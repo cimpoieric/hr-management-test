@@ -24,9 +24,9 @@ import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
 import { decrypt } from "@/lib/encryption";
-import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import {
-  generateEmployeeListPDF,
   generateA1ReportPDF,
   generateCountryReportPDF,
   generateEmployeeSheetPDF,
@@ -34,6 +34,7 @@ import {
   type EmployeeListItem,
 } from "@/lib/pdfGenerator";
 import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
+import { salaryAmountToJson } from "@/lib/salaryFields";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -138,15 +139,7 @@ async function generateAccountingListPdf(params: {
   title: string;
 }): Promise<Uint8Array> {
   const { employees, companyName, companyRef, title } = params;
-  const pdfDoc = await PDFDocument.create();
-  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const pageWidth = 842;
-  const pageHeight = 595;
-  const margin = 24;
-  const rowHeight = 18;
   const generatedAt = new Date().toLocaleString("ro-RO");
-
   const headers = ["Nr.", "Nume", "Prenume", "CNP", "IBAN", "Bancă", "Tip plată", "Sumă brută", "Monedă", "Status"];
   const widths = [28, 78, 78, 92, 128, 78, 64, 66, 44, 58];
   const rows = employees.map((e, idx) => [
@@ -161,59 +154,34 @@ async function generateAccountingListPdf(params: {
     e.salaryCurrency || "—",
     e.status === "ACTIVE" ? "Activ" : "Terminat",
   ]);
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.text(`${title} — ${companyName || "Companie"}`, 24, 24);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`${companyRef || "CUI nedefinit"} · ${generatedAt}`, 24, 40);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("TEST PDF - Raport salarial", 24, 54);
 
-  let page = pdfDoc.addPage([pageWidth, pageHeight]);
-  let y = pageHeight - margin - 34;
-
-  const drawHeader = (p: PDFPage) => {
-    p.drawText(`${title} — ${companyName || "Companie"}`, {
-      x: margin, y: pageHeight - margin, size: 12, font: fontBold, color: rgb(0.12, 0.12, 0.12),
-    });
-    p.drawText(`${companyRef || "CUI nedefinit"} · ${generatedAt}`, {
-      x: margin, y: pageHeight - margin - 14, size: 9, font: fontRegular, color: rgb(0.35, 0.35, 0.35),
-    });
-    p.drawText(`TEST PDF - Raport salarial`, {
-      x: margin, y: pageHeight - margin - 28, size: 9, font: fontBold, color: rgb(0.15, 0.32, 0.75),
-    });
-  };
-  const drawFooter = (p: PDFPage) => {
-    p.drawText(`Generat la ${generatedAt} — Total angajați: ${rows.length}`, {
-      x: margin, y: 10, size: 9, font: fontRegular, color: rgb(0.35, 0.35, 0.35),
-    });
-  };
-  const drawTableHeader = (p: PDFPage, rowY: number) => {
-    let x = margin;
-    for (let i = 0; i < headers.length; i++) {
-      p.drawRectangle({ x, y: rowY - rowHeight + 2, width: widths[i] ?? 50, height: rowHeight, color: rgb(0.92, 0.94, 0.97) });
-      p.drawText(headers[i] ?? "", { x: x + 3, y: rowY - 11, size: 8, font: fontBold, color: rgb(0.15, 0.15, 0.15) });
-      x += widths[i] ?? 50;
-    }
-  };
-
-  drawHeader(page);
-  drawTableHeader(page, y);
-  y -= rowHeight;
-
-  for (const row of rows) {
-    if (y < 30) {
-      drawFooter(page);
-      page = pdfDoc.addPage([pageWidth, pageHeight]);
-      drawHeader(page);
-      y = pageHeight - margin - 34;
-      drawTableHeader(page, y);
-      y -= rowHeight;
-    }
-    let x = margin;
-    for (let i = 0; i < headers.length; i++) {
-      page.drawText(String(row[i] ?? "—").slice(0, 40), {
-        x: x + 3, y: y - 11, size: 8, font: fontRegular, color: rgb(0.12, 0.12, 0.12),
-      });
-      x += widths[i] ?? 50;
-    }
-    y -= rowHeight;
-  }
-  drawFooter(page);
-  return await pdfDoc.save();
+  autoTable(doc, {
+    startY: 62,
+    head: [headers],
+    body: rows,
+    styles: { font: "helvetica", fontSize: 8, cellPadding: 3, overflow: "linebreak" },
+    headStyles: { fillColor: [235, 240, 248], textColor: [25, 25, 25] },
+    columnStyles: Object.fromEntries(widths.map((w, i) => [i, { cellWidth: w }])),
+    margin: { left: 24, right: 24 },
+    didDrawPage: () => {
+      const pageHeight = doc.internal.pageSize.getHeight();
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.text(`Generat la ${generatedAt} — Total angajați: ${rows.length}`, 24, pageHeight - 12);
+    },
+  });
+  const ab = doc.output("arraybuffer");
+  return new Uint8Array(ab);
 }
 
 // ─── POST handler ────────────────────────────────────────────────────────────
@@ -264,8 +232,8 @@ export async function POST(request: NextRequest) {
           _count: { select: { documents: true, deployments: true } },
         },
       });
-      console.log("[PDF DEBUG] employees:", employees);
-      console.log("[PDF DEBUG] employees length:", employees?.length);
+      console.log("[PDF DATA]", employees);
+      console.log("[PDF DATA] employees length:", employees?.length);
 
       const items: EmployeeListItem[] = employees.map((e) => ({
         id: e.id,
@@ -282,8 +250,8 @@ export async function POST(request: NextRequest) {
         cnp: e.cnp,
         iban: e.iban,
         bankName: e.bankName,
-        salaryType: e.salaryType,
-        salaryAmount: e.salaryAmount,
+        salaryType: e.salaryType ?? null,
+        salaryAmount: salaryAmountToJson(e.salaryAmount),
         salaryCurrency: e.salaryCurrency,
         salaryStartDate: e.salaryStartDate,
       }));
@@ -301,8 +269,8 @@ export async function POST(request: NextRequest) {
           cnp: e.cnp,
           iban: e.iban,
           bankName: e.bankName,
-          salaryType: e.salaryType,
-          salaryAmount: e.salaryAmount,
+          salaryType: e.salaryType ?? null,
+          salaryAmount: salaryAmountToJson(e.salaryAmount),
           salaryCurrency: e.salaryCurrency,
           status: e.status,
         })),
@@ -523,8 +491,8 @@ export async function POST(request: NextRequest) {
           observations: employee.observations,
           seriesCI: employee.seriesCI,
           numberCI: employee.numberCI,
-          salaryType: employee.salaryType,
-          salaryAmount: employee.salaryAmount,
+          salaryType: employee.salaryType ?? null,
+          salaryAmount: salaryAmountToJson(employee.salaryAmount),
           salaryCurrency: employee.salaryCurrency,
           salaryStartDate: employee.salaryStartDate,
         },
@@ -570,6 +538,7 @@ export async function POST(request: NextRequest) {
     });
 
   } catch (error) {
+    console.log("[PDF ERROR]", error);
     console.error("[REPORTS_GENERATE]", error);
     return NextResponse.json({ error: "Eroare la generare raport" }, { status: 500 });
   }

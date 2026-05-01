@@ -13,6 +13,7 @@ import {
   AlertCircle,
   ChevronRight,
   ArrowLeft,
+  CalendarDays,
 } from "lucide-react";
 import { AdvancedFilter, defaultFilters, type FilterState } from "@/components/filters/AdvancedFilter";
 import { BulkSelectionBar } from "@/components/tables/BulkSelection";
@@ -92,6 +93,18 @@ const CATEGORY_LABELS: Record<string, string> = {
   meta: "Altele",
 };
 
+/** Pentru export „Plată săptămânală”: ORA + sumă orară + monedă */
+function weeklySalaryComplete(
+  emp: Pick<Employee, "salaryType" | "salaryAmount" | "salaryCurrency">
+): boolean {
+  return (
+    emp.salaryType === "ORA" &&
+    emp.salaryAmount != null &&
+    Number(emp.salaryAmount) > 0 &&
+    !!(emp.salaryCurrency?.trim())
+  );
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ExportPage() {
@@ -114,6 +127,8 @@ export default function ExportPage() {
   const [salaryTypeFilter, setSalaryTypeFilter] = useState("");
   const [salaryCurrencyFilter, setSalaryCurrencyFilter] = useState("");
   const [salaryCompleteOnly, setSalaryCompleteOnly] = useState(false);
+  const [weeklyHours, setWeeklyHours] = useState<Record<string, string>>({});
+  const [weeklyPayExporting, setWeeklyPayExporting] = useState(false);
   const [step, setStep] = useState<"select" | "configure" | "preview">("select");
 
   // ── Fetch companies ──
@@ -157,6 +172,18 @@ export default function ExportPage() {
   useEffect(() => {
     fetchEmployees();
   }, [fetchEmployees]);
+
+  useEffect(() => {
+    setWeeklyHours((prev) => {
+      const next = { ...prev };
+      for (const emp of employees) {
+        if (weeklySalaryComplete(emp) && next[String(emp.id)] === undefined) {
+          next[String(emp.id)] = "40";
+        }
+      }
+      return next;
+    });
+  }, [employees]);
 
   // ── Selection helpers ──
   function toggleSelect(id: number) {
@@ -290,6 +317,48 @@ export default function ExportPage() {
     }
   }
 
+  async function handleWeeklyPayExport() {
+    if (selectedIds.size === 0) {
+      alert("Selectează cel puțin un angajat");
+      return;
+    }
+    setWeeklyPayExporting(true);
+    try {
+      const hoursByEmployeeId: Record<string, number> = {};
+      for (const id of selectedIds) {
+        const raw = weeklyHours[String(id)] ?? "0";
+        const n = Number(String(raw).replace(",", "."));
+        hoursByEmployeeId[String(id)] = Number.isFinite(n) ? n : 0;
+      }
+      const res = await fetch("/api/export/weekly-pay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeIds: Array.from(selectedIds),
+          hoursByEmployeeId,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json();
+        alert(d.error ?? "Eroare la export plată săptămânală");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `plata-saptamanala-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Eroare la export plată săptămânală");
+    } finally {
+      setWeeklyPayExporting(false);
+    }
+  }
+
   // ── Preview data ──
   const previewEmployees = employees.slice(0, 5);
   const previewColumns = COLUMN_OPTIONS.filter((c) => selectedColumns.has(c.key));
@@ -383,6 +452,21 @@ export default function ExportPage() {
         </p>
       </div>
 
+      {/* Plată săptămânală — instrucțiuni (tabelul cu ore e la pasul 1) */}
+      <div className="bg-white rounded-xl border border-violet-200 shadow-sm p-6">
+        <div className="flex items-center gap-2 mb-2">
+          <CalendarDays size={18} className="text-violet-600" />
+          <h2 className="text-sm font-semibold text-gray-900">Plată săptămânală</h2>
+        </div>
+        <p className="text-xs text-gray-600 mb-2">
+          La pasul <strong>1. Selectează angajați</strong>: bifează angajații, completează{" "}
+          <strong>Ore lucrate</strong> pentru cei cu tip plată <strong>ORA</strong> și date salariale complete.
+          Rândurile fără date salariale complete sunt evidențiate în galben. Apoi apasă{" "}
+          <strong>Generează export plată săptămânală</strong> — fișier Excel cu: Nume complet, CNP, IBAN, Bancă,
+          Suma brută/oră, Ore lucrate, Total de plată, Monedă.
+        </p>
+      </div>
+
       {/* Step indicator */}
       <div className="flex items-center gap-2 text-sm">
         {[
@@ -453,6 +537,10 @@ export default function ExportPage() {
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Nume</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">CNP</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600">Tip plată</th>
+                    <th className="px-4 py-3 text-left font-medium text-gray-600 min-w-[9rem]">
+                      Ore lucrate
+                    </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Funcție</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Firmă</th>
@@ -461,60 +549,110 @@ export default function ExportPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-400">
+                      <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
                         <Loader2 size={20} className="inline animate-spin mr-2" />
                         Se încarcă...
                       </td>
                     </tr>
                   ) : employees.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-gray-400">
+                      <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
                         <AlertCircle size={20} className="inline mr-2" />
                         Niciun angajat găsit. Ajustează filtrele.
                       </td>
                     </tr>
                   ) : (
-                    employees.map((emp) => (
-                      <tr
-                        key={emp.id}
-                        className={`border-b last:border-b-0 transition-colors cursor-pointer ${
-                          selectedIds.has(emp.id) ? "bg-blue-50" : "hover:bg-gray-50"
-                        }`}
-                        onClick={() => toggleSelect(emp.id)}
-                      >
-                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(emp.id)}
-                            onChange={() => toggleSelect(emp.id)}
-                            className="rounded"
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-gray-900">
-                            {emp.lastName} {emp.firstName}
-                          </div>
-                          {emp.email && (
-                            <div className="text-xs text-gray-400">{emp.email}</div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-gray-600">{emp.cnp}</td>
-                        <td className="px-4 py-3 text-gray-600">{emp.position ?? "—"}</td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={emp.status} />
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">
-                          {emp.company?.name ?? "—"}
-                        </td>
-                      </tr>
-                    ))
+                    employees.map((emp) => {
+                      const incomplete = !weeklySalaryComplete(emp);
+                      const rowHighlight = incomplete
+                        ? "bg-amber-50 border-l-4 border-amber-400"
+                        : selectedIds.has(emp.id)
+                          ? "bg-blue-50"
+                          : "hover:bg-gray-50";
+                      return (
+                        <tr
+                          key={emp.id}
+                          className={`border-b last:border-b-0 transition-colors cursor-pointer ${rowHighlight}`}
+                          onClick={() => toggleSelect(emp.id)}
+                        >
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(emp.id)}
+                              onChange={() => toggleSelect(emp.id)}
+                              className="rounded"
+                            />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-gray-900">
+                              {emp.lastName} {emp.firstName}
+                            </div>
+                            {emp.email && (
+                              <div className="text-xs text-gray-400">{emp.email}</div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-gray-600">{emp.cnp}</td>
+                          <td className="px-4 py-3 text-gray-700">
+                            {emp.salaryType ?? "—"}
+                          </td>
+                          <td
+                            className="px-4 py-3"
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
+                            {weeklySalaryComplete(emp) ? (
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.5}
+                                value={weeklyHours[String(emp.id)] ?? "40"}
+                                onChange={(e) =>
+                                  setWeeklyHours((p) => ({
+                                    ...p,
+                                    [String(emp.id)]: e.target.value,
+                                  }))
+                                }
+                                className="w-24 rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                              />
+                            ) : (
+                              <span className="text-xs font-medium text-amber-800">
+                                Lipsesc date salariale
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">{emp.position ?? "—"}</td>
+                          <td className="px-4 py-3">
+                            <StatusBadge status={emp.status} />
+                          </td>
+                          <td className="px-4 py-3 text-gray-600">
+                            {emp.company?.name ?? "—"}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               </table>
             </div>
 
             {/* Next step button */}
-            <div className="px-4 py-3 border-t flex items-center justify-end gap-2 bg-gray-50">
+            <div className="px-4 py-3 border-t flex flex-wrap items-center justify-end gap-2 bg-gray-50">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void handleWeeklyPayExport();
+                }}
+                disabled={weeklyPayExporting || selectedIds.size === 0}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                {weeklyPayExporting ? (
+                  <Loader2 size={16} className="animate-spin" />
+                ) : (
+                  <FileSpreadsheet size={16} />
+                )}
+                Generează export plată săptămânală
+              </button>
               <button
                 onClick={() => setStep("configure")}
                 disabled={selectedIds.size === 0}

@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { Calculator, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Calculator, Download, X } from "lucide-react";
 
 type SalaryType = "LUNAR" | "SAPTAMANAL" | "ORA";
 
@@ -13,6 +13,9 @@ interface SalaryCalculatorModalProps {
   salaryCurrency?: string | null;
   employeeName?: string;
   employeeId?: number;
+  /** Pentru export linie plată (CSV) */
+  iban?: string | null;
+  bankName?: string | null;
   onSaved?: () => void;
 }
 
@@ -23,6 +26,18 @@ function formatMoney(value: number, currency: string): string {
   })} ${currency}`;
 }
 
+function csvEscape(value: string): string {
+  if (/[;"\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
+}
+
+function defaultInputForType(type: SalaryType | null | undefined): string {
+  if (type === "ORA") return "160";
+  if (type === "SAPTAMANAL") return "4";
+  if (type === "LUNAR") return "";
+  return "";
+}
+
 export function SalaryCalculatorModal({
   isOpen,
   onClose,
@@ -31,42 +46,123 @@ export function SalaryCalculatorModal({
   salaryCurrency,
   employeeName,
   employeeId,
+  iban,
+  bankName,
   onSaved,
 }: SalaryCalculatorModalProps) {
-  const [hoursWorked, setHoursWorked] = useState("160");
-  const [weeksWorked, setWeeksWorked] = useState("4");
-  const [daysWorked, setDaysWorked] = useState("21");
+  const [inputValue, setInputValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const currency = (salaryCurrency?.trim() || "RON").toUpperCase();
   const amount = salaryAmount ?? 0;
 
+  useEffect(() => {
+    if (!isOpen) return;
+    setInputValue(defaultInputForType(salaryType));
+    setSaveMessage("");
+  }, [isOpen, salaryType]);
+
+  const inputMeta = useMemo(() => {
+    if (salaryType === "ORA") {
+      return {
+        label: "Ore lucrate",
+        suffix: "ore",
+        hint: "Calcul: ore × sumă brută / oră",
+      };
+    }
+    if (salaryType === "SAPTAMANAL") {
+      return {
+        label: "Săptămâni lucrate",
+        suffix: "săptămâni",
+        hint: "Calcul: săptămâni × sumă brută / săptămână",
+      };
+    }
+    if (salaryType === "LUNAR") {
+      return {
+        label: "Zile lucrate (opțional)",
+        suffix: "zile",
+        hint: "Lasă gol pentru suma lunară integrală. Altfel: (zile / 21) × sumă brută lunară",
+      };
+    }
+    return { label: "", suffix: "", hint: "" };
+  }, [salaryType]);
+
   const calculated = useMemo(() => {
     if (!salaryType || amount <= 0) return 0;
-    if (salaryType === "ORA") return Number(hoursWorked || "0") * amount;
-    if (salaryType === "SAPTAMANAL") return Number(weeksWorked || "0") * amount;
-    if (!daysWorked.trim()) return amount;
-    return (Number(daysWorked || "0") / 21) * amount;
-  }, [salaryType, amount, hoursWorked, weeksWorked, daysWorked]);
+    if (salaryType === "ORA") {
+      const h = Number(inputValue.replace(",", ".") || "0");
+      return Number.isFinite(h) && h >= 0 ? h * amount : 0;
+    }
+    if (salaryType === "SAPTAMANAL") {
+      const w = Number(inputValue.replace(",", ".") || "0");
+      return Number.isFinite(w) && w >= 0 ? w * amount : 0;
+    }
+    if (salaryType === "LUNAR") {
+      const raw = inputValue.trim();
+      if (!raw) return amount;
+      const d = Number(raw.replace(",", "."));
+      if (!Number.isFinite(d) || d < 0) return 0;
+      return (d / 21) * amount;
+    }
+    return 0;
+  }, [salaryType, amount, inputValue]);
 
-  if (!isOpen) return null;
+  function parsedInputForSave(): { inputLabel: string; inputValue: number | null } {
+    if (salaryType === "ORA") {
+      return { inputLabel: "Ore lucrate", inputValue: Number(inputValue.replace(",", ".") || "0") };
+    }
+    if (salaryType === "SAPTAMANAL") {
+      return {
+        inputLabel: "Săptămâni lucrate",
+        inputValue: Number(inputValue.replace(",", ".") || "0"),
+      };
+    }
+    if (salaryType === "LUNAR") {
+      const raw = inputValue.trim();
+      return {
+        inputLabel: "Zile lucrate",
+        inputValue: raw ? Number(raw.replace(",", ".")) : null,
+      };
+    }
+    return { inputLabel: "", inputValue: null };
+  }
+
+  function handleExportPayLine() {
+    if (!salaryType || amount <= 0) return;
+    const name = (employeeName ?? "").trim() || "—";
+    const ibanPlain = (iban ?? "").trim();
+    const bank = (bankName ?? "").trim();
+    const sumStr = calculated.toLocaleString("ro-RO", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    const header = ["Nume", "IBAN", "Bancă", "Suma de plată", "Monedă"].join(";");
+    const ibanCell = ibanPlain ? `="${ibanPlain.replace(/"/g, '""')}"` : "";
+    const row = [
+      csvEscape(name),
+      ibanCell,
+      csvEscape(bank),
+      csvEscape(sumStr),
+      csvEscape(currency),
+    ].join(";");
+    const bom = "\uFEFF";
+    const blob = new Blob([bom + header + "\n" + row], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const safeName = name.replace(/[^\w\d\-]+/g, "_").slice(0, 40) || "angajat";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `linie-plata-${safeName}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
 
   async function handleSaveCalculation() {
     if (!employeeId || !salaryType || amount <= 0) return;
-    const inputLabel =
-      salaryType === "ORA"
-        ? "Ore lucrate"
-        : salaryType === "SAPTAMANAL"
-        ? "Săptămâni lucrate"
-        : "Zile lucrate";
-    const inputValue =
-      salaryType === "ORA"
-        ? Number(hoursWorked || "0")
-        : salaryType === "SAPTAMANAL"
-        ? Number(weeksWorked || "0")
-        : daysWorked.trim()
-        ? Number(daysWorked || "0")
-        : null;
+    const { inputLabel, inputValue: iv } = parsedInputForSave();
 
     setSaving(true);
     setSaveMessage("");
@@ -78,7 +174,7 @@ export function SalaryCalculatorModal({
           salaryType,
           salaryAmount: amount,
           salaryCurrency: currency,
-          inputValue,
+          inputValue: iv,
           inputLabel,
           calculatedTotal: calculated,
         }),
@@ -97,12 +193,16 @@ export function SalaryCalculatorModal({
     }
   }
 
+  if (!isOpen) return null;
+
+  const canCalculate = !!salaryType && amount > 0;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-xl rounded-xl border bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-6 py-4">
           <div>
-            <h3 className="text-base font-semibold text-gray-900">Calcul salariu</h3>
+            <h3 className="text-base font-semibold text-gray-900">Calcul salarial</h3>
             <p className="text-xs text-gray-500 mt-1">
               {employeeName ? `${employeeName} · ` : ""}
               Tip plată: {salaryType ?? "—"}
@@ -118,47 +218,48 @@ export function SalaryCalculatorModal({
         </div>
 
         <div className="space-y-4 px-6 py-5">
-          {salaryType === "ORA" && (
-            <InputRow
-              label="Ore lucrate"
-              value={hoursWorked}
-              onChange={setHoursWorked}
-              suffix="ore"
-            />
-          )}
-          {salaryType === "SAPTAMANAL" && (
-            <InputRow
-              label="Săptămâni lucrate"
-              value={weeksWorked}
-              onChange={setWeeksWorked}
-              suffix="săptămâni"
-            />
-          )}
-          {salaryType === "LUNAR" && (
-            <InputRow
-              label="Zile lucrate (opțional)"
-              value={daysWorked}
-              onChange={setDaysWorked}
-              suffix="zile"
-              placeholder="Dacă lași gol, se folosește suma integrală"
-            />
+          {salaryType && inputMeta.label ? (
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-gray-700">
+                {inputMeta.label}
+              </span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={inputValue}
+                  onChange={(e) => setInputValue(e.target.value)}
+                  placeholder={salaryType === "LUNAR" ? "ex: 21 sau lasă gol" : undefined}
+                  className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+                />
+                <span className="shrink-0 text-xs text-gray-500">{inputMeta.suffix}</span>
+              </div>
+              <span className="mt-1 block text-xs text-gray-400">{inputMeta.hint}</span>
+            </label>
+          ) : (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+              Selectează tipul de plată (ORA / SAPTAMANAL / LUNAR) și suma brută pentru acest
+              angajat.
+            </div>
           )}
 
-          {!salaryType || amount <= 0 ? (
+          {!canCalculate ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-              Completează "Tip plată" și "Sumă brută" pentru a calcula.
+              Completează „Tip plată” și „Sumă brută” pentru a calcula.
             </div>
           ) : (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
               <div className="flex items-center gap-2 text-emerald-800">
                 <Calculator size={16} />
-                <span className="text-sm font-medium">Total de plată</span>
+                <span className="text-sm font-medium">Total de plată (live)</span>
               </div>
-              <p className="mt-1 text-2xl font-bold text-emerald-900">
+              <p className="mt-1 text-2xl font-bold text-emerald-900 tabular-nums">
                 {formatMoney(calculated, currency)}
               </p>
             </div>
           )}
+
           {saveMessage && (
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
               {saveMessage}
@@ -166,11 +267,20 @@ export function SalaryCalculatorModal({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t px-6 py-4">
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t px-6 py-4">
+          <button
+            type="button"
+            onClick={handleExportPayLine}
+            disabled={!canCalculate}
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-40"
+          >
+            <Download size={16} />
+            Export linie plată
+          </button>
           <button
             type="button"
             onClick={handleSaveCalculation}
-            disabled={!employeeId || !salaryType || amount <= 0 || saving}
+            disabled={!employeeId || !canCalculate || saving}
             className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
           >
             {saving ? "Se salvează..." : "Salvează calcul în istoric"}
@@ -185,38 +295,5 @@ export function SalaryCalculatorModal({
         </div>
       </div>
     </div>
-  );
-}
-
-function InputRow({
-  label,
-  value,
-  onChange,
-  suffix,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  suffix: string;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-sm font-medium text-gray-700">{label}</span>
-      <div className="flex items-center gap-2">
-        <input
-          type="number"
-          min="0"
-          step="0.01"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
-        />
-        <span className="text-xs text-gray-500">{suffix}</span>
-      </div>
-      {placeholder && <span className="mt-1 block text-xs text-gray-400">{placeholder}</span>}
-    </label>
   );
 }

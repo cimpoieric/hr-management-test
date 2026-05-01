@@ -21,8 +21,10 @@ import "server-only";
 import { PrismaClient } from "@prisma/client";
 import { auditStorage } from "./auditContext";
 
+type ExtendedPrismaClient = ReturnType<typeof createPrismaClient>;
+
 const globalForPrisma = global as unknown as {
-  prisma: PrismaClient | undefined;
+  prisma: ExtendedPrismaClient | undefined;
 };
 
 // ─── Câmpuri sensibile — niciodată logate în oldValues/newValues ─────────────
@@ -82,89 +84,88 @@ const MODEL_TO_FINDER: Record<string, string> = {
 
 // ─── Creare Prisma client ────────────────────────────────────────────────────
 
-function createPrismaClient(): PrismaClient {
-  const client = new PrismaClient({
-    log: process.env.NODE_ENV === "development"
-      ? ["query", "error", "warn"]
-      : ["error"],
+function createPrismaClient() {
+  const prismaBase = new PrismaClient({
+    log:
+      process.env.NODE_ENV === "development"
+        ? ["query", "error", "warn"]
+        : ["error"],
   });
 
-  // ─── Middleware auto-audit ────────────────────────────────────────────────
-  client.$use(async (params, next) => {
-    // Doar modelele tracate
-    if (!TRACED_MODELS.has(params.model ?? "")) {
-      return next(params);
-    }
-
-    // Doar create / update / delete / upsert
-    if (!["create", "update", "delete", "upsert"].includes(params.action)) {
-      return next(params);
-    }
-
-    // Pentru update/delete — captează old values
-    let oldValues: Record<string, unknown> | null = null;
-    if (["update", "delete", "upsert"].includes(params.action)) {
-      try {
-        const where = (params.args as Record<string, unknown>)?.where;
-        const modelKey = MODEL_TO_FINDER[params.model ?? ""];
-        if (where && modelKey) {
-          const finder = client[modelKey as keyof PrismaClient] as
-            | { findUnique: (args: { where: unknown }) => Promise<unknown> }
-            | undefined;
-          const existing = await finder?.findUnique({ where });
-          if (existing && typeof existing === "object" && existing !== null) {
-            oldValues = stripSensitive(existing as Record<string, unknown>);
+  // Prisma 6: $use a fost înlocuit cu Client Extensions
+  return prismaBase.$extends({
+    query: {
+      $allModels: {
+        async $allOperations({ model, operation, args, query }) {
+          if (!TRACED_MODELS.has(model ?? "")) {
+            return query(args);
           }
-        }
-      } catch {
-        // ignore — nu blocăm request-ul
-      }
-    }
+          if (!["create", "update", "delete", "upsert"].includes(operation)) {
+            return query(args);
+          }
 
-    // Execută operația
-    const result = await next(params);
+          let oldValues: Record<string, unknown> | null = null;
+          if (["update", "delete", "upsert"].includes(operation)) {
+            try {
+              const where = (args as Record<string, unknown>)?.where;
+              const modelKey = MODEL_TO_FINDER[model ?? ""];
+              if (where && modelKey) {
+                const finder = prismaBase[modelKey as keyof PrismaClient] as
+                  | { findUnique: (args: { where: unknown }) => Promise<unknown> }
+                  | undefined;
+                const existing = await finder?.findUnique({ where });
+                if (existing && typeof existing === "object" && existing !== null) {
+                  oldValues = stripSensitive(existing as Record<string, unknown>);
+                }
+              }
+            } catch {
+              // ignore — nu blocăm request-ul
+            }
+          }
 
-    // Determină acțiunea audit
-    const auditAction =
-      params.action === "create" ? "CREATE" :
-      params.action === "delete" ? "DELETE" :
-      "UPDATE";
+          const result = await query(args);
 
-    const entityId = result && typeof result === "object"
-      ? (result as Record<string, unknown>).id as number | undefined
-      : undefined;
+          const auditAction =
+            operation === "create" ? "CREATE" :
+            operation === "delete" ? "DELETE" :
+            "UPDATE";
 
-    // Strip new values
-    let newValues: Record<string, unknown> | null = null;
-    if (result && typeof result === "object" && result !== null) {
-      newValues = stripSensitive(result as Record<string, unknown>);
-    }
+          const entityId =
+            result && typeof result === "object"
+              ? ((result as Record<string, unknown>).id as number | undefined)
+              : undefined;
 
-    // Citește context audit
-    const ctx = auditStorage.getStore();
+          let newValues: Record<string, unknown> | null = null;
+          if (result && typeof result === "object" && result !== null) {
+            newValues = stripSensitive(result as Record<string, unknown>);
+          }
 
-    // Log async — nu await, fire-and-forget
-    client.auditLog.create({
-      data: {
-        action: auditAction,
-        entity: params.model ?? "Unknown",
-        entityId: entityId ?? null,
-        userId: ctx?.userId ?? null,
-        userName: ctx?.userName ?? null,
-        userRole: ctx?.userRole ?? null,
-        oldValues: oldValues ? JSON.stringify(oldValues) : null,
-        newValues: newValues ? JSON.stringify(newValues) : null,
-        ipAddress: ctx?.ipAddress ?? null,
-        userAgent: ctx?.userAgent ?? null,
+          const ctx = auditStorage.getStore();
+
+          prismaBase.auditLog
+            .create({
+              data: {
+                action: auditAction,
+                entity: model ?? "Unknown",
+                entityId: entityId ?? null,
+                userId: ctx?.userId ?? null,
+                userName: ctx?.userName ?? null,
+                userRole: ctx?.userRole ?? null,
+                oldValues: oldValues ? JSON.stringify(oldValues) : null,
+                newValues: newValues ? JSON.stringify(newValues) : null,
+                ipAddress: ctx?.ipAddress ?? null,
+                userAgent: ctx?.userAgent ?? null,
+              },
+            })
+            .catch((e: unknown) => {
+              console.error("[PRISMA_AUDIT]", e instanceof Error ? e.message : String(e));
+            });
+
+          return result;
+        },
       },
-    }).catch((e: unknown) => {
-      console.error("[PRISMA_AUDIT]", e instanceof Error ? e.message : String(e));
-    });
-
-    return result;
+    },
   });
-
-  return client;
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();

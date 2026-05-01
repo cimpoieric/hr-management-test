@@ -8,6 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import {
@@ -26,6 +27,11 @@ import {
 } from "@/lib/validation";
 import { encrypt, decrypt, hashSha256 } from "@/lib/encryption";
 import { logAuditFF } from "@/lib/audit";
+import {
+  parseSalaryAmountDecimal,
+  parseSalaryTypeInput,
+  salaryAmountToJson,
+} from "@/lib/salaryFields";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -99,7 +105,7 @@ export async function GET(
       status: employee.status,
       observations: employee.observations,
       salaryType: employee.salaryType,
-      salaryAmount: employee.salaryAmount,
+      salaryAmount: salaryAmountToJson(employee.salaryAmount),
       salaryCurrency: employee.salaryCurrency,
       salaryStartDate: employee.salaryStartDate,
       company: employee.company,
@@ -183,8 +189,19 @@ const updateSchema = z.object({
   country: z.string().max(2).optional(),
   status: z.string().max(20).optional(),
   observations: z.string().max(1000).nullable().optional(),
-  salaryType: z.enum(["LUNAR", "SAPTAMANAL", "ORA"]).nullable().optional(),
-  salaryAmount: z.coerce.number().nonnegative().nullable().optional(),
+  salaryType: z
+    .union([
+      z.literal("LUNAR"),
+      z.literal("SAPTAMANAL"),
+      z.literal("ORA"),
+      z.literal(""),
+      z.null(),
+      z.undefined(),
+    ])
+    .optional(),
+  salaryAmount: z
+    .union([z.number(), z.string(), z.literal(""), z.null(), z.undefined()])
+    .optional(),
   salaryCurrency: z.string().max(10).nullable().optional(),
   salaryStartDate: z.string().trim().min(1).nullable().optional(),
   companyId: z.number().int().positive().optional(),
@@ -212,7 +229,8 @@ export async function PUT(
   try {
     const employeeId = await getId(params);
 
-    const body = await request.json();
+    const rawBody: unknown = await request.json();
+    const body = rawBody && typeof rawBody === "object" ? rawBody : {};
     const parsed = updateSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
@@ -270,7 +288,7 @@ export async function PUT(
     }
 
     // ─── Build update data ───────────────────────────────────────
-    const updateData: Record<string, unknown> = {};
+    const updateData: Prisma.EmployeeUpdateInput = {};
 
     if (data.firstName !== undefined) updateData.firstName = data.firstName;
     if (data.lastName !== undefined) updateData.lastName = data.lastName;
@@ -284,15 +302,26 @@ export async function PUT(
     if (data.country !== undefined) updateData.country = data.country;
     if (data.status !== undefined) updateData.status = data.status;
     if (data.observations !== undefined) updateData.observations = data.observations;
-    if (data.salaryType !== undefined) updateData.salaryType = data.salaryType;
-    if (data.salaryAmount !== undefined) updateData.salaryAmount = data.salaryAmount;
+    if (data.salaryType !== undefined) {
+      updateData.salaryType =
+        data.salaryType === "" || data.salaryType === null
+          ? null
+          : parseSalaryTypeInput(data.salaryType);
+    }
+    if (data.salaryAmount !== undefined) {
+      const dec = parseSalaryAmountDecimal(data.salaryAmount);
+      updateData.salaryAmount =
+        dec === null ? null : (dec.toString() as Prisma.EmployeeUpdateInput["salaryAmount"]);
+    }
     if (data.salaryCurrency !== undefined) {
       updateData.salaryCurrency = data.salaryCurrency?.trim().toUpperCase() || "RON";
     }
     if (data.salaryStartDate !== undefined) {
       updateData.salaryStartDate = parseSalaryStartDate(data.salaryStartDate);
     }
-    if (data.companyId !== undefined) updateData.companyId = data.companyId;
+    if (data.companyId !== undefined) {
+      updateData.company = { connect: { id: data.companyId } };
+    }
     if (data.bankName !== undefined) updateData.bankName = data.bankName;
     if (ibanEncrypted !== undefined) {
       updateData.iban = ibanEncrypted;

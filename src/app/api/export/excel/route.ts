@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
+import { salaryAmountToJson } from "@/lib/salaryFields";
 import { decrypt } from "@/lib/encryption";
 import * as XLSX from "xlsx";
 
@@ -126,6 +127,8 @@ export async function POST(request: NextRequest) {
         ...emp,
         iban: safeDecrypt(emp.iban),
         companyName: emp.company?.name ?? "—",
+        salaryType: emp.salaryType ?? "",
+        salaryAmount: salaryAmountToJson(emp.salaryAmount),
       };
 
       return activeColumns.map((col) => {

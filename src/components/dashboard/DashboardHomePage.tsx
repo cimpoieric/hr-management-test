@@ -24,6 +24,7 @@ type DashboardStats = {
   pendingImports: number;
   monthlySalaryCost: number;
   monthlySalaryEmployeeCount: number;
+  monthlySalaryCurrency: string;
   documentAlertDays: number;
 };
 
@@ -50,6 +51,7 @@ const EMPTY_STATS: DashboardStats = {
   pendingImports: 0,
   monthlySalaryCost: 0,
   monthlySalaryEmployeeCount: 0,
+  monthlySalaryCurrency: "RON",
   documentAlertDays: 30,
 };
 
@@ -280,6 +282,7 @@ export default function DashboardHomePage() {
           pendingImports: Number(data.stats?.pendingImports ?? 0),
           monthlySalaryCost: Number(data.stats?.monthlySalaryCost ?? 0),
           monthlySalaryEmployeeCount: Number(data.stats?.monthlySalaryEmployeeCount ?? 0),
+          monthlySalaryCurrency: String(data.stats?.monthlySalaryCurrency ?? "RON"),
           documentAlertDays: Number(data.stats?.documentAlertDays ?? 30),
         });
         setDeploymentsByCountry(Array.isArray(data.deploymentsByCountry) ? data.deploymentsByCountry : []);
@@ -359,14 +362,14 @@ export default function DashboardHomePage() {
         />
 
         <StatCard
-          title="Cost salarii lunare estimate"
-          value={`${stats.monthlySalaryCost.toLocaleString("ro-RO")} RON`}
+          title="Cost salarial lunar estimat"
+          value={`${stats.monthlySalaryCost.toLocaleString("ro-RO")} ${stats.monthlySalaryCurrency}`}
           subtitle={`${stats.monthlySalaryEmployeeCount} angajați LUNAR`}
           icon={Wallet}
           accentColor="bg-emerald-500"
-          href="/rapoarte"
+          href="/angajati?status=ACTIVE&salaryType=LUNAR"
           badge={{
-            text: "Doar contracte LUNAR în RON",
+            text: `Monedă predominantă: ${stats.monthlySalaryCurrency}`,
             color: "bg-emerald-100 text-emerald-700",
           }}
         />

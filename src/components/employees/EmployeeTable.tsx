@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Search,
   ChevronLeft,
@@ -51,6 +51,32 @@ interface Company {
   name: string;
 }
 
+function statusesEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort();
+  const sb = [...b].sort();
+  return sa.every((v, i) => v === sb[i]);
+}
+
+function salaryTypePresetLabel(code: string): string {
+  switch (code) {
+    case "LUNAR":
+      return "Plată lunară (LUNAR)";
+    case "SAPTAMANAL":
+      return "Plată săptămânală (SAPTAMANAL)";
+    case "ORA":
+      return "Plată pe oră (ORA)";
+    default:
+      return code;
+  }
+}
+
+function statusPresetLabel(statuses: string[]): string {
+  if (statuses.length === 1 && statuses[0] === "ACTIVE") return "Doar activi (ACTIVE)";
+  if (statuses.length === 1 && statuses[0] === "TERMINATED") return "Doar terminați (TERMINATED)";
+  return `Status: ${statuses.join(", ")}`;
+}
+
 interface EmployeeTableProps {
   initialData?: Employee[];
   initialTotal?: number;
@@ -67,6 +93,9 @@ export function EmployeeTable({
   showBulkActions = true,
 }: EmployeeTableProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const presetStatusFromUrl = searchParams.get("status");
+  const presetSalaryTypeFromUrl = searchParams.get("salaryType");
 
   // ── State ──
   const [employees, setEmployees] = useState<Employee[]>(initialData);
@@ -79,8 +108,44 @@ export function EmployeeTable({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // Advanced filters
-  const [filters, setFilters] = useState<FilterState>({ ...defaultFilters });
+  const [filters, setFilters] = useState<FilterState>(() => ({
+    ...defaultFilters,
+    status: presetStatusFromUrl
+      ? presetStatusFromUrl
+          .split(",")
+          .map((s) => s.trim().toUpperCase())
+          .filter((s) => s === "ACTIVE" || s === "TERMINATED")
+      : defaultFilters.status,
+  }));
+  const [salaryTypeQuickFilter, setSalaryTypeQuickFilter] = useState(() => {
+    const normalized = (presetSalaryTypeFromUrl ?? "").trim().toUpperCase();
+    return normalized === "LUNAR" || normalized === "SAPTAMANAL" || normalized === "ORA"
+      ? normalized
+      : "";
+  });
   const [filtersApplied, setFiltersApplied] = useState(false);
+
+  const initialStatusFromUrlRef = useRef(
+    (presetStatusFromUrl ?? "")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter((s) => s === "ACTIVE" || s === "TERMINATED")
+  );
+
+  const showStatusPresetChip =
+    initialStatusFromUrlRef.current.length > 0 &&
+    statusesEqual(filters.status, initialStatusFromUrlRef.current);
+
+  const syncUrlAfterPresetChange = useCallback(
+    (options: { removeStatus?: boolean; removeSalaryType?: boolean }) => {
+      const next = new URLSearchParams(window.location.search);
+      if (options.removeStatus) next.delete("status");
+      if (options.removeSalaryType) next.delete("salaryType");
+      const q = next.toString();
+      router.replace(q ? `/angajati?${q}` : "/angajati", { scroll: false });
+    },
+    [router]
+  );
 
   const totalPages = Math.ceil(total / limit);
 
@@ -101,9 +166,10 @@ export function EmployeeTable({
     if (filters.hireDateFrom) params.set("hireDateFrom", filters.hireDateFrom);
     if (filters.hireDateTo) params.set("hireDateTo", filters.hireDateTo);
     if (filters.hasAssignment) params.set("hasAssignment", "true");
+    if (salaryTypeQuickFilter) params.set("salaryType", salaryTypeQuickFilter);
 
     return params;
-  }, [page, limit, sortBy, sortOrder, filters]);
+  }, [page, limit, sortBy, sortOrder, filters, salaryTypeQuickFilter]);
 
   // ── Fetch employees ──
   const fetchEmployees = useCallback(async () => {
@@ -197,8 +263,10 @@ export function EmployeeTable({
 
   function handleResetFilters() {
     setFilters({ ...defaultFilters });
+    setSalaryTypeQuickFilter("");
     setFiltersApplied(false);
     setPage(1);
+    router.replace("/angajati", { scroll: false });
   }
 
   const SortIcon = ({ field }: { field: string }) => {
@@ -278,6 +346,42 @@ export function EmployeeTable({
               <option value="TERMINATED">Terminați</option>
             </select>
           </div>
+        </div>
+      )}
+
+      {(salaryTypeQuickFilter || showStatusPresetChip) && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm">
+          <span className="text-slate-600 font-medium shrink-0">Filtre din link:</span>
+          {showStatusPresetChip && (
+            <button
+              type="button"
+              aria-label={`Elimină filtrul de status: ${statusPresetLabel(filters.status)}`}
+              onClick={() => {
+                setFilters((f) => ({ ...f, status: defaultFilters.status }));
+                syncUrlAfterPresetChange({ removeStatus: true });
+                setPage(1);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white text-slate-800 border border-slate-200 px-3 py-1 text-xs font-medium shadow-sm hover:bg-slate-50"
+            >
+              {statusPresetLabel(filters.status)}
+              <X size={14} className="shrink-0 text-slate-500" aria-hidden />
+            </button>
+          )}
+          {salaryTypeQuickFilter && (
+            <button
+              type="button"
+              aria-label={`Elimină filtrul tip plată: ${salaryTypePresetLabel(salaryTypeQuickFilter)}`}
+              onClick={() => {
+                setSalaryTypeQuickFilter("");
+                syncUrlAfterPresetChange({ removeSalaryType: true });
+                setPage(1);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-white text-slate-800 border border-slate-200 px-3 py-1 text-xs font-medium shadow-sm hover:bg-slate-50"
+            >
+              {salaryTypePresetLabel(salaryTypeQuickFilter)}
+              <X size={14} className="shrink-0 text-slate-500" aria-hidden />
+            </button>
+          )}
         </div>
       )}
 

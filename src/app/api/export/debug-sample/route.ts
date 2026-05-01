@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { decrypt } from "@/lib/encryption";
+import { salaryAmountToJson } from "@/lib/salaryFields";
 
 function safeDecrypt(value: string | null | undefined): string {
   if (!value) return "";
@@ -44,8 +45,8 @@ export async function GET(request: NextRequest) {
       cnpRaw: e.cnp,
       ibanRaw: ibanPlain,
       bankName: e.bankName ?? "",
-      salaryType: e.salaryType ?? "",
-      salaryAmount: e.salaryAmount ?? "",
+      salaryType: e.salaryType != null ? String(e.salaryType) : "",
+      salaryAmount: salaryAmountToJson(e.salaryAmount) ?? "",
       salaryCurrency: e.salaryCurrency ?? "",
       status: e.status,
       csvCnpCell: `="${e.cnp}"`,

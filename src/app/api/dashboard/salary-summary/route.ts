@@ -21,7 +21,8 @@ export async function GET(request: NextRequest) {
     });
 
     return NextResponse.json({
-      totalMonthlySalaryRON: result._sum.salaryAmount ?? 0,
+      totalMonthlySalaryRON:
+        result._sum.salaryAmount != null ? result._sum.salaryAmount.toNumber() : 0,
       employeeCount: result._count._all ?? 0,
     });
   } catch (error) {

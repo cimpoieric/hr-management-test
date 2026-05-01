@@ -10,8 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { canEditEmployee, canViewIban } from "@/lib/permissions";
@@ -24,6 +23,198 @@ import {
   maskIBAN,
 } from "@/lib/validation";
 import { encrypt, hashSha256 } from "@/lib/encryption";
+import {
+  parseSalaryAmountDecimal,
+  parseSalaryTypeInput,
+  salaryAmountToJson,
+} from "@/lib/salaryFields";
+
+/** Body JSON la POST /api/employees — câmpuri opționale, tipuri ca la `JSON.parse`. */
+export interface EmployeeFormData {
+  cnp?: unknown;
+  firstName?: unknown;
+  lastName?: unknown;
+  seriesCI?: unknown;
+  numberCI?: unknown;
+  email?: unknown;
+  phone?: unknown;
+  iban?: unknown;
+  bankName?: unknown;
+  position?: unknown;
+  address?: unknown;
+  city?: unknown;
+  country?: unknown;
+  status?: unknown;
+  observations?: unknown;
+  salaryType?: unknown;
+  salaryAmount?: unknown;
+  salaryCurrency?: unknown;
+  salaryStartDate?: unknown;
+  companyId?: unknown;
+}
+
+type ValidationIssue = { path: (string | number)[]; message: string };
+
+function issue(path: string, message: string): ValidationIssue {
+  return { path: [path], message };
+}
+
+function parseRequiredString(
+  value: unknown,
+  field: string,
+  minLen: number,
+  maxLen: number
+): { ok: true; value: string } | { ok: false; issues: ValidationIssue[] } {
+  if (typeof value !== "string") {
+    return { ok: false, issues: [issue(field, "Obligatoriu (text)")] };
+  }
+  const t = value.trim();
+  if (t.length < minLen) {
+    return { ok: false, issues: [issue(field, minLen === 1 ? "Obligatoriu" : "Prea scurt")] };
+  }
+  if (t.length > maxLen) {
+    return { ok: false, issues: [issue(field, `Maxim ${maxLen} caractere`)] };
+  }
+  return { ok: true, value: t };
+}
+
+function parseOptionalString(
+  value: unknown,
+  field: string,
+  maxLen: number
+): { ok: true; value: string | null | undefined } | { ok: false; issues: ValidationIssue[] } {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (value === null) return { ok: true, value: null };
+  if (typeof value !== "string") {
+    return { ok: false, issues: [issue(field, "Trebuie să fie text sau null")] };
+  }
+  const t = value.trim();
+  if (t.length > maxLen) {
+    return { ok: false, issues: [issue(field, `Maxim ${maxLen} caractere`)] };
+  }
+  return { ok: true, value: t === "" ? null : t };
+}
+
+interface ValidatedEmployeeCreate {
+  cnp: string;
+  firstName: string;
+  lastName: string;
+  seriesCI: string | null | undefined;
+  numberCI: string | null | undefined;
+  email: string | null | undefined;
+  phone: string | null | undefined;
+  iban: string | null | undefined;
+  bankName: string | null | undefined;
+  position: string | null | undefined;
+  address: string | null | undefined;
+  city: string | null | undefined;
+  country: string;
+  status: string;
+  observations: string | null | undefined;
+  salaryTypeRaw: unknown;
+  salaryAmountRaw: unknown;
+  salaryCurrencyRaw: unknown;
+  salaryStartDateRaw: unknown;
+  companyId: number;
+}
+
+function parseEmployeeCreateBody(
+  raw: unknown
+): { ok: true; data: ValidatedEmployeeCreate } | { ok: false; issues: ValidationIssue[] } {
+  if (raw === null || typeof raw !== "object") {
+    return { ok: false, issues: [issue("body", "Obiect JSON așteptat")] };
+  }
+  const b = raw as EmployeeFormData;
+  const issues: ValidationIssue[] = [];
+
+  const cnp = parseRequiredString(b.cnp, "cnp", 1, 64);
+  if (!cnp.ok) issues.push(...cnp.issues);
+  const firstName = parseRequiredString(b.firstName, "firstName", 1, 100);
+  if (!firstName.ok) issues.push(...firstName.issues);
+  const lastName = parseRequiredString(b.lastName, "lastName", 1, 100);
+  if (!lastName.ok) issues.push(...lastName.issues);
+
+  const seriesCI = parseOptionalString(b.seriesCI, "seriesCI", 10);
+  if (!seriesCI.ok) issues.push(...seriesCI.issues);
+  const numberCI = parseOptionalString(b.numberCI, "numberCI", 20);
+  if (!numberCI.ok) issues.push(...numberCI.issues);
+  const email = parseOptionalString(b.email, "email", 255);
+  if (!email.ok) issues.push(...email.issues);
+  const phone = parseOptionalString(b.phone, "phone", 20);
+  if (!phone.ok) issues.push(...phone.issues);
+  const iban = parseOptionalString(b.iban, "iban", 34);
+  if (!iban.ok) issues.push(...iban.issues);
+  const bankName = parseOptionalString(b.bankName, "bankName", 100);
+  if (!bankName.ok) issues.push(...bankName.issues);
+  const position = parseOptionalString(b.position, "position", 100);
+  if (!position.ok) issues.push(...position.issues);
+  const address = parseOptionalString(b.address, "address", 255);
+  if (!address.ok) issues.push(...address.issues);
+  const city = parseOptionalString(b.city, "city", 100);
+  if (!city.ok) issues.push(...city.issues);
+  const observations = parseOptionalString(b.observations, "observations", 1000);
+  if (!observations.ok) issues.push(...observations.issues);
+
+  let country = "RO";
+  if (b.country !== undefined && b.country !== null) {
+    if (typeof b.country !== "string") {
+      issues.push(issue("country", "Trebuie să fie text"));
+    } else {
+      const t = b.country.trim();
+      if (t.length > 2) issues.push(issue("country", "Maxim 2 caractere"));
+      else country = t || "RO";
+    }
+  }
+
+  let status = "ACTIVE";
+  if (b.status !== undefined && b.status !== null) {
+    if (typeof b.status !== "string") {
+      issues.push(issue("status", "Trebuie să fie text"));
+    } else {
+      const t = b.status.trim();
+      if (t.length > 20) issues.push(issue("status", "Maxim 20 caractere"));
+      else status = t || "ACTIVE";
+    }
+  }
+
+  if (typeof b.companyId !== "number" || !Number.isInteger(b.companyId) || b.companyId <= 0) {
+    issues.push(issue("companyId", "ID firmă invalid (număr întreg pozitiv)"));
+  }
+
+  if (b.salaryStartDate !== undefined && b.salaryStartDate !== null) {
+    if (typeof b.salaryStartDate !== "string") {
+      issues.push(issue("salaryStartDate", "Trebuie să fie text (dată) sau gol"));
+    }
+  }
+
+  if (issues.length > 0) return { ok: false, issues };
+
+  return {
+    ok: true,
+    data: {
+      cnp: cnp.ok ? cnp.value : "",
+      firstName: firstName.ok ? firstName.value : "",
+      lastName: lastName.ok ? lastName.value : "",
+      seriesCI: seriesCI.ok ? seriesCI.value : undefined,
+      numberCI: numberCI.ok ? numberCI.value : undefined,
+      email: email.ok ? email.value : undefined,
+      phone: phone.ok ? phone.value : undefined,
+      iban: iban.ok ? iban.value : undefined,
+      bankName: bankName.ok ? bankName.value : undefined,
+      position: position.ok ? position.value : undefined,
+      address: address.ok ? address.value : undefined,
+      city: city.ok ? city.value : undefined,
+      country,
+      status,
+      observations: observations.ok ? observations.value : undefined,
+      salaryTypeRaw: b.salaryType,
+      salaryAmountRaw: b.salaryAmount,
+      salaryCurrencyRaw: b.salaryCurrency,
+      salaryStartDateRaw: b.salaryStartDate,
+      companyId: b.companyId as number,
+    },
+  };
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -124,6 +315,7 @@ export async function GET(request: NextRequest) {
     const statusFilter = searchParams.get("status"); // "ACTIVE,TERMINATED"
     const companyFilter = searchParams.get("company"); // "1,2,3"
     const countryFilter = searchParams.get("country"); // "NL,DE"
+    const salaryTypeFilter = searchParams.get("salaryType"); // "LUNAR|SAPTAMANAL|ORA"
     const expiredDocType = searchParams.get("expiredDocumentType"); // "A1|MEDICAL|CONTRACT|ANY"
     const expiringSoon = searchParams.get("expiringSoon") === "true";
     const hireDateFrom = searchParams.get("hireDateFrom");
@@ -165,6 +357,14 @@ export async function GET(request: NextRequest) {
       const companyIds = companyFilter.split(",").map(Number).filter(Boolean);
       if (companyIds.length > 0) {
         andConditions.push({ companyId: { in: companyIds } });
+      }
+    }
+
+    // ─── Salary type filter ───────────────────────────────────
+    if (salaryTypeFilter) {
+      const normalizedSalaryType = parseSalaryTypeInput(salaryTypeFilter);
+      if (normalizedSalaryType) {
+        andConditions.push({ salaryType: normalizedSalaryType });
       }
     }
 
@@ -280,7 +480,7 @@ export async function GET(request: NextRequest) {
           hiredAt: e.hiredAt,
           observations: e.observations,
           salaryType: e.salaryType,
-          salaryAmount: e.salaryAmount,
+          salaryAmount: salaryAmountToJson(e.salaryAmount),
           salaryCurrency: e.salaryCurrency,
           salaryStartDate: e.salaryStartDate,
           company: e.company,
@@ -308,29 +508,6 @@ export async function GET(request: NextRequest) {
 
 // ─── POST /api/employees ─────────────────────────────────────────────────────
 
-const createSchema = z.object({
-  cnp: z.string().trim().min(1, "CNP obligatoriu"),
-  firstName: z.string().trim().min(1, "Prenume obligatoriu").max(100),
-  lastName: z.string().trim().min(1, "Nume obligatoriu").max(100),
-  seriesCI: z.string().max(10).nullable().optional(),
-  numberCI: z.string().max(20).nullable().optional(),
-  email: z.string().max(255).nullable().optional(),
-  phone: z.string().max(20).nullable().optional(),
-  iban: z.string().max(34).nullable().optional(),
-  bankName: z.string().max(100).nullable().optional(),
-  position: z.string().max(100).nullable().optional(),
-  address: z.string().max(255).nullable().optional(),
-  city: z.string().max(100).nullable().optional(),
-  country: z.string().max(2).default("RO"),
-  status: z.string().max(20).default("ACTIVE"),
-  observations: z.string().max(1000).nullable().optional(),
-  salaryType: z.enum(["LUNAR", "SAPTAMANAL", "ORA"]).nullable().optional(),
-  salaryAmount: z.coerce.number().nonnegative().nullable().optional(),
-  salaryCurrency: z.string().max(10).default("RON").nullable().optional(),
-  salaryStartDate: z.string().trim().min(1).nullable().optional(),
-  companyId: z.number().int().positive(),
-});
-
 function parseSalaryStartDate(value: string | null | undefined): Date | null {
   if (!value) return null;
   const date = new Date(value);
@@ -348,12 +525,12 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
-    const parsed = createSchema.safeParse(body);
+    const rawBody: unknown = await request.json();
+    const parsed = parseEmployeeCreateBody(rawBody);
 
-    if (!parsed.success) {
+    if (!parsed.ok) {
       return NextResponse.json(
-        { error: "Date invalide", issues: parsed.error.issues },
+        { error: "Date invalide", issues: parsed.issues },
         { status: 400 }
       );
     }
@@ -361,7 +538,7 @@ export async function POST(request: NextRequest) {
     const data = parsed.data;
     const warnings: string[] = [];
 
-    const normalizedCnp = data.cnp.trim();
+    const normalizedCnp = data.cnp;
 
     const cnpHash = hashSha256(normalizedCnp);
     const existing = await prisma.employee.findFirst({
@@ -389,9 +566,14 @@ export async function POST(request: NextRequest) {
       warnings.push("CNP are format invalid, dar a fost salvat ca valoare brută.");
     }
 
-    const normalizedEmail = data.email?.trim() || null;
-    const normalizedPhone = data.phone?.trim() || null;
-    const normalizedIban = data.iban?.trim().toUpperCase() || null;
+    const normalizedEmail =
+      typeof data.email === "string" && data.email.trim().length > 0 ? data.email.trim() : null;
+    const normalizedPhone =
+      typeof data.phone === "string" && data.phone.trim().length > 0 ? data.phone.trim() : null;
+    const normalizedIban =
+      typeof data.iban === "string" && data.iban.trim().length > 0
+        ? data.iban.trim().toUpperCase()
+        : null;
 
     const safeEmail =
       normalizedEmail && !validateEmail(normalizedEmail)
@@ -405,19 +587,30 @@ export async function POST(request: NextRequest) {
       normalizedIban && !validateIBAN(normalizedIban)
         ? (warnings.push("IBAN invalid ignorat."), null)
         : normalizedIban;
-    const normalizedSalaryCurrency = data.salaryCurrency?.trim().toUpperCase() || "RON";
-    const salaryStartDate = parseSalaryStartDate(data.salaryStartDate);
+    const normalizedSalaryType = parseSalaryTypeInput(data.salaryTypeRaw);
+    const normalizedSalaryAmount = parseSalaryAmountDecimal(data.salaryAmountRaw);
+    const normalizedSalaryCurrency =
+      typeof data.salaryCurrencyRaw === "string" && data.salaryCurrencyRaw.trim().length > 0
+        ? data.salaryCurrencyRaw.trim().toUpperCase()
+        : "RON";
+    const salaryStartDate =
+      typeof data.salaryStartDateRaw === "string"
+        ? parseSalaryStartDate(data.salaryStartDateRaw)
+        : null;
 
     const cnpEncrypted = encrypt(normalizedCnp);
     const ibanEncrypted = safeIban ? encrypt(safeIban) : null;
     const ibanHash = safeIban ? hashSha256(safeIban) : null;
 
+    const salaryAmountForCreate: string | undefined =
+      normalizedSalaryAmount !== null ? normalizedSalaryAmount.toString() : undefined;
+
     const createData: Prisma.EmployeeCreateInput = {
       cnp: normalizedCnp,
       cnpEncrypted,
       cnpHash,
-      firstName: data.firstName.trim(),
-      lastName: data.lastName.trim(),
+      firstName: data.firstName,
+      lastName: data.lastName,
       seriesCI: data.seriesCI,
       numberCI: data.numberCI,
       email: safeEmail,
@@ -430,8 +623,8 @@ export async function POST(request: NextRequest) {
       city: data.city,
       country: data.country,
       status: data.status,
-      salaryType: data.salaryType ?? null,
-      salaryAmount: data.salaryAmount ?? null,
+      salaryType: normalizedSalaryType,
+      salaryAmount: salaryAmountForCreate as Prisma.EmployeeCreateInput["salaryAmount"],
       salaryCurrency: normalizedSalaryCurrency,
       salaryStartDate,
       observations: data.observations,

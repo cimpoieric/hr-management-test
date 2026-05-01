@@ -126,6 +126,11 @@ if (isPlaceholder(currentJwtSecret)) {
   log("  JWT_SECRET validă ✓", "green");
 }
 
+// DATABASE_URL — SQLite: cale relativă la folderul prisma/ (schema.prisma)
+if (!/^DATABASE_URL=/m.test(envContent)) {
+  setEnvVar("DATABASE_URL", "file:../data/app.db");
+}
+
 // Salvează .env dacă a fost modificat
 if (modified) {
   fs.writeFileSync(envPath, envContent, "utf8");
@@ -211,5 +216,5 @@ log("  npm run build    — build de producție");
 log("  npm start        — pornire producție");
 log("\nCont admin default:", "bold");
 log("  Email:    admin@firma.local");
-log("  Parola:   Admin123!");
+log("  Parola:   AdminTemp123!");
 log("\n", "reset");

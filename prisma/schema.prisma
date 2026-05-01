@@ -4,12 +4,13 @@ generator client {
 
 datasource db {
   provider = "sqlite"
+  // SQLite: calea din DATABASE_URL e relativă la folderul care conține schema.prisma (folderul prisma/).
   url      = env("DATABASE_URL")
 }
 
 // Valid roles: ADMIN | OPERATOR | ACCOUNTING
 // Valid employee status: ACTIVE | TERMINATED
-// Valid salary type: LUNAR | SAPTAMANAL | ORA
+// Valid salary type: LUNAR | SAPTAMANAL | ORA (Prisma enum; SQLite stochează TEXT)
 // Valid document status: VALID | EXPIRING_SOON | EXPIRED | PENDING
 // Valid document types: CONTRACT | ID | MEDICAL | A1 | AUTHORIZATION | VISA | OTHER
 // Valid deployment status: ACTIVE | COMPLETED | CANCELLED
@@ -25,6 +26,12 @@ model User {
   lastLoginAt        DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+}
+
+enum SalaryType {
+  LUNAR
+  SAPTAMANAL
+  ORA
 }
 
 model Employee {
@@ -47,8 +54,8 @@ model Employee {
   country      String        @default("RO")
   status       String        @default("ACTIVE")
   observations String?
-  salaryType   String?       // LUNAR | SAPTAMANAL | ORA
-  salaryAmount Float?
+  salaryType   SalaryType?
+  salaryAmount Decimal?
   salaryCurrency String      @default("RON")
   salaryStartDate DateTime?
   companyId    Int

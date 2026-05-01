@@ -276,6 +276,8 @@ export default function AngajatDetailPage() {
         isOpen={salaryCalculatorOpen}
         onClose={() => setSalaryCalculatorOpen(false)}
         employeeName={`${employee.lastName} ${employee.firstName}`}
+        iban={employee.iban}
+        bankName={employee.bankName}
         salaryType={employee.salaryType}
         salaryAmount={employee.salaryAmount ?? null}
         salaryCurrency={employee.salaryCurrency ?? "RON"}

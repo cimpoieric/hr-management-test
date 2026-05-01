@@ -15,7 +15,9 @@ import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
 import { decrypt } from "@/lib/encryption";
-import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
+import { salaryAmountToJson } from "@/lib/salaryFields";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -66,6 +68,8 @@ export async function POST(request: NextRequest) {
         _count: { select: { documents: true, deployments: true } },
       },
     });
+    console.log("[PDF DATA]", employees);
+    console.log("[PDF DATA] employees length:", employees?.length);
 
     if (employees.length === 0) {
       return NextResponse.json({ error: "Angajați negăsiți" }, { status: 404 });
@@ -91,110 +95,41 @@ export async function POST(request: NextRequest) {
       safeDecrypt(emp.iban),
       emp.bankName ?? "—",
       emp.salaryType ?? "—",
-      typeof emp.salaryAmount === "number" ? String(emp.salaryAmount) : "—",
+      (() => {
+        const n = salaryAmountToJson(emp.salaryAmount);
+        return n != null ? String(n) : "—";
+      })(),
       emp.salaryCurrency ?? "—",
       emp.status === "ACTIVE" ? "Activ" : "Terminat",
     ]);
 
-    const pdfDoc = await PDFDocument.create();
-    const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-
-    const pageWidth = 842; // landscape-like A4 width in points
-    const pageHeight = 595; // landscape-like A4 height
-    const margin = 24;
-    const rowHeight = 18;
-    const headerYTop = pageHeight - margin;
     const generatedAt = new Date().toLocaleString("ro-RO");
     const title = `Raport salarial — ${appSettings.companyName || "Companie"}`;
     const tableColWidths = [28, 78, 78, 92, 128, 78, 64, 66, 44, 58];
+    const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.text(title, 24, 24);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.text(`${appSettings.companyCuiReg || "CUI nedefinit"} · ${generatedAt}`, 24, 40);
 
-    let page = pdfDoc.addPage([pageWidth, pageHeight]);
-    let y = headerYTop;
-
-    const drawPageHeader = (targetPage: PDFPage) => {
-      targetPage.drawText(title, {
-        x: margin,
-        y: pageHeight - margin,
-        size: 12,
-        font: fontBold,
-        color: rgb(0.12, 0.12, 0.12),
-      });
-      targetPage.drawText(`${appSettings.companyCuiReg || "CUI nedefinit"} · ${generatedAt}`, {
-        x: margin,
-        y: pageHeight - margin - 14,
-        size: 9,
-        font: fontRegular,
-        color: rgb(0.35, 0.35, 0.35),
-      });
-    };
-
-    const drawFooter = (targetPage: PDFPage, totalRows: number) => {
-      targetPage.drawText(`Generat la ${generatedAt} — Total angajați: ${totalRows}`, {
-        x: margin,
-        y: 10,
-        size: 9,
-        font: fontRegular,
-        color: rgb(0.35, 0.35, 0.35),
-      });
-    };
-
-    const drawHeaderRow = (targetPage: PDFPage, rowY: number) => {
-      let x = margin;
-      for (let i = 0; i < headers.length; i++) {
-        const label = headers[i] ?? "";
-        const width = tableColWidths[i] ?? 50;
-        targetPage.drawRectangle({
-          x,
-          y: rowY - rowHeight + 2,
-          width,
-          height: rowHeight,
-          color: rgb(0.92, 0.94, 0.97),
-        });
-        targetPage.drawText(label, {
-          x: x + 3,
-          y: rowY - 11,
-          size: 8,
-          font: fontBold,
-          color: rgb(0.15, 0.15, 0.15),
-        });
-        x += width;
-      }
-    };
-
-    drawPageHeader(page);
-    y = pageHeight - margin - 34;
-    drawHeaderRow(page, y);
-    y -= rowHeight;
-
-    for (let r = 0; r < rows.length; r++) {
-      if (y < 30) {
-        drawFooter(page, rows.length);
-        page = pdfDoc.addPage([pageWidth, pageHeight]);
-        drawPageHeader(page);
-        y = pageHeight - margin - 34;
-        drawHeaderRow(page, y);
-        y -= rowHeight;
-      }
-      const row = rows[r] ?? [];
-      let x = margin;
-      for (let c = 0; c < headers.length; c++) {
-        const width = tableColWidths[c] ?? 50;
-        const cellText = String(row[c] ?? "—").slice(0, 40);
-        page.drawText(cellText, {
-          x: x + 3,
-          y: y - 11,
-          size: 8,
-          font: fontRegular,
-          color: rgb(0.12, 0.12, 0.12),
-        });
-        x += width;
-      }
-      y -= rowHeight;
-    }
-    drawFooter(page, rows.length);
-
-    const pdfBytes = await pdfDoc.save();
+    autoTable(doc, {
+      startY: 54,
+      head: [headers],
+      body: rows,
+      styles: { font: "helvetica", fontSize: 8, cellPadding: 3, overflow: "linebreak" },
+      headStyles: { fillColor: [235, 240, 248], textColor: [25, 25, 25] },
+      columnStyles: Object.fromEntries(tableColWidths.map((w, i) => [i, { cellWidth: w }])),
+      margin: { left: 24, right: 24 },
+      didDrawPage: () => {
+        const pageHeight = doc.internal.pageSize.getHeight();
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(9);
+        doc.text(`Generat la ${generatedAt} — Total angajați: ${rows.length}`, 24, pageHeight - 12);
+      },
+    });
+    const pdfBytes = new Uint8Array(doc.output("arraybuffer"));
 
     // Audit log
     logAuditFF({
@@ -215,6 +150,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    console.log("[PDF ERROR]", error);
     console.error("[EXPORT_PDF]", error);
     return NextResponse.json({ error: "Eroare la generare PDF" }, { status: 500 });
   }

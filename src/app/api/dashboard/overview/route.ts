@@ -25,6 +25,7 @@ export async function GET(request: NextRequest) {
       expiringSoonDocuments,
       pendingImports,
       salaryAgg,
+      salaryCurrencyAgg,
       deploymentsByCountryRaw,
       recentAuditRaw,
     ] = await Promise.all([
@@ -54,6 +55,17 @@ export async function GET(request: NextRequest) {
         },
         _sum: { salaryAmount: true },
         _count: { _all: true },
+      }),
+      prisma.employee.groupBy({
+        by: ["salaryCurrency"],
+        where: {
+          salaryType: "LUNAR",
+          status: "ACTIVE",
+          salaryAmount: { not: null },
+        },
+        _count: { _all: true },
+        orderBy: { _count: { salaryCurrency: "desc" } },
+        take: 1,
       }),
       prisma.deployment.groupBy({
         by: ["country"],
@@ -89,6 +101,7 @@ export async function GET(request: NextRequest) {
       code: item.country,
       count: item._count._all,
     }));
+    const predominantSalaryCurrency = salaryCurrencyAgg[0]?.salaryCurrency ?? "RON";
 
     return NextResponse.json({
       stats: {
@@ -99,8 +112,12 @@ export async function GET(request: NextRequest) {
         expiredDocuments,
         expiringSoonDocuments,
         pendingImports,
-        monthlySalaryCost: salaryAgg._sum.salaryAmount ?? 0,
+        monthlySalaryCost:
+          salaryAgg._sum.salaryAmount != null
+            ? salaryAgg._sum.salaryAmount.toNumber()
+            : 0,
         monthlySalaryEmployeeCount: salaryAgg._count._all ?? 0,
+        monthlySalaryCurrency: predominantSalaryCurrency,
         documentAlertDays: settings.alertExpiredDocumentsDays,
       },
       deploymentsByCountry,

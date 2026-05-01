@@ -6,6 +6,7 @@ import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
 import { decrypt } from "@/lib/encryption";
+import { parseSalaryTypeInput, salaryAmountToJson } from "@/lib/salaryFields";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -56,7 +57,8 @@ export async function POST(request: NextRequest) {
       body.salaryCompleteOnly === 1;
 
     const where: Prisma.EmployeeWhereInput = {};
-    if (salaryType) where.salaryType = salaryType;
+    const typeFilter = parseSalaryTypeInput(salaryType || undefined);
+    if (typeFilter) where.salaryType = typeFilter;
     if (salaryCurrency) where.salaryCurrency = salaryCurrency;
     if (salaryCompleteOnly) {
       where.AND = [
@@ -97,11 +99,9 @@ export async function POST(request: NextRequest) {
     ];
 
     const rows = employees.map((emp) => {
-      const tipPlata = emp.salaryType?.trim() ?? "";
-      const suma =
-        typeof emp.salaryAmount === "number" && !Number.isNaN(emp.salaryAmount)
-          ? String(emp.salaryAmount)
-          : "";
+      const tipPlata = emp.salaryType != null ? String(emp.salaryType) : "";
+      const sumaVal = salaryAmountToJson(emp.salaryAmount);
+      const suma = sumaVal != null ? String(sumaVal) : "";
       const moneda = emp.salaryCurrency?.trim() ?? "";
       return [
         emp.lastName,
