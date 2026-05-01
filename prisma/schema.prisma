@@ -1,0 +1,206 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Valid roles: ADMIN | OPERATOR | ACCOUNTING
+// Valid employee status: ACTIVE | TERMINATED
+// Valid salary type: LUNAR | SAPTAMANAL | ORA
+// Valid document status: VALID | EXPIRING_SOON | EXPIRED | PENDING
+// Valid document types: CONTRACT | ID | MEDICAL | A1 | AUTHORIZATION | VISA | OTHER
+// Valid deployment status: ACTIVE | COMPLETED | CANCELLED
+
+model User {
+  id                 Int      @id @default(autoincrement())
+  name               String   @default("")
+  email              String   @unique
+  password           String   // bcrypt hash — NEVER expose in API
+  role               String   @default("OPERATOR")
+  isActive           Boolean  @default(true)
+  mustChangePassword Boolean  @default(false)
+  lastLoginAt        DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Employee {
+  id           Int           @id @default(autoincrement())
+  cnp          String        @unique
+  cnpEncrypted String
+  cnpHash      String
+  firstName    String
+  lastName     String
+  seriesCI     String?
+  numberCI     String?
+  email        String?       @unique
+  phone        String?
+  iban         String?
+  ibanHash     String?
+  bankName     String?
+  position     String?
+  address      String?
+  city         String?
+  country      String        @default("RO")
+  status       String        @default("ACTIVE")
+  observations String?
+  salaryType   String?       // LUNAR | SAPTAMANAL | ORA
+  salaryAmount Float?
+  salaryCurrency String      @default("RON")
+  salaryStartDate DateTime?
+  companyId    Int
+  company      Company       @relation(fields: [companyId], references: [id])
+  hiredAt      DateTime      @default(now())
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  documents    Document[]
+  deployments  Deployment[]
+  salaryCalculations SalaryCalculation[]
+  auditLogs    AuditLog[]
+
+  @@index([cnpHash])
+  @@index([companyId])
+  @@index([status])
+}
+
+model SalaryCalculation {
+  id             Int      @id @default(autoincrement())
+  employeeId     Int
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  salaryType     String
+  salaryAmount   Float
+  salaryCurrency String   @default("RON")
+  inputValue     Float?
+  inputLabel     String?
+  calculatedTotal Float
+  createdAt      DateTime @default(now())
+
+  @@index([employeeId, createdAt])
+}
+
+model Company {
+  id          Int        @id @default(autoincrement())
+  name        String
+  cui         String?    @unique
+  regCom      String?
+  address     String?
+  city        String?
+  country     String     @default("RO")
+  employees   Employee[]
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Document {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type        String   // CONTRACT | ID | MEDICAL | A1 | AUTHORIZATION | VISA | OTHER
+  number      String?  // Număr document (ex: nr. contract, serie CI)
+  fileName    String   // Nume original sanitizat
+  storagePath String   // Cale relativă în ./data/documents/
+  fileSize    Int      // Bytes
+  mimeType    String   // application/pdf, image/jpeg, etc.
+  status      String   @default("PENDING") // VALID | EXPIRING_SOON | EXPIRED | PENDING
+  issueDate   DateTime?
+  expiryDate  DateTime?
+  uploadedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([type])
+  @@index([status])
+  @@index([expiryDate])
+}
+
+model Deployment {
+  id          Int      @id @default(autoincrement())
+  employeeId  Int
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  country     String
+  city        String?
+  startDate   DateTime
+  endDate     DateTime?
+  status      String   @default("ACTIVE")
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([employeeId])
+}
+
+model AuditLog {
+  id          Int       @id @default(autoincrement())
+  action      String    // LOGIN, LOGOUT, CREATE, UPDATE, DELETE, VIEW, EXPORT, IMPORT_APPROVE, IMPORT_REJECT, BACKUP
+  entity      String    // Employee, Document, Deployment, User, Report, System
+  entityId    Int?
+  employee    Employee? @relation(fields: [entityId], references: [id], onDelete: SetNull)
+  userId      Int?      // User who performed the action
+  userName    String?   // Denormalized for querying
+  userRole    String?   // Denormalized for querying
+  oldValues   String?   // JSON - masked for sensitive data
+  newValues   String?   // JSON - masked for sensitive data
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime  @default(now())
+
+  @@index([entity, entityId])
+  @@index([action])
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// Valid import status: PENDING | APPROVED | REJECTED | DRAFT
+model PendingImport {
+  id              Int      @id @default(autoincrement())
+  sourceType      String   @default("MANUAL_UPLOAD")
+  fileName        String
+  filePath        String   // Cale relativă în ./data/import/
+  mimeType        String
+  fileSize        Int
+  rawText         String   // Text brut extras (PDF sau OCR)
+  extractedFields String   // JSON cu câmpurile extrase
+  confidenceScore Float    // 0.0 - 1.0
+  uncertainFields String   // JSON array cu numele câmpurilor incerte
+  status          String   @default("PENDING") // PENDING | APPROVED | REJECTED | DRAFT
+  employeeId      Int?     // Populat la aprobare (legare sau creare)
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Valid email import status: PENDING | PROCESSED | ERROR
+model EmailImport {
+  id           Int      @id @default(autoincrement())
+  imapUid      String   @unique // UID unic de pe serverul IMAP
+  subject      String
+  fromAddress  String
+  receivedAt   DateTime
+  attachments  Int      @default(0)
+  processed    Int      @default(0) // câte atașamente au creat PendingImport
+  status       String   @default("PENDING") // PENDING | PROCESSED | ERROR
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  @@index([status])
+  @@index([receivedAt])
+  @@index([createdAt])
+}
+
+// Stocare key-value pentru configurări sistem
+model SystemConfig {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
