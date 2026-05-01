@@ -10,6 +10,11 @@ import {
   Loader2,
   Trash2,
   Info,
+  Building2,
+  Wallet,
+  Globe2,
+  Bell,
+  Database,
 } from "lucide-react";
 
 export default function SetariPage() {
@@ -18,6 +23,29 @@ export default function SetariPage() {
   const [error, setError] = useState("");
   const [logoExists, setLogoExists] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [dbPath, setDbPath] = useState("");
+  const [importingDb, setImportingDb] = useState(false);
+  const dbInputRef = useRef<HTMLInputElement>(null);
+  const [form, setForm] = useState({
+    companyName: "",
+    companyCuiReg: "",
+    companyAddress: "",
+    legalRepName: "",
+    legalRepRole: "",
+    companyIban: "",
+    companyBank: "",
+    salaryDefaultCurrency: "RON",
+    salaryDefaultType: "LUNAR",
+    standardMonthlyHours: 168,
+    standardWeeklyHours: 40,
+    dateFormat: "DD.MM.YYYY",
+    language: "ro",
+    timezone: "Europe/Bucharest",
+    alertExpiredDocumentsDays: 30,
+    alertExpiringDeploymentsDays: 7,
+    inAppNotificationsEnabled: true,
+  });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Check if logo exists
@@ -39,6 +67,63 @@ export default function SetariPage() {
   useEffect(() => {
     checkLogo();
   }, [checkLogo]);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
+      .then((data) => {
+        setForm({
+          companyName: data.companyName ?? "",
+          companyCuiReg: data.companyCuiReg ?? "",
+          companyAddress: data.companyAddress ?? "",
+          legalRepName: data.legalRepName ?? "",
+          legalRepRole: data.legalRepRole ?? "",
+          companyIban: data.companyIban ?? "",
+          companyBank: data.companyBank ?? "",
+          salaryDefaultCurrency: data.salaryDefaultCurrency ?? "RON",
+          salaryDefaultType: data.salaryDefaultType ?? "LUNAR",
+          standardMonthlyHours: Number(data.standardMonthlyHours ?? 168),
+          standardWeeklyHours: Number(data.standardWeeklyHours ?? 40),
+          dateFormat: data.dateFormat ?? "DD.MM.YYYY",
+          language: data.language ?? "ro",
+          timezone: data.timezone ?? "Europe/Bucharest",
+          alertExpiredDocumentsDays: Number(data.alertExpiredDocumentsDays ?? 30),
+          alertExpiringDeploymentsDays: Number(data.alertExpiringDeploymentsDays ?? 7),
+          inAppNotificationsEnabled: data.inAppNotificationsEnabled !== false,
+        });
+        setDbPath(data.dbPath ?? "");
+      })
+      .catch(() => {
+        // keep defaults
+      });
+  }, []);
+
+  function setField(key: string, value: string | number | boolean) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSaveSettings() {
+    setSavingSettings(true);
+    setMessage("");
+    setError("");
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Nu am putut salva setările.");
+        return;
+      }
+      setMessage("Setările au fost salvate.");
+    } catch {
+      setError("Nu am putut salva setările.");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
 
   async function handleUpload(file: File) {
     setUploading(true);
@@ -96,6 +181,52 @@ export default function SetariPage() {
       }
     } catch {
       setError("Eroare la ștergere");
+    }
+  }
+
+  async function handleDatabaseExport() {
+    try {
+      const res = await fetch("/api/settings/database-export");
+      if (!res.ok) {
+        const d = await res.json();
+        setError(d.error ?? "Export DB eșuat.");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `dev-${new Date().toISOString().slice(0, 10)}.db`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Export DB eșuat.");
+    }
+  }
+
+  async function handleDatabaseImport(file: File) {
+    setImportingDb(true);
+    setMessage("");
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("database", file);
+      const res = await fetch("/api/settings/database-import", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Import DB eșuat.");
+        return;
+      }
+      setMessage(data.warning ?? "Import DB finalizat.");
+    } catch {
+      setError("Import DB eșuat.");
+    } finally {
+      setImportingDb(false);
     }
   }
 
@@ -214,70 +345,126 @@ export default function SetariPage() {
 
       {/* Report Settings */}
       <div className="bg-white rounded-xl border shadow-sm">
-        <div className="px-6 py-4 border-b">
+        <div className="px-6 py-4 border-b flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <Settings size={18} className="text-gray-500" />
-            <h2 className="text-lg font-semibold text-gray-900">Setări rapoarte</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Setări generale aplicație</h2>
           </div>
+          <button
+            type="button"
+            onClick={handleSaveSettings}
+            disabled={savingSettings}
+            className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+          >
+            {savingSettings ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            Salvează setări
+          </button>
         </div>
 
         <div className="p-6 space-y-4">
-          <div className="flex items-start gap-3">
-            <div className="flex-1">
-              <h3 className="text-sm font-medium text-gray-700">
-                Validitate rapoarte
-              </h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Rapoartele generate sunt valabile 24 ore, apoi sunt șterse automat.
-              </p>
+          <div className="rounded-xl border p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Building2 size={15} className="text-gray-500" />
+              Date companie
+            </h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <input value={form.companyName} onChange={(e) => setField("companyName", e.target.value)} placeholder="Nume firmă" className="rounded-lg border px-3 py-2 text-sm" />
+              <input value={form.companyCuiReg} onChange={(e) => setField("companyCuiReg", e.target.value)} placeholder="CUI / Reg. Com." className="rounded-lg border px-3 py-2 text-sm" />
+              <input value={form.legalRepName} onChange={(e) => setField("legalRepName", e.target.value)} placeholder="Reprezentant legal (nume)" className="rounded-lg border px-3 py-2 text-sm" />
+              <input value={form.legalRepRole} onChange={(e) => setField("legalRepRole", e.target.value)} placeholder="Reprezentant legal (funcție)" className="rounded-lg border px-3 py-2 text-sm" />
+              <input value={form.companyIban} onChange={(e) => setField("companyIban", e.target.value.toUpperCase())} placeholder="IBAN firmă" className="rounded-lg border px-3 py-2 text-sm" />
+              <input value={form.companyBank} onChange={(e) => setField("companyBank", e.target.value)} placeholder="Bancă firmă" className="rounded-lg border px-3 py-2 text-sm" />
+              <textarea value={form.companyAddress} onChange={(e) => setField("companyAddress", e.target.value)} placeholder="Adresă sediu" className="rounded-lg border px-3 py-2 text-sm sm:col-span-2" rows={2} />
             </div>
-            <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-              24 ore
-            </span>
           </div>
 
-          <div className="flex items-start gap-3">
-            <div className="flex-1">
-              <h3 className="text-sm font-medium text-gray-700">
-                Limită angajați per raport
-              </h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Maxim 5000 de angajați pot fi incluși într-un singur raport.
-              </p>
+          <div className="rounded-xl border p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Wallet size={15} className="text-gray-500" />
+              Setări salariale default
+            </h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <select value={form.salaryDefaultCurrency} onChange={(e) => setField("salaryDefaultCurrency", e.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="RON">RON</option>
+                <option value="EUR">EUR</option>
+                <option value="USD">USD</option>
+              </select>
+              <select value={form.salaryDefaultType} onChange={(e) => setField("salaryDefaultType", e.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="LUNAR">Lunar</option>
+                <option value="SAPTAMANAL">Săptămânal</option>
+                <option value="ORA">Pe oră</option>
+              </select>
+              <input type="number" value={form.standardMonthlyHours} onChange={(e) => setField("standardMonthlyHours", Number(e.target.value || 0))} placeholder="Ore standard/lună" className="rounded-lg border px-3 py-2 text-sm" />
+              <input type="number" value={form.standardWeeklyHours} onChange={(e) => setField("standardWeeklyHours", Number(e.target.value || 0))} placeholder="Ore standard/săptămână" className="rounded-lg border px-3 py-2 text-sm" />
             </div>
-            <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-              5000
-            </span>
           </div>
 
-          <div className="flex items-start gap-3">
-            <div className="flex-1">
-              <h3 className="text-sm font-medium text-gray-700">
-                Font utilizat
-              </h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Helvetica (regular + bold) — font standard PDF, fără necesitate de embedding.
-              </p>
+          <div className="rounded-xl border p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Globe2 size={15} className="text-gray-500" />
+              Format dată și regional
+            </h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <select value={form.dateFormat} onChange={(e) => setField("dateFormat", e.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="DD.MM.YYYY">DD.MM.YYYY</option>
+                <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+              </select>
+              <select value={form.language} onChange={(e) => setField("language", e.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="ro">Română</option>
+                <option value="en">English</option>
+              </select>
+              <input value={form.timezone} onChange={(e) => setField("timezone", e.target.value)} className="rounded-lg border px-3 py-2 text-sm" placeholder="Europe/Bucharest" />
             </div>
-            <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
-              Helvetica
-            </span>
           </div>
 
-          <div className="flex items-start gap-3">
-            <div className="flex-1">
-              <h3 className="text-sm font-medium text-gray-700">
-                Culori design
-              </h3>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Header slate-800, accent blue-500, text slate-900.
-              </p>
+          <div className="rounded-xl border p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Bell size={15} className="text-gray-500" />
+              Setări notificări
+            </h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <input type="number" value={form.alertExpiredDocumentsDays} onChange={(e) => setField("alertExpiredDocumentsDays", Number(e.target.value || 0))} placeholder="Alertă documente expirate (zile)" className="rounded-lg border px-3 py-2 text-sm" />
+              <input type="number" value={form.alertExpiringDeploymentsDays} onChange={(e) => setField("alertExpiringDeploymentsDays", Number(e.target.value || 0))} placeholder="Alertă detașări (zile)" className="rounded-lg border px-3 py-2 text-sm" />
+              <label className="flex items-center gap-2 rounded-lg border px-3 py-2 text-sm text-gray-700">
+                <input type="checkbox" checked={form.inAppNotificationsEnabled} onChange={(e) => setField("inAppNotificationsEnabled", e.target.checked)} />
+                Notificări în aplicație
+              </label>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-5 h-5 rounded-full bg-[#1e293b]" title="slate-800" />
-              <span className="w-5 h-5 rounded-full bg-[#3b82f6]" title="blue-500" />
-              <span className="w-5 h-5 rounded-full bg-[#0f172a]" title="slate-900" />
+          </div>
+
+          <div className="rounded-xl border p-4">
+            <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold text-gray-900">
+              <Database size={15} className="text-gray-500" />
+              Backup și mentenanță
+            </h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDatabaseExport}
+                className="rounded-lg border px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Export bază de date
+              </button>
+              <input
+                ref={dbInputRef}
+                type="file"
+                accept=".db"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleDatabaseImport(file);
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => dbInputRef.current?.click()}
+                disabled={importingDb}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+              >
+                {importingDb ? "Se importă..." : "Import bază de date"}
+              </button>
             </div>
+            <p className="mt-3 text-xs text-gray-500">Locație DB: {dbPath || "prisma/dev.db"}</p>
           </div>
         </div>
       </div>

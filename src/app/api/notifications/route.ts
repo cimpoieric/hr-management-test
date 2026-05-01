@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { getAppSettings } from "@/lib/appSettings";
 
 type NotificationType = "warning" | "info" | "success";
 
@@ -12,12 +13,27 @@ export async function GET(request: NextRequest) {
 
   try {
     const now = new Date();
-    const in30Days = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const settings = await getAppSettings();
+    if (!settings.inAppNotificationsEnabled) {
+      return NextResponse.json({ data: [], unreadCount: 0 });
+    }
+    const inDocAlertDays = new Date(
+      now.getTime() + settings.alertExpiredDocumentsDays * 24 * 60 * 60 * 1000
+    );
+    const inDeploymentAlertDays = new Date(
+      now.getTime() + settings.alertExpiringDeploymentsDays * 24 * 60 * 60 * 1000
+    );
 
-    const [expiredDocs, expiringDocs, pendingImports, recentAudit] = await Promise.all([
+    const [expiredDocs, expiringDocs, expiringDeployments, pendingImports, recentAudit] = await Promise.all([
       prisma.document.count({ where: { expiryDate: { not: null, lt: now } } }),
       prisma.document.count({
-        where: { expiryDate: { not: null, gte: now, lte: in30Days } },
+        where: { expiryDate: { not: null, gte: now, lte: inDocAlertDays } },
+      }),
+      prisma.deployment.count({
+        where: {
+          status: "ACTIVE",
+          endDate: { not: null, gte: now, lte: inDeploymentAlertDays },
+        },
       }),
       prisma.pendingImport.count({ where: { status: "PENDING" } }),
       prisma.auditLog.findMany({
@@ -57,7 +73,16 @@ export async function GET(request: NextRequest) {
       notifications.push({
         id: 3,
         type: "info",
-        message: `${expiringDocs} documente expiră în 30 zile.`,
+        message: `${expiringDocs} documente expiră în ${settings.alertExpiredDocumentsDays} zile.`,
+        time: "Acum",
+        read: false,
+      });
+    }
+    if (expiringDeployments > 0) {
+      notifications.push({
+        id: 4,
+        type: "warning",
+        message: `${expiringDeployments} detașări expiră în ${settings.alertExpiringDeploymentsDays} zile.`,
         time: "Acum",
         read: false,
       });

@@ -128,6 +128,22 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
       .finally(() => setLoading(false));
   }, [employeeId, router]);
 
+  useEffect(() => {
+    if (employeeId) return;
+    fetch("/api/settings", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
+      .then((data) => {
+        setForm((prev) => ({
+          ...prev,
+          salaryCurrency: data.salaryDefaultCurrency ?? prev.salaryCurrency,
+          salaryType: data.salaryDefaultType ?? prev.salaryType,
+        }));
+      })
+      .catch(() => {
+        // keep defaults
+      });
+  }, [employeeId]);
+
   const updateField = useCallback(<K extends keyof FormData>(key: K, value: FormData[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     // Clear error on change

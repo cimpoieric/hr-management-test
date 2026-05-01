@@ -22,6 +22,9 @@ import { randomUUID } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
+import { getAppSettings } from "@/lib/appSettings";
+import { decrypt } from "@/lib/encryption";
+import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
 import {
   generateEmployeeListPDF,
   generateA1ReportPDF,
@@ -109,6 +112,110 @@ const DEFAULT_LIST_COLUMNS: ColumnDef[] = [
   { key: "status", header: "Status", width: 12 },
 ];
 
+function safeDecrypt(value: string | null | undefined): string {
+  if (!value) return "—";
+  try {
+    return decrypt(value);
+  } catch {
+    return value;
+  }
+}
+
+async function generateAccountingListPdf(params: {
+  employees: Array<{
+    firstName: string;
+    lastName: string;
+    cnp: string;
+    iban: string | null;
+    bankName: string | null;
+    salaryType: string | null;
+    salaryAmount: number | null;
+    salaryCurrency: string;
+    status: string;
+  }>;
+  companyName: string;
+  companyRef: string;
+  title: string;
+}): Promise<Uint8Array> {
+  const { employees, companyName, companyRef, title } = params;
+  const pdfDoc = await PDFDocument.create();
+  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const pageWidth = 842;
+  const pageHeight = 595;
+  const margin = 24;
+  const rowHeight = 18;
+  const generatedAt = new Date().toLocaleString("ro-RO");
+
+  const headers = ["Nr.", "Nume", "Prenume", "CNP", "IBAN", "Bancă", "Tip plată", "Sumă brută", "Monedă", "Status"];
+  const widths = [28, 78, 78, 92, 128, 78, 64, 66, 44, 58];
+  const rows = employees.map((e, idx) => [
+    String(idx + 1),
+    e.lastName || "—",
+    e.firstName || "—",
+    e.cnp || "—",
+    safeDecrypt(e.iban),
+    e.bankName || "—",
+    e.salaryType || "—",
+    typeof e.salaryAmount === "number" ? String(e.salaryAmount) : "—",
+    e.salaryCurrency || "—",
+    e.status === "ACTIVE" ? "Activ" : "Terminat",
+  ]);
+
+  let page = pdfDoc.addPage([pageWidth, pageHeight]);
+  let y = pageHeight - margin - 34;
+
+  const drawHeader = (p: PDFPage) => {
+    p.drawText(`${title} — ${companyName || "Companie"}`, {
+      x: margin, y: pageHeight - margin, size: 12, font: fontBold, color: rgb(0.12, 0.12, 0.12),
+    });
+    p.drawText(`${companyRef || "CUI nedefinit"} · ${generatedAt}`, {
+      x: margin, y: pageHeight - margin - 14, size: 9, font: fontRegular, color: rgb(0.35, 0.35, 0.35),
+    });
+    p.drawText(`TEST PDF - Raport salarial`, {
+      x: margin, y: pageHeight - margin - 28, size: 9, font: fontBold, color: rgb(0.15, 0.32, 0.75),
+    });
+  };
+  const drawFooter = (p: PDFPage) => {
+    p.drawText(`Generat la ${generatedAt} — Total angajați: ${rows.length}`, {
+      x: margin, y: 10, size: 9, font: fontRegular, color: rgb(0.35, 0.35, 0.35),
+    });
+  };
+  const drawTableHeader = (p: PDFPage, rowY: number) => {
+    let x = margin;
+    for (let i = 0; i < headers.length; i++) {
+      p.drawRectangle({ x, y: rowY - rowHeight + 2, width: widths[i] ?? 50, height: rowHeight, color: rgb(0.92, 0.94, 0.97) });
+      p.drawText(headers[i] ?? "", { x: x + 3, y: rowY - 11, size: 8, font: fontBold, color: rgb(0.15, 0.15, 0.15) });
+      x += widths[i] ?? 50;
+    }
+  };
+
+  drawHeader(page);
+  drawTableHeader(page, y);
+  y -= rowHeight;
+
+  for (const row of rows) {
+    if (y < 30) {
+      drawFooter(page);
+      page = pdfDoc.addPage([pageWidth, pageHeight]);
+      drawHeader(page);
+      y = pageHeight - margin - 34;
+      drawTableHeader(page, y);
+      y -= rowHeight;
+    }
+    let x = margin;
+    for (let i = 0; i < headers.length; i++) {
+      page.drawText(String(row[i] ?? "—").slice(0, 40), {
+        x: x + 3, y: y - 11, size: 8, font: fontRegular, color: rgb(0.12, 0.12, 0.12),
+      });
+      x += widths[i] ?? 50;
+    }
+    y -= rowHeight;
+  }
+  drawFooter(page);
+  return await pdfDoc.save();
+}
+
 // ─── POST handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -129,6 +236,7 @@ export async function POST(request: NextRequest) {
     await cleanupOldReports();
 
     const logoPath = getLogoPath();
+    const appSettings = await getAppSettings();
     const generatedBy = user.email;
     let pdfBytes: Uint8Array;
     let reportTitle: string;
@@ -183,13 +291,24 @@ export async function POST(request: NextRequest) {
       reportTitle = body.title ?? "Raport salarial — confidential";
       employeeCount = items.length;
 
-      pdfBytes = generateEmployeeListPDF({
-        employees: items,
-        columns,
+      void columns;
+      void logoPath;
+      void generatedBy;
+      pdfBytes = await generateAccountingListPdf({
+        employees: employees.map((e) => ({
+          firstName: e.firstName,
+          lastName: e.lastName,
+          cnp: e.cnp,
+          iban: e.iban,
+          bankName: e.bankName,
+          salaryType: e.salaryType,
+          salaryAmount: e.salaryAmount,
+          salaryCurrency: e.salaryCurrency,
+          status: e.status,
+        })),
+        companyName: appSettings.companyName || "",
+        companyRef: appSettings.companyCuiReg || "",
         title: reportTitle,
-        subtitle: `Generat la: ${new Date().toLocaleString("ro-RO")}`,
-        generatedBy,
-        logoPath,
       });
 
     } else if (reportType === "a1") {

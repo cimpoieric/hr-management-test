@@ -12,6 +12,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
+import { getAppSettings } from "@/lib/appSettings";
+import { decrypt } from "@/lib/encryption";
 import * as XLSX from "xlsx";
 
 // ─── Coloane disponibile ─────────────────────────────────────────────────────
@@ -27,7 +29,7 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "id", header: "ID", width: 8 },
   { key: "lastName", header: "Nume", width: 18 },
   { key: "firstName", header: "Prenume", width: 18 },
-  { key: "cnp", header: "CNP", width: 16 },
+  { key: "cnp", header: "CNP", width: 15 },
   { key: "seriesCI", header: "Serie CI", width: 8 },
   { key: "numberCI", header: "Număr CI", width: 12 },
   { key: "email", header: "Email", width: 28 },
@@ -39,7 +41,7 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "city", header: "Oraș", width: 16 },
   { key: "country", header: "Țară", width: 10 },
   { key: "hiredAt", header: "Data angajării", width: 16, format: (v) => v ? new Date(v as string).toLocaleDateString("ro-RO") : "" },
-  { key: "iban", header: "IBAN", width: 28 },
+  { key: "iban", header: "IBAN", width: 25 },
   { key: "bankName", header: "Bancă", width: 18 },
   { key: "salaryType", header: "Tip plată", width: 14 },
   { key: "salaryAmount", header: "Sumă brută", width: 14 },
@@ -54,6 +56,15 @@ function getClientIp(request: NextRequest): string {
     request.headers.get("x-real-ip") ??
     "unknown"
   );
+}
+
+function safeDecrypt(value: string | null | undefined): string {
+  if (!value) return "";
+  try {
+    return decrypt(value);
+  } catch {
+    return value;
+  }
 }
 
 // ─── POST handler ────────────────────────────────────────────────────────────
@@ -87,6 +98,7 @@ export async function POST(request: NextRequest) {
       ];
 
     // Query employees
+    const appSettings = await getAppSettings();
     const employees = await prisma.employee.findMany({
       where: { id: { in: employeeIds } },
       orderBy: { lastName: "asc" },
@@ -112,6 +124,7 @@ export async function POST(request: NextRequest) {
     const rows = employees.map((emp) => {
       const flatEmp: Record<string, unknown> = {
         ...emp,
+        iban: safeDecrypt(emp.iban),
         companyName: emp.company?.name ?? "—",
       };
 
@@ -125,13 +138,37 @@ export async function POST(request: NextRequest) {
     });
 
     // Crează workbook
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const metadataRows = [
+      [`Raport contabilitate — ${appSettings.companyName || "Companie"}`],
+      [`CUI/Reg. Com.: ${appSettings.companyCuiReg || "-"}`],
+      [`Generat la: ${new Date().toLocaleString("ro-RO")} (${appSettings.timezone})`],
+      [],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet([...metadataRows, headers, ...rows]);
 
     // Setează lățimi coloane
     ws["!cols"] = activeColumns.map((c) => ({ wch: c.width }));
 
+    // Force text cell type for CNP + IBAN columns so Excel won't use scientific notation.
+    const cnpColIndex = activeColumns.findIndex((c) => c.key === "cnp");
+    const ibanColIndex = activeColumns.findIndex((c) => c.key === "iban");
+    const dataStartRow = metadataRows.length + 1;
+    if (cnpColIndex >= 0 || ibanColIndex >= 0) {
+      for (let rowOffset = 0; rowOffset < rows.length; rowOffset++) {
+        const r = dataStartRow + rowOffset;
+        if (cnpColIndex >= 0) {
+          const ref = XLSX.utils.encode_cell({ r, c: cnpColIndex });
+          if (ws[ref]) ws[ref].t = "s";
+        }
+        if (ibanColIndex >= 0) {
+          const ref = XLSX.utils.encode_cell({ r, c: ibanColIndex });
+          if (ws[ref]) ws[ref].t = "s";
+        }
+      }
+    }
+
     // Setează înălțime header
-    ws["!rows"] = [{ hpt: 22 }];
+    ws["!rows"] = [{ hpt: 20 }, { hpt: 18 }, { hpt: 18 }, { hpt: 10 }, { hpt: 22 }];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Angajati");

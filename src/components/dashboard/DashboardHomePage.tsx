@@ -24,6 +24,7 @@ type DashboardStats = {
   pendingImports: number;
   monthlySalaryCost: number;
   monthlySalaryEmployeeCount: number;
+  documentAlertDays: number;
 };
 
 type DeploymentCountry = {
@@ -49,6 +50,7 @@ const EMPTY_STATS: DashboardStats = {
   pendingImports: 0,
   monthlySalaryCost: 0,
   monthlySalaryEmployeeCount: 0,
+  documentAlertDays: 30,
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -185,7 +187,7 @@ function DocumentStatus({ stats }: { stats: DashboardStats }) {
               Expiră curând
             </p>
             <p className="text-xs text-amber-600">
-              {stats.expiringSoonDocuments} documente în următoarele 30 zile
+              {stats.expiringSoonDocuments} documente în următoarele {stats.documentAlertDays} zile
             </p>
           </div>
           <span className="text-lg font-bold text-amber-700 shrink-0">
@@ -278,6 +280,7 @@ export default function DashboardHomePage() {
           pendingImports: Number(data.stats?.pendingImports ?? 0),
           monthlySalaryCost: Number(data.stats?.monthlySalaryCost ?? 0),
           monthlySalaryEmployeeCount: Number(data.stats?.monthlySalaryEmployeeCount ?? 0),
+          documentAlertDays: Number(data.stats?.documentAlertDays ?? 30),
         });
         setDeploymentsByCountry(Array.isArray(data.deploymentsByCountry) ? data.deploymentsByCountry : []);
         setRecentActivity(Array.isArray(data.recentActivity) ? data.recentActivity : []);

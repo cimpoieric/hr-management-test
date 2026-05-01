@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { getAppSettings } from "@/lib/appSettings";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
@@ -10,7 +11,11 @@ export async function GET(request: NextRequest) {
 
   try {
     const now = new Date();
+    const settings = await getAppSettings();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const expiringDocLimit = new Date(
+      now.getTime() + settings.alertExpiredDocumentsDays * 24 * 60 * 60 * 1000
+    );
 
     const [
       totalEmployees,
@@ -36,7 +41,7 @@ export async function GET(request: NextRequest) {
           expiryDate: {
             not: null,
             gte: now,
-            lte: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+            lte: expiringDocLimit,
           },
         },
       }),
@@ -96,6 +101,7 @@ export async function GET(request: NextRequest) {
         pendingImports,
         monthlySalaryCost: salaryAgg._sum.salaryAmount ?? 0,
         monthlySalaryEmployeeCount: salaryAgg._count._all ?? 0,
+        documentAlertDays: settings.alertExpiredDocumentsDays,
       },
       deploymentsByCountry,
       recentActivity,

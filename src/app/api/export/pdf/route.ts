@@ -12,8 +12,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
-import { generatePDF } from "@/lib/pdfGenerator";
 import { logAuditFF } from "@/lib/audit";
+import { getAppSettings } from "@/lib/appSettings";
+import { decrypt } from "@/lib/encryption";
+import { PDFDocument, StandardFonts, rgb, type PDFPage } from "pdf-lib";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -21,6 +23,15 @@ function getClientIp(request: NextRequest): string {
     request.headers.get("x-real-ip") ??
     "unknown"
   );
+}
+
+function safeDecrypt(value: string | null | undefined): string {
+  if (!value) return "—";
+  try {
+    return decrypt(value);
+  } catch {
+    return value;
+  }
 }
 
 // ─── POST handler ────────────────────────────────────────────────────────────
@@ -45,7 +56,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Maxim 5000 angajați per export" }, { status: 400 });
     }
 
-    const exportType = body.type === "detailed" ? "detailed" : "list";
+    const appSettings = await getAppSettings();
     // Query employees
     const employees = await prisma.employee.findMany({
       where: { id: { in: employeeIds } },
@@ -60,63 +71,130 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Angajați negăsiți" }, { status: 404 });
     }
 
-    // Construiește tabel
-    const headers =
-      exportType === "detailed"
-        ? ["ID", "Nume", "Prenume", "CNP", "Email", "Telefon", "Functie", "Status", "Firma", "Oras", "Data Angajarii", "IBAN", "Banca", "Tip plata", "Suma bruta", "Moneda", "Valabil de la", "Doc.", "Det."]
-        : ["Nume", "Prenume", "CNP", "IBAN", "Banca", "Tip plata", "Suma bruta", "Moneda", "Status", "Firma"];
+    const headers = [
+      "Nr.",
+      "Nume",
+      "Prenume",
+      "CNP",
+      "IBAN",
+      "Bancă",
+      "Tip plată",
+      "Sumă brută",
+      "Monedă",
+      "Status",
+    ];
+    const rows = employees.map((emp, idx) => [
+      String(idx + 1),
+      emp.lastName ?? "—",
+      emp.firstName ?? "—",
+      emp.cnp ?? "—",
+      safeDecrypt(emp.iban),
+      emp.bankName ?? "—",
+      emp.salaryType ?? "—",
+      typeof emp.salaryAmount === "number" ? String(emp.salaryAmount) : "—",
+      emp.salaryCurrency ?? "—",
+      emp.status === "ACTIVE" ? "Activ" : "Terminat",
+    ]);
 
-    const colWidths =
-      exportType === "detailed"
-        ? [6, 14, 14, 14, 18, 12, 12, 10, 14, 10, 12, 20, 12, 10, 12, 10, 12, 6, 6]
-        : [14, 14, 14, 20, 12, 10, 12, 10, 10, 14];
+    const pdfDoc = await PDFDocument.create();
+    const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    const rows = employees.map((emp) => {
-      if (exportType === "detailed") {
-        return [
-          String(emp.id),
-          emp.lastName,
-          emp.firstName,
-          emp.cnp ?? "—",
-          emp.email ?? "—",
-          emp.phone ?? "—",
-          emp.position ?? "—",
-          emp.status === "ACTIVE" ? "Activ" : "Terminat",
-          emp.company?.name ?? "—",
-          emp.city ?? "—",
-          emp.hiredAt ? new Date(emp.hiredAt).toLocaleDateString("ro-RO") : "—",
-          emp.iban ?? "—",
-          emp.bankName ?? "—",
-          emp.salaryType ?? "—",
-          typeof emp.salaryAmount === "number" ? String(emp.salaryAmount) : "—",
-          emp.salaryCurrency ?? "—",
-          emp.salaryStartDate ? new Date(emp.salaryStartDate).toLocaleDateString("ro-RO") : "—",
-          String(emp._count.documents),
-          String(emp._count.deployments),
-        ];
+    const pageWidth = 842; // landscape-like A4 width in points
+    const pageHeight = 595; // landscape-like A4 height
+    const margin = 24;
+    const rowHeight = 18;
+    const headerYTop = pageHeight - margin;
+    const generatedAt = new Date().toLocaleString("ro-RO");
+    const title = `Raport salarial — ${appSettings.companyName || "Companie"}`;
+    const tableColWidths = [28, 78, 78, 92, 128, 78, 64, 66, 44, 58];
+
+    let page = pdfDoc.addPage([pageWidth, pageHeight]);
+    let y = headerYTop;
+
+    const drawPageHeader = (targetPage: PDFPage) => {
+      targetPage.drawText(title, {
+        x: margin,
+        y: pageHeight - margin,
+        size: 12,
+        font: fontBold,
+        color: rgb(0.12, 0.12, 0.12),
+      });
+      targetPage.drawText(`${appSettings.companyCuiReg || "CUI nedefinit"} · ${generatedAt}`, {
+        x: margin,
+        y: pageHeight - margin - 14,
+        size: 9,
+        font: fontRegular,
+        color: rgb(0.35, 0.35, 0.35),
+      });
+    };
+
+    const drawFooter = (targetPage: PDFPage, totalRows: number) => {
+      targetPage.drawText(`Generat la ${generatedAt} — Total angajați: ${totalRows}`, {
+        x: margin,
+        y: 10,
+        size: 9,
+        font: fontRegular,
+        color: rgb(0.35, 0.35, 0.35),
+      });
+    };
+
+    const drawHeaderRow = (targetPage: PDFPage, rowY: number) => {
+      let x = margin;
+      for (let i = 0; i < headers.length; i++) {
+        const label = headers[i] ?? "";
+        const width = tableColWidths[i] ?? 50;
+        targetPage.drawRectangle({
+          x,
+          y: rowY - rowHeight + 2,
+          width,
+          height: rowHeight,
+          color: rgb(0.92, 0.94, 0.97),
+        });
+        targetPage.drawText(label, {
+          x: x + 3,
+          y: rowY - 11,
+          size: 8,
+          font: fontBold,
+          color: rgb(0.15, 0.15, 0.15),
+        });
+        x += width;
       }
+    };
 
-      return [
-        emp.lastName,
-        emp.firstName,
-        emp.cnp ?? "—",
-        emp.iban ?? "—",
-        emp.bankName ?? "—",
-        emp.salaryType ?? "—",
-        typeof emp.salaryAmount === "number" ? String(emp.salaryAmount) : "—",
-        emp.salaryCurrency ?? "—",
-        emp.status === "ACTIVE" ? "Activ" : "Terminat",
-        emp.company?.name ?? "—",
-      ];
-    });
+    drawPageHeader(page);
+    y = pageHeight - margin - 34;
+    drawHeaderRow(page, y);
+    y -= rowHeight;
 
-    // Generează PDF
-    const pdfBytes = generatePDF({
-      title: `Raport Angajati — ${exportType === "detailed" ? "Detaliat" : "Lista"}`,
-      header: `HR Management — Export din ${new Date().toLocaleDateString("ro-RO")} — ${employees.length} angajati`,
-      footer: `Generat de ${user.email} | pagina`,
-      tables: [{ headers, rows, colWidths }],
-    });
+    for (let r = 0; r < rows.length; r++) {
+      if (y < 30) {
+        drawFooter(page, rows.length);
+        page = pdfDoc.addPage([pageWidth, pageHeight]);
+        drawPageHeader(page);
+        y = pageHeight - margin - 34;
+        drawHeaderRow(page, y);
+        y -= rowHeight;
+      }
+      const row = rows[r] ?? [];
+      let x = margin;
+      for (let c = 0; c < headers.length; c++) {
+        const width = tableColWidths[c] ?? 50;
+        const cellText = String(row[c] ?? "—").slice(0, 40);
+        page.drawText(cellText, {
+          x: x + 3,
+          y: y - 11,
+          size: 8,
+          font: fontRegular,
+          color: rgb(0.12, 0.12, 0.12),
+        });
+        x += width;
+      }
+      y -= rowHeight;
+    }
+    drawFooter(page, rows.length);
+
+    const pdfBytes = await pdfDoc.save();
 
     // Audit log
     logAuditFF({
@@ -125,7 +203,7 @@ export async function POST(request: NextRequest) {
       userId: user.userId,
       userRole: user.role,
       ipAddress: getClientIp(request),
-      newValues: { employeeCount: employees.length, type: exportType },
+      newValues: { employeeCount: employees.length, type: "accounting" },
     });
 
     return new NextResponse(Buffer.from(pdfBytes), {

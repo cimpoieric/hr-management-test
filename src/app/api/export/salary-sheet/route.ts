@@ -4,6 +4,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
+import { getAppSettings } from "@/lib/appSettings";
+import { decrypt } from "@/lib/encryption";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -20,8 +22,17 @@ function statusLabel(status: string): string {
 }
 
 function csvEscape(value: string): string {
-  if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  if (/[;"\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
   return value;
+}
+
+function safeDecrypt(value: string | null | undefined): string {
+  if (!value) return "";
+  try {
+    return decrypt(value);
+  } catch {
+    return value;
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -54,6 +65,7 @@ export async function POST(request: NextRequest) {
       ];
     }
 
+    const appSettings = await getAppSettings();
     const employees = await prisma.employee.findMany({
       where,
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -95,7 +107,7 @@ export async function POST(request: NextRequest) {
         emp.lastName,
         emp.firstName,
         emp.cnp ?? "",
-        emp.iban ?? "",
+        safeDecrypt(emp.iban),
         emp.bankName ?? "",
         tipPlata,
         suma,
@@ -122,9 +134,25 @@ export async function POST(request: NextRequest) {
     });
 
     if (format === "csv") {
+      const meta = [
+        `Raport contabilitate - ${appSettings.companyName || "Companie"}`,
+        `CUI/Reg. Com.: ${appSettings.companyCuiReg || "-"}`,
+        `Generat la: ${new Date().toLocaleString("ro-RO")} (${appSettings.timezone})`,
+        "",
+      ];
       const lines = [
-        headers.map(csvEscape).join(","),
-        ...rows.map((r) => r.map((c) => csvEscape(c)).join(",")),
+        ...meta,
+        headers.map(csvEscape).join(";"),
+        ...rows.map((r) =>
+          r
+            .map((c, idx) => {
+              if (idx === 2 || idx === 3) {
+                return csvEscape(`="${String(c)}"`);
+              }
+              return csvEscape(String(c));
+            })
+            .join(";")
+        ),
       ];
       const csv = "\uFEFF" + lines.join("\r\n");
       const buf = Buffer.from(csv, "utf8");
@@ -138,13 +166,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const aoa = [headers, ...rows];
+    const aoa = [
+      [`Raport contabilitate - ${appSettings.companyName || "Companie"}`],
+      [`CUI/Reg. Com.: ${appSettings.companyCuiReg || "-"}`],
+      [`Generat la: ${new Date().toLocaleString("ro-RO")} (${appSettings.timezone})`],
+      [],
+      headers,
+      ...rows,
+    ];
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     ws["!cols"] = [
       { wch: 20 },
       { wch: 20 },
-      { wch: 18 },
-      { wch: 32 },
+      { wch: 15 },
+      { wch: 25 },
       { wch: 20 },
       { wch: 14 },
       { wch: 12 },
@@ -152,6 +187,14 @@ export async function POST(request: NextRequest) {
       { wch: 14 },
       { wch: 14 },
     ];
+
+    // Force CNP + IBAN as text cells (Excel must not auto-convert).
+    for (let rowIndex = 5; rowIndex < aoa.length; rowIndex++) {
+      const cnpCell = XLSX.utils.encode_cell({ r: rowIndex, c: 2 });
+      const ibanCell = XLSX.utils.encode_cell({ r: rowIndex, c: 3 });
+      if (ws[cnpCell]) ws[cnpCell].t = "s";
+      if (ws[ibanCell]) ws[ibanCell].t = "s";
+    }
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Salarii");
