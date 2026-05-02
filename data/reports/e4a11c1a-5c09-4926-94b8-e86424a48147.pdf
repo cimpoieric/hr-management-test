@@ -20,7 +20,7 @@ endobj
 endobj
 
 5 0 obj
-<< /Length 2121 >>
+<< /Length 2136 >>
 stream
 0.118 0.169 0.231 rg 50 757 495 35 re f
 1 1 1 rg
@@ -28,12 +28,12 @@ BT /F2 14 Tf 58 772 Td () Tj ET
 1 1 1 rg
 BT /F1 11 Tf 200 776 Td (Raport pe tara) Tj ET
 0.8 0.8 0.8 rg
-BT /F1 9 Tf 535 776 Td (01.05.2026) Tj ET
+BT /F1 9 Tf 535 776 Td (02.05.2026) Tj ET
 2 w
 0.231 0.51 0.965 RG
 50 754 m 545 754 l S
 0.118 0.169 0.231 rg
-BT /F2 11 Tf 50 730 Td (Tara: Germania \(DE\)) Tj ET
+BT /F2 11 Tf 50 730 Td (Tara: Olanda \(NL\)) Tj ET
 1.5 w
 0.231 0.51 0.965 RG
 50 728 m 250 728 l S
@@ -52,7 +52,7 @@ BT /F1 9 Tf 190 678 Td (0) Tj ET
 0.376 0.431 0.49 rg
 BT /F2 9 Tf 50 664 Td (Data raport:) Tj ET
 0.059 0.09 0.102 rg
-BT /F1 9 Tf 190 664 Td (01.05.2026) Tj ET
+BT /F1 9 Tf 190 664 Td (02.05.2026) Tj ET
 0.118 0.169 0.231 rg
 BT /F2 11 Tf 50 640 Td (Lista angajati detasati) Tj ET
 1.5 w
@@ -73,15 +73,15 @@ BT /F2 8 Tf 413.11764705882354 616 Td (Oras) Tj ET
 BT /F2 8 Tf 490.7647058823529 616 Td (Status) Tj ET
 1 1 1 rg 50 598 495 14 re f
 0.059 0.09 0.102 rg
-BT /F1 8 Tf 54 602 Td (Ionescu) Tj ET
+BT /F1 8 Tf 54 602 Td (Georgescu) Tj ET
 0.059 0.09 0.102 rg
-BT /F1 8 Tf 141.35294117647058 602 Td (Maria) Tj ET
+BT /F1 8 Tf 141.35294117647058 602 Td (Andrei) Tj ET
 0.059 0.09 0.102 rg
-BT /F1 8 Tf 219 602 Td (EuroWork HR Solutions) Tj ET
+BT /F1 8 Tf 219 602 Td (BuildTeam International) Tj ET
 0.059 0.09 0.102 rg
-BT /F1 8 Tf 325.7647058823529 602 Td (—) Tj ET
+BT /F1 8 Tf 325.7647058823529 602 Td (necalificat) Tj ET
 0.059 0.09 0.102 rg
-BT /F1 8 Tf 413.11764705882354 602 Td (München) Tj ET
+BT /F1 8 Tf 413.11764705882354 602 Td (amsterdam) Tj ET
 0.059 0.09 0.102 rg
 BT /F1 8 Tf 490.7647058823529 602 Td (Activ) Tj ET
 0.3 w
@@ -112,5 +112,5 @@ xref
 trailer
 << /Size 7 /Root 1 0 R >>
 startxref
-2623
+2638
 %%EOF
