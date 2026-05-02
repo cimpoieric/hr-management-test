@@ -1,0 +1,87 @@
+{
+  "nav": {
+    "dashboard": "Panou de control",
+    "employees": "Angajați",
+    "documents": "Documente",
+    "deployments": "Detașări",
+    "imports": "Importuri",
+    "reports": "Rapoarte",
+    "export": "Export",
+    "pay": "Plată",
+    "settings": "Setări",
+    "companies": "Firme",
+    "countries": "Țări",
+    "users": "Utilizatori",
+    "backup": "Backup"
+  },
+  "dashboard": {
+    "title": "Panou de control",
+    "overviewLine": "Prezentare generală — date actualizate la {date}",
+    "employeeBreakdownTitle": "Distribuție angajați",
+    "recentActivity": "Activitate recentă",
+    "last7Days": "Ultimele 7 zile",
+    "noRecentActivity": "Nu există activitate recentă.",
+    "documentsHealthyTitle": "Valabile",
+    "documentsHealthyHint": "Toate celelalte documente sunt în regulă"
+  },
+  "documents": {
+    "status": {
+      "VALID": "Valabil",
+      "EXPIRING_SOON": "Expiră curând",
+      "EXPIRED": "Expirat",
+      "PENDING": "În așteptare"
+    },
+    "filterAllTypes": "Toate tipurile",
+    "filterAllStatuses": "Toate statusurile"
+  },
+  "import": {
+    "status": {
+      "PENDING": "În așteptare",
+      "APPROVED": "Aprobat",
+      "REJECTED": "Respins",
+      "DRAFT": "Draft"
+    }
+  },
+  "audit": {
+    "allActions": "Toate acțiunile",
+    "allEntities": "Toate entitățile",
+    "actions": {
+      "CREATE": "Creare",
+      "UPDATE": "Actualizare",
+      "DELETE": "Ștergere",
+      "VIEW": "Vizualizare",
+      "EXPORT_EXCEL": "Export Excel",
+      "EXPORT_PDF": "Export PDF",
+      "REPORT_GENERATE": "Raport generat",
+      "LOGIN": "Autentificare",
+      "LOGOUT": "Deconectare",
+      "LOGIN_FAILED": "Autentificare eșuată",
+      "IMPORT_APPROVE": "Aprobare import",
+      "IMPORT_REJECT": "Respingere import",
+      "BACKUP": "Copie de siguranță",
+      "PASSWORD_CHANGE": "Schimbare parolă",
+      "SETTINGS_CHANGE": "Modificare setări",
+      "STATUS_CHANGE": "Schimbare status",
+      "REVIEW": "Revizuire"
+    },
+    "entities": {
+      "Employee": "Angajat",
+      "Document": "Document",
+      "Deployment": "Detașare",
+      "User": "Utilizator",
+      "Report": "Raport",
+      "System": "Sistem",
+      "PendingImport": "Import în așteptare",
+      "Company": "Firmă",
+      "Country": "Țară",
+      "AuditLog": "Jurnal audit",
+      "Unknown": "Necunoscut"
+    }
+  },
+  "common": {
+    "relativeNow": "Acum",
+    "relativeMins": "Acum {n} min",
+    "relativeHours": "Acum {n} ore",
+    "relativeDays": "Acum {n} zile"
+  }
+}
