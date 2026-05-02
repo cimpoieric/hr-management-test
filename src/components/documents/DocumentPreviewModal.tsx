@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { X, Download, Loader2 } from "lucide-react";
 
 export type DocumentPreviewModalDocument = {
   id: number;
   fileName: string;
   mimeType: string;
-  /** URL pentru <img> / <iframe> (ex. /api/documents/1/file) */
+  /** URL API (ex. /api/documents/1/file) — încărcat cu credentials, apoi afișat ca blob. */
   url: string;
   downloadUrl?: string;
   employee?: { firstName: string; lastName: string } | null;
@@ -36,34 +36,87 @@ function employeeLabel(doc: DocumentPreviewModalDocument): string {
   return a.length > 0 ? a : "—";
 }
 
+function revokeRefUrl(ref: { current: string | null }): void {
+  if (ref.current) {
+    URL.revokeObjectURL(ref.current);
+    ref.current = null;
+  }
+}
+
 export function DocumentPreviewModal({
   document: doc,
   onClose,
 }: DocumentPreviewModalProps) {
   const [assetLoaded, setAssetLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** URL blob pentru <img> / <iframe> (fetch cu cookie httpOnly). */
+  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
   const needsAssetLoader = doc != null && (isPdf(doc) || isPreviewableImage(doc));
 
   useEffect(() => {
+    revokeRefUrl(blobUrlRef);
+    setPreviewSrc(null);
+
     if (!doc) {
       setAssetLoaded(false);
       setLoadError(null);
       return;
     }
+
     setLoadError(null);
-    if (isPdf(doc) || isPreviewableImage(doc)) {
-      setAssetLoaded(false);
-    } else {
+
+    if (!isPdf(doc) && !isPreviewableImage(doc)) {
       setAssetLoaded(true);
+      return;
     }
+
+    setAssetLoaded(false);
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const res = await fetch(doc.url, { credentials: "include", cache: "no-store" });
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          if (!cancelled) {
+            setLoadError(data.error ?? `Eroare la încărcare (${res.status})`);
+            setAssetLoaded(true);
+          }
+          return;
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        revokeRefUrl(blobUrlRef);
+        const objectUrl = URL.createObjectURL(blob);
+        blobUrlRef.current = objectUrl;
+        setPreviewSrc(objectUrl);
+      } catch {
+        if (!cancelled) {
+          setLoadError("Eroare de rețea la încărcarea previzualizării.");
+          setAssetLoaded(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [doc]);
+
+  useEffect(() => {
+    return () => {
+      revokeRefUrl(blobUrlRef);
+    };
+  }, []);
 
   const handleDownload = useCallback(async () => {
     if (!doc) return;
     const url = doc.downloadUrl ?? `/api/documents/${doc.id}/download`;
     try {
-      const res = await fetch(url, { credentials: "include" });
+      const res = await fetch(url, { credentials: "include", cache: "no-store" });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         alert(data.error ?? "Eroare la descărcare");
@@ -85,7 +138,7 @@ export function DocumentPreviewModal({
 
   if (!doc) return null;
 
-  const showSpinner = needsAssetLoader && !assetLoaded && !loadError;
+  const showSpinner = needsAssetLoader && (!previewSrc || (!assetLoaded && !loadError));
 
   return (
     <div
@@ -147,10 +200,10 @@ export function DocumentPreviewModal({
             </div>
           )}
 
-          {!loadError && isPreviewableImage(doc) && (
+          {!loadError && previewSrc != null && isPreviewableImage(doc) && (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={doc.url}
+              src={previewSrc}
               alt={doc.fileName}
               className="mx-auto max-h-[70vh] max-w-full object-contain"
               onLoad={() => {
@@ -164,9 +217,9 @@ export function DocumentPreviewModal({
             />
           )}
 
-          {!loadError && isPdf(doc) && (
+          {!loadError && previewSrc != null && isPdf(doc) && (
             <iframe
-              src={doc.url}
+              src={previewSrc}
               width="100%"
               height={500}
               className="w-full rounded border-0 bg-white"

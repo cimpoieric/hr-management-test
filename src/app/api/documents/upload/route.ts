@@ -7,7 +7,6 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { canEditEmployee } from "@/lib/permissions";
@@ -22,6 +21,16 @@ import {
   initStorage,
 } from "@/lib/storage";
 import { calculateStatus } from "@/lib/documentStatus";
+import { DOCUMENT_TYPES } from "@/lib/documentConstants";
+
+function parsePositiveIntFormValue(raw: unknown): number | null {
+  if (raw == null) return null;
+  const s = typeof raw === "string" ? raw.trim() : String(raw).trim();
+  if (!/^\d+$/.test(s)) return null;
+  const n = Number.parseInt(s, 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
 
 export async function POST(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request, [
@@ -40,34 +49,24 @@ export async function POST(request: NextRequest) {
 
     const file = formData.get("file") as File | null;
     const employeeIdRaw = formData.get("employeeId");
-    const employeeIdStr =
-      typeof employeeIdRaw === "string"
-        ? employeeIdRaw.trim()
-        : employeeIdRaw != null
-          ? String(employeeIdRaw).trim()
-          : "";
-
-    const employeeIdParsed = z
-      .string()
-      .min(1, { message: "Angajatul este obligatoriu" })
-      .regex(/^\d+$/, {
-        message: "Selectați un angajat valid din listă.",
-      })
-      .transform((s) => parseInt(s, 10))
-      .pipe(z.number().int().positive({ message: "ID angajat invalid." }))
-      .safeParse(employeeIdStr);
-
-    if (!employeeIdParsed.success) {
-      const msg =
-        employeeIdParsed.error.issues[0]?.message ?? "Angajatul este obligatoriu";
+    const employeeId = parsePositiveIntFormValue(employeeIdRaw);
+    if (employeeId == null) {
       return NextResponse.json(
-        { error: msg, field: "employeeId" },
+        {
+          error: "Selectați un angajat valid din listă.",
+          field: "employeeId",
+        },
         { status: 400 }
       );
     }
 
-    const employeeId = employeeIdParsed.data;
-    const type = formData.get("type") as string;
+    const typeRaw = formData.get("type");
+    const type =
+      typeof typeRaw === "string"
+        ? typeRaw.trim()
+        : typeRaw != null
+          ? String(typeRaw).trim()
+          : "";
     const numberRaw = (formData.get("number") as string) ?? "";
     const number = numberRaw.trim() || null;
     const issueDateStr = ((formData.get("issueDate") as string) ?? "").trim() || null;
@@ -84,7 +83,10 @@ export async function POST(request: NextRequest) {
 
     if (!isValidDocumentType(type)) {
       return NextResponse.json(
-        { error: "Tip document invalid", validTypes: ["CONTRACT", "ID", "MEDICAL", "A1", "AUTHORIZATION", "VISA", "OTHER"] },
+        {
+          error: "Tip document invalid",
+          validTypes: [...DOCUMENT_TYPES],
+        },
         { status: 400 }
       );
     }
@@ -102,15 +104,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Data expirării este obligatorie" }, { status: 400 });
     }
 
-    // Verifică employee există
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
       select: { id: true, firstName: true, lastName: true },
     });
     if (!employee) {
       return NextResponse.json(
-        { error: "Angajat negăsit" },
-        { status: 404 }
+        { error: "Angajatul nu există", field: "employeeId" },
+        { status: 400 }
       );
     }
 
@@ -186,12 +187,19 @@ export async function POST(request: NextRequest) {
 
     // ─── Audit log ───────────────────────────────────────────────
 
+    // `AuditLog.entityId` → FK către `Employee.id` (nu ID document).
     await prisma.auditLog.create({
       data: {
         action: "CREATE",
         entity: "Document",
-        entityId: document.id,
-        newValues: JSON.stringify({ type, employeeId, fileName: file.name, status }),
+        entityId: employeeId,
+        newValues: JSON.stringify({
+          documentId: document.id,
+          type,
+          employeeId,
+          fileName: file.name,
+          status,
+        }),
       },
     });
 

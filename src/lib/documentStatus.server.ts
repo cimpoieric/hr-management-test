@@ -53,9 +53,15 @@ export async function updateDocumentStatuses(): Promise<{
           data: {
             action: "STATUS_CHANGE",
             entity: "Document",
-            entityId: doc.id,
-            oldValues: JSON.stringify({ status: doc.status }),
-            newValues: JSON.stringify({ status: "EXPIRED" }),
+            entityId: doc.employeeId,
+            oldValues: JSON.stringify({
+              documentId: doc.id,
+              status: doc.status,
+            }),
+            newValues: JSON.stringify({
+              documentId: doc.id,
+              status: "EXPIRED",
+            }),
           },
         });
       }

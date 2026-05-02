@@ -84,8 +84,9 @@ export async function DELETE(
       data: {
         action: "DELETE",
         entity: "Document",
-        entityId: documentId,
+        entityId: document.employeeId,
         oldValues: JSON.stringify({
+          documentId,
           fileName: document.fileName,
           type: document.type,
           employeeId: document.employeeId,

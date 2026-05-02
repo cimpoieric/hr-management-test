@@ -106,12 +106,13 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
     };
   }, [needsEmployeePicker]);
 
-  const resolvedDocumentType: DocumentType = isValidDocumentType(type) ? type : "CONTRACT";
+  /** Valoare sigură pentru `<select>` — coduri DOCUMENT_TYPES, nu id numerice. */
+  const documentTypeValue: DocumentType = isValidDocumentType(type)
+    ? type
+    : "CONTRACT";
 
   useEffect(() => {
-    if (!isValidDocumentType(type)) {
-      setType("CONTRACT");
-    }
+    if (!isValidDocumentType(type)) setType("CONTRACT");
   }, [type]);
 
   const filteredEmployees = useMemo(() => {
@@ -201,7 +202,7 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
       const formData = new FormData();
       formData.append("file", file);
       formData.append("employeeId", String(uploadEmployeeId));
-      formData.append("type", resolvedDocumentType);
+      formData.append("type", documentTypeValue);
       formData.append("number", number.trim());
       formData.append("issueDate", issueDate);
       formData.append("expiryDate", expiryDate);
@@ -400,9 +401,8 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
             </label>
             <select
               id="upload-document-type"
-              key="upload-document-type-select"
               name="documentType"
-              value={resolvedDocumentType}
+              value={documentTypeValue}
               onChange={(e) => {
                 const v = e.target.value;
                 setType(isValidDocumentType(v) ? v : "CONTRACT");

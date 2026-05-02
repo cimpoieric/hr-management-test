@@ -44,6 +44,7 @@ export type DocumentListFilteredStats = {
 
 interface DocumentItem {
   id: number;
+  employeeId: number;
   type: string;
   number: string | null;
   fileName: string;
@@ -101,6 +102,7 @@ function mapApiDocument(raw: Record<string, unknown>): DocumentItem {
 
   return {
     id: Number(raw.id),
+    employeeId: Number(raw.employeeId ?? raw.employee_id ?? 0),
     type: String(raw.type ?? "").trim(),
     number: numberVal,
     fileName: String(raw.fileName ?? raw.file_name ?? ""),
@@ -262,7 +264,18 @@ export function DocumentList({
           ? `${emp.firstName} ${emp.lastName} ${emp.lastName} ${emp.firstName}`.toLowerCase()
           : "";
         const file = doc.fileName.toLowerCase();
-        if (!full.includes(q) && !file.includes(q)) return false;
+        const num = (doc.number ?? "").toLowerCase();
+        const typeLabel = getDocumentTypeLabel(doc.type).toLowerCase();
+        const empIdStr = String(doc.employeeId || emp?.id || "").toLowerCase();
+        if (
+          !full.includes(q) &&
+          !file.includes(q) &&
+          !num.includes(q) &&
+          !typeLabel.includes(q) &&
+          !empIdStr.includes(q)
+        ) {
+          return false;
+        }
       }
       return true;
     });
@@ -300,7 +313,10 @@ export function DocumentList({
 
   async function handleDownload(doc: DocumentItem) {
     try {
-      const res = await fetch(doc.downloadUrl, { credentials: "include" });
+      const res = await fetch(doc.downloadUrl, {
+        credentials: "include",
+        cache: "no-store",
+      });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         alert(data.error ?? "Eroare la descărcare");
