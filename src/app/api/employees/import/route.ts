@@ -8,7 +8,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+import { prismaTyped } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { canApproveImport } from "@/lib/permissions";
 import { dedupeEmployee } from "@/lib/dedupe";
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
     const results: ImportRowResult[] = [];
 
     const allCnps = items.map((i) => i.cnp);
-    const existingEmployees = await prisma.employee.findMany({
+    const existingEmployees = await prismaTyped.employee.findMany({
       where: { cnp: { in: allCnps } },
     });
 
@@ -139,7 +140,7 @@ export async function POST(request: NextRequest) {
             const ibanEncrypted = item.iban ? encrypt(item.iban) : null;
             const ibanHash = item.iban ? hashSha256(item.iban) : null;
 
-            const created = await prisma.employee.create({
+            const created = await prismaTyped.employee.create({
               data: {
                 cnp: item.cnp,
                 cnpEncrypted,
@@ -153,9 +154,9 @@ export async function POST(request: NextRequest) {
                 bankName: item.bankName ?? null,
                 address: item.address ?? null,
                 city: item.city ?? null,
-                ...(item.countryId != null ? { countryId: item.countryId } : {}),
                 companyId: item.companyId,
-              },
+                ...(item.countryId != null ? { countryId: item.countryId } : {}),
+              } as unknown as Prisma.EmployeeUncheckedCreateInput,
             });
             results.push({
               index: i,
@@ -183,7 +184,7 @@ export async function POST(request: NextRequest) {
             const ibanEncrypted = item.iban ? encrypt(item.iban) : null;
             const ibanHash = item.iban ? hashSha256(item.iban) : null;
 
-            const updated = await prisma.employee.update({
+            const updated = await prismaTyped.employee.update({
               where: { id: existing!.id },
               data: {
                 firstName: item.firstName,
@@ -195,9 +196,9 @@ export async function POST(request: NextRequest) {
                 bankName: item.bankName ?? null,
                 address: item.address ?? null,
                 city: item.city ?? null,
-                countryId: item.countryId ?? null,
                 companyId: item.companyId,
-              },
+                countryId: item.countryId ?? null,
+              } as unknown as Prisma.EmployeeUncheckedUpdateInput,
             });
             results.push({
               index: i,

@@ -18,7 +18,7 @@ import { decrypt } from "@/lib/encryption";
 import { salaryAmountToJson } from "@/lib/salaryFields";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { registerRobotoFonts } from "@/lib/pdf/registerRobotoForJsPdf";
+import { addSettingsLogo, registerPdfFontWithFallback } from "@/lib/pdf/jsPdfBranding";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -82,10 +82,10 @@ export async function POST(request: NextRequest) {
       "Prenume",
       "CNP",
       "IBAN",
-      "Bancă",
-      "Tip plată",
-      "Sumă brută",
-      "Monedă",
+      "Banca",
+      "Tip plata",
+      "Suma bruta",
+      "Moneda",
       "Status",
     ];
     const rows = employees.map((emp, idx) => [
@@ -105,30 +105,34 @@ export async function POST(request: NextRequest) {
     ]);
 
     const generatedAt = new Date().toLocaleString("ro-RO");
-    const title = `Raport salarial — ${appSettings.companyName || "Companie"}`;
+    const companyLabel = (appSettings.companyName || "").trim() || "Companie";
     const tableColWidths = [28, 78, 78, 92, 128, 78, 64, 66, 44, 58];
     const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-    registerRobotoFonts(doc);
-    doc.setFont("Roboto", "bold");
+    const pdfFont = registerPdfFontWithFallback(doc);
+    const marginLeft = 24;
+    const textX = addSettingsLogo(doc, marginLeft, 12, 48, 36);
+    doc.setFont(pdfFont, "bold");
+    doc.setFontSize(11);
+    doc.text(companyLabel, textX, 24);
     doc.setFontSize(12);
-    doc.text(title, 24, 24);
-    doc.setFont("Roboto", "normal");
+    doc.text("Raport salarial", textX, 38);
+    doc.setFont(pdfFont, "normal");
     doc.setFontSize(9);
-    doc.text(`${appSettings.companyCuiReg || "CUI nedefinit"} · ${generatedAt}`, 24, 40);
+    doc.text(`${appSettings.companyCuiReg || "CUI nedefinit"} · ${generatedAt}`, marginLeft, 54);
 
     autoTable(doc, {
-      startY: 54,
+      startY: 66,
       head: [headers],
       body: rows,
       styles: {
-        font: "Roboto",
+        font: pdfFont,
         fontStyle: "normal",
         fontSize: 8,
         cellPadding: 3,
         overflow: "linebreak",
       },
       headStyles: {
-        font: "Roboto",
+        font: pdfFont,
         fontStyle: "bold",
         fillColor: [235, 240, 248],
         textColor: [25, 25, 25],
@@ -137,9 +141,9 @@ export async function POST(request: NextRequest) {
       margin: { left: 24, right: 24 },
       didDrawPage: () => {
         const pageHeight = doc.internal.pageSize.getHeight();
-        doc.setFont("Roboto", "normal");
+        doc.setFont(pdfFont, "normal");
         doc.setFontSize(9);
-        doc.text(`Generat la ${generatedAt} — Total angajați: ${rows.length}`, 24, pageHeight - 12);
+        doc.text(`Generat la ${generatedAt} - Total angajati: ${rows.length}`, marginLeft, pageHeight - 12);
       },
     });
     const pdfBytes = new Uint8Array(doc.output("arraybuffer"));

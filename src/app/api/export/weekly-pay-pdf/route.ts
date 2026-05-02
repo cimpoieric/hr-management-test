@@ -18,7 +18,8 @@ import {
   parseSalaryTypeInput,
 } from "@/lib/salaryFields";
 import { decrypt } from "@/lib/encryption";
-import { registerRobotoFonts } from "@/lib/pdf/registerRobotoForJsPdf";
+import { getAppSettings } from "@/lib/appSettings";
+import { addSettingsLogo, registerPdfFontWithFallback } from "@/lib/pdf/jsPdfBranding";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -77,17 +78,21 @@ export async function POST(request: NextRequest) {
     const orderMap = new Map(employeeIds.map((id, i) => [id, i]));
     employees.sort((a, b) => (orderMap.get(a.id) ?? 0) - (orderMap.get(b.id) ?? 0));
 
+    const appSettings = await getAppSettings();
+    const companyName = (appSettings.companyName || "").trim() || "—";
+
     const generatedAt = new Date().toLocaleString("ro-RO");
-    const titleLine = "Fișă plată săptămânală";
-    const footerLine = "Date confidențiale — conform GDPR";
+    /** Variante fara diacritice — afisare sigura in PDF (Helvetica fallback). */
+    const titleLine = "Fisa plata saptamanala";
+    const footerLine = "Date confidentiale - conform GDPR";
 
     const headers = [
       "Nume",
       "CNP",
-      "Tip plată",
-      "Sumă brută",
-      "Monedă",
-      "Perioada lucrată",
+      "Tip plata",
+      "Suma bruta",
+      "Moneda",
+      "Perioada lucrata",
       "Total calculat",
     ];
 
@@ -138,29 +143,35 @@ export async function POST(request: NextRequest) {
     });
 
     const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-    registerRobotoFonts(doc);
-    doc.setFont("Roboto", "bold");
+    const pdfFont = registerPdfFontWithFallback(doc);
+    const marginLeft = 40;
+    const topY = 12;
+    const textX = addSettingsLogo(doc, marginLeft, topY, 48, 36);
+
+    doc.setFont(pdfFont, "bold");
+    doc.setFontSize(11);
+    doc.text(companyName, textX, 26);
     doc.setFontSize(14);
-    doc.text(titleLine, 40, 36);
-    doc.setFont("Roboto", "normal");
+    doc.text(titleLine, textX, 42);
+    doc.setFont(pdfFont, "normal");
     doc.setFontSize(10);
-    doc.text(`Generat: ${generatedAt}`, 40, 54);
+    doc.text(`Generat: ${generatedAt}`, marginLeft, 58);
 
     const tableColWidths = [120, 92, 72, 72, 52, 88, 100];
 
     autoTable(doc, {
-      startY: 68,
+      startY: 72,
       head: [headers],
       body: rows,
       styles: {
-        font: "Roboto",
+        font: pdfFont,
         fontStyle: "normal",
         fontSize: 8,
         cellPadding: 4,
         overflow: "linebreak",
       },
       headStyles: {
-        font: "Roboto",
+        font: pdfFont,
         fontStyle: "bold",
         fillColor: [235, 240, 248],
         textColor: [25, 25, 25],
@@ -169,7 +180,7 @@ export async function POST(request: NextRequest) {
       margin: { left: 40, right: 40, bottom: 36 },
       didDrawPage: (data) => {
         const pageHeight = doc.internal.pageSize.getHeight();
-        doc.setFont("Roboto", "italic");
+        doc.setFont(pdfFont, "italic");
         doc.setFontSize(8);
         doc.setTextColor(90, 90, 90);
         doc.text(footerLine, 40, pageHeight - 20);

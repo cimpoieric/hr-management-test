@@ -19,7 +19,8 @@ import { mkdir, writeFile, stat } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
+import { prismaTyped } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
@@ -35,6 +36,7 @@ import {
 } from "@/lib/pdfGenerator";
 import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
 import { salaryAmountToJson } from "@/lib/salaryFields";
+import { addSettingsLogo, registerPdfFontWithFallback } from "@/lib/pdf/jsPdfBranding";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -55,6 +57,69 @@ interface GenerateRequest {
   columns?: ColumnDef[];
   title?: string;
 }
+
+/** Rând din listă + companie + countryId (rezolvat separat prin tabela Country). */
+type ListaReportEmployee = {
+  id: number;
+  lastName: string;
+  firstName: string;
+  email: string | null;
+  phone: string | null;
+  position: string | null;
+  status: string;
+  city: string | null;
+  hiredAt: Date;
+  cnp: string;
+  iban: string | null;
+  bankName: string | null;
+  salaryType: string | null;
+  salaryAmount: Prisma.Decimal | null;
+  salaryCurrency: string;
+  salaryStartDate: Date | null;
+  countryId: number | null;
+  company: { id: number; name: string } | null;
+  _count: { documents: number; deployments: number };
+};
+
+type FisaReportEmployee = {
+  id: number;
+  lastName: string;
+  firstName: string;
+  cnp: string | null;
+  email: string | null;
+  phone: string | null;
+  position: string | null;
+  status: string;
+  city: string | null;
+  address: string | null;
+  hiredAt: Date;
+  iban: string | null;
+  bankName: string | null;
+  observations: string | null;
+  seriesCI: string | null;
+  numberCI: string | null;
+  salaryType: string | null;
+  salaryAmount: Prisma.Decimal | null;
+  salaryCurrency: string;
+  salaryStartDate: Date | null;
+  countryId: number | null;
+  company: { name: string } | null;
+  documents: Array<{
+    type: string;
+    number: string | null;
+    status: string;
+    issueDate: Date | null;
+    expiryDate: Date | null;
+  }>;
+  deployments: Array<{
+    country: string;
+    city: string | null;
+    startDate: Date;
+    endDate: Date | null;
+    status: string;
+    notes: string | null;
+  }>;
+};
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -93,6 +158,16 @@ function getClientIp(request: NextRequest): string {
 function getLogoPath(): string | null {
   const logoPath = join(process.cwd(), "data", "settings", "logo.png");
   return existsSync(logoPath) ? logoPath : null;
+}
+
+async function fetchCountriesByIds(
+  ids: number[]
+): Promise<Map<number, { name: string; code: string }>> {
+  if (ids.length === 0) return new Map();
+  const rows = await prismaTyped.$queryRaw<Array<{ id: number; name: string; code: string }>>`
+    SELECT id, name, code FROM Country WHERE id IN (${Prisma.join(ids)})
+  `;
+  return new Map(rows.map((r) => [r.id, r]));
 }
 
 // ─── Default columns for list report ─────────────────────────────────────────
@@ -140,7 +215,7 @@ async function generateAccountingListPdf(params: {
 }): Promise<Uint8Array> {
   const { employees, companyName, companyRef, title } = params;
   const generatedAt = new Date().toLocaleString("ro-RO");
-  const headers = ["Nr.", "Nume", "Prenume", "CNP", "IBAN", "Bancă", "Tip plată", "Sumă brută", "Monedă", "Status"];
+  const headers = ["Nr.", "Nume", "Prenume", "CNP", "IBAN", "Banca", "Tip plata", "Suma bruta", "Moneda", "Status"];
   const widths = [28, 78, 78, 92, 128, 78, 64, 66, 44, 58];
   const rows = employees.map((e, idx) => [
     String(idx + 1),
@@ -155,29 +230,32 @@ async function generateAccountingListPdf(params: {
     e.status === "ACTIVE" ? "Activ" : "Terminat",
   ]);
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(12);
-  doc.text(`${title} — ${companyName || "Companie"}`, 24, 24);
-  doc.setFont("helvetica", "normal");
+  const pdfFont = registerPdfFontWithFallback(doc);
+  const ml = 24;
+  const tx = addSettingsLogo(doc, ml, 12, 48, 36);
+  const firm = (companyName || "").trim() || "Companie";
+  doc.setFont(pdfFont, "bold");
+  doc.setFontSize(11);
+  doc.text(firm, tx, 24);
+  doc.setFontSize(11);
+  doc.text(title, tx, 38);
+  doc.setFont(pdfFont, "normal");
   doc.setFontSize(9);
-  doc.text(`${companyRef || "CUI nedefinit"} · ${generatedAt}`, 24, 40);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.text("TEST PDF - Raport salarial", 24, 54);
+  doc.text(`${companyRef || "CUI nedefinit"} · ${generatedAt}`, ml, 54);
 
   autoTable(doc, {
-    startY: 62,
+    startY: 64,
     head: [headers],
     body: rows,
-    styles: { font: "helvetica", fontSize: 8, cellPadding: 3, overflow: "linebreak" },
-    headStyles: { fillColor: [235, 240, 248], textColor: [25, 25, 25] },
+    styles: { font: pdfFont, fontSize: 8, cellPadding: 3, overflow: "linebreak" },
+    headStyles: { font: pdfFont, fontStyle: "bold", fillColor: [235, 240, 248], textColor: [25, 25, 25] },
     columnStyles: Object.fromEntries(widths.map((w, i) => [i, { cellWidth: w }])),
     margin: { left: 24, right: 24 },
     didDrawPage: () => {
       const pageHeight = doc.internal.pageSize.getHeight();
-      doc.setFont("helvetica", "normal");
+      doc.setFont(pdfFont, "normal");
       doc.setFontSize(9);
-      doc.text(`Generat la ${generatedAt} — Total angajați: ${rows.length}`, 24, pageHeight - 12);
+      doc.text(`Generat la ${generatedAt} - Total angajati: ${rows.length}`, ml, pageHeight - 12);
     },
   });
   const ab = doc.output("arraybuffer");
@@ -224,42 +302,64 @@ export async function POST(request: NextRequest) {
 
       const columns = body.columns && body.columns.length > 0 ? body.columns : DEFAULT_LIST_COLUMNS;
 
-      const employees = await prisma.employee.findMany({
+      const employees = (await prismaTyped.employee.findMany({
         where: { id: { in: employeeIds } },
         orderBy: { lastName: "asc" },
-        include: {
+        select: {
+          id: true,
+          lastName: true,
+          firstName: true,
+          email: true,
+          phone: true,
+          position: true,
+          status: true,
+          city: true,
+          hiredAt: true,
+          cnp: true,
+          iban: true,
+          bankName: true,
+          salaryType: true,
+          salaryAmount: true,
+          salaryCurrency: true,
+          salaryStartDate: true,
+          countryId: true,
           company: { select: { id: true, name: true } },
-          country: { select: { name: true, code: true } },
           _count: { select: { documents: true, deployments: true } },
-        },
-      });
+        } as unknown as Prisma.EmployeeSelect,
+      })) as unknown as ListaReportEmployee[];
+      const countryIds = [
+        ...new Set(employees.map((e) => e.countryId).filter((id): id is number => id != null)),
+      ];
+      const countryById = await fetchCountriesByIds(countryIds);
+
       console.log("[PDF DATA]", employees);
       console.log("[PDF DATA] employees length:", employees?.length);
 
-      const items: EmployeeListItem[] = employees.map((e) => ({
-        id: e.id,
-        lastName: e.lastName,
-        firstName: e.firstName,
-        email: e.email,
-        phone: e.phone,
-        position: e.position,
-        status: e.status,
-        companyName: e.company?.name ?? null,
-        country: e.country
-          ? `${e.country.name} (${e.country.code})`
-          : null,
-        city: e.city,
-        hiredAt: e.hiredAt,
-        cnp: e.cnp,
-        iban: e.iban,
-        bankName: e.bankName,
-        salaryType: e.salaryType ?? null,
-        salaryAmount: salaryAmountToJson(e.salaryAmount),
-        salaryCurrency: e.salaryCurrency,
-        salaryStartDate: e.salaryStartDate,
-      }));
+      const items: EmployeeListItem[] = employees.map((e) => {
+        const cr = e.countryId != null ? countryById.get(e.countryId) : undefined;
+        return {
+          id: e.id,
+          lastName: e.lastName,
+          firstName: e.firstName,
+          email: e.email,
+          phone: e.phone,
+          position: e.position,
+          status: e.status,
+          companyName: e.company?.name ?? null,
+          country: cr ? `${cr.name} (${cr.code})` : null,
+          city: e.city,
+          hiredAt: e.hiredAt,
+          cnp: e.cnp,
+          iban: e.iban,
+          bankName: e.bankName,
+          salaryType: e.salaryType ?? null,
+          salaryAmount: salaryAmountToJson(e.salaryAmount),
+          salaryCurrency: e.salaryCurrency,
+          salaryStartDate: e.salaryStartDate,
+        };
+      });
 
-      reportTitle = body.title ?? "Raport salarial — confidential";
+      reportTitle = body.title ?? "Raport salarial - confidential";
       employeeCount = items.length;
 
       void columns;
@@ -287,7 +387,7 @@ export async function POST(request: NextRequest) {
       const today = new Date();
 
       // Find employees with active deployments
-      const activeDeployments = await prisma.deployment.findMany({
+      const activeDeployments = await prismaTyped.deployment.findMany({
         where: {
           status: "ACTIVE",
           OR: [{ endDate: null }, { endDate: { gte: today } }],
@@ -302,7 +402,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Get A1 documents for these employees
-      const a1Docs = await prisma.document.findMany({
+      const a1Docs = await prismaTyped.document.findMany({
         where: {
           employeeId: { in: employeeIds },
           type: "A1",
@@ -322,7 +422,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const employees = await prisma.employee.findMany({
+      const employees = await prismaTyped.employee.findMany({
         where: { id: { in: employeeIds } },
         orderBy: { lastName: "asc" },
         include: {
@@ -372,7 +472,7 @@ export async function POST(request: NextRequest) {
       const countryName = countryInfo?.name ?? countryCode;
 
       const today = new Date();
-      const deployments = await prisma.deployment.findMany({
+      const deployments = await prismaTyped.deployment.findMany({
         where: {
           country: countryCode,
           status: { not: "CANCELLED" },
@@ -392,7 +492,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Niciun angajat in aceasta tara" }, { status: 404 });
       }
 
-      const employees = await prisma.employee.findMany({
+      const employees = await prismaTyped.employee.findMany({
         where: { id: { in: employeeIds } },
         orderBy: { lastName: "asc" },
         include: {
@@ -439,11 +539,31 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "ID angajat necesar" }, { status: 400 });
       }
 
-      const employee = await prisma.employee.findUnique({
+      const employee = (await prismaTyped.employee.findUnique({
         where: { id: employeeId },
-        include: {
+        select: {
+          id: true,
+          lastName: true,
+          firstName: true,
+          cnp: true,
+          email: true,
+          phone: true,
+          position: true,
+          status: true,
+          city: true,
+          address: true,
+          hiredAt: true,
+          iban: true,
+          bankName: true,
+          observations: true,
+          seriesCI: true,
+          numberCI: true,
+          salaryType: true,
+          salaryAmount: true,
+          salaryCurrency: true,
+          salaryStartDate: true,
+          countryId: true,
           company: { select: { name: true } },
-          country: { select: { name: true, code: true } },
           documents: {
             orderBy: { type: "asc" },
             select: {
@@ -465,11 +585,20 @@ export async function POST(request: NextRequest) {
               notes: true,
             },
           },
-        },
-      });
+        } as unknown as Prisma.EmployeeSelect,
+      })) as FisaReportEmployee | null;
 
       if (!employee) {
         return NextResponse.json({ error: "Angajat negasit" }, { status: 404 });
+      }
+
+      let countryDisplay = "—";
+      if (employee.countryId != null) {
+        const rows = await prismaTyped.$queryRaw<Array<{ name: string; code: string }>>`
+          SELECT name, code FROM Country WHERE id = ${employee.countryId} LIMIT 1
+        `;
+        const cr = rows[0];
+        if (cr) countryDisplay = `${cr.name} (${cr.code})`;
       }
 
       reportTitle = body.title ?? `Fisa angajat — ${employee.lastName} ${employee.firstName}`;
@@ -486,9 +615,7 @@ export async function POST(request: NextRequest) {
           position: employee.position,
           status: employee.status,
           companyName: employee.company?.name ?? null,
-          country: employee.country
-            ? `${employee.country.name} (${employee.country.code})`
-            : "—",
+          country: countryDisplay,
           city: employee.city,
           address: employee.address,
           hiredAt: employee.hiredAt,
