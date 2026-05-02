@@ -202,7 +202,7 @@ export default function RapoartePage() {
 
   // ── Generate report ──
   async function handleGenerate() {
-    if (!reportType) return;
+    if (!reportType || generating) return;
     setGenerating(true);
     setError("");
 
@@ -296,9 +296,25 @@ export default function RapoartePage() {
     }
   }
 
+  function goBackToReportTypeSelect() {
+    setPdfUrl(null);
+    setStep("select");
+    setReportType(null);
+    setReportTitle("");
+    setCountryCode("");
+    setEmployeeSearch("");
+    setSelectedEmployeeIds(new Set());
+    setSelectedEmployeeId(null);
+    setColumns(DEFAULT_COLUMNS.map((c) => ({ ...c })));
+    setError("");
+    setGeneratedReport(null);
+    setGenerating(false);
+  }
+
   // ── Select report type ──
   function selectReportType(type: ReportType) {
     setReportType(type);
+    setCountryCode("");
     setError("");
     setGeneratedReport(null);
     setPdfUrl(null);
@@ -388,7 +404,8 @@ export default function RapoartePage() {
           {/* Navigation */}
           <div className="flex items-center gap-2 text-sm">
             <button
-              onClick={() => setStep("select")}
+              type="button"
+              onClick={goBackToReportTypeSelect}
               className="text-gray-500 hover:text-gray-700 flex items-center gap-1"
             >
               <ChevronLeft size={14} />
@@ -662,24 +679,27 @@ export default function RapoartePage() {
           {/* Actions */}
           <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={handleGenerate}
               disabled={generating}
-              className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors"
+              aria-busy={generating || undefined}
+              className="inline-flex min-w-[11.5rem] items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-70 disabled:cursor-wait transition-colors"
             >
               {generating ? (
                 <>
-                  <Loader2 size={16} className="animate-spin" />
-                  Se generează...
+                  <Loader2 size={16} className="shrink-0 animate-spin" aria-hidden />
+                  <span>Se generează...</span>
                 </>
               ) : (
                 <>
-                  <FileText size={16} />
-                  Generează PDF
+                  <FileText size={16} className="shrink-0" aria-hidden />
+                  <span>Generează PDF</span>
                 </>
               )}
             </button>
             <button
-              onClick={() => setStep("select")}
+              type="button"
+              onClick={goBackToReportTypeSelect}
               className="px-4 py-2.5 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Anulează

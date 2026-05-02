@@ -281,11 +281,11 @@ export function EmployeeTable({
   }
 
   const SortIcon = ({ field }: { field: string }) => {
-    if (sortBy !== field) return <span className="w-4" />;
+    if (sortBy !== field) return <span className="inline-block w-4 shrink-0" aria-hidden />;
     return sortOrder === "asc" ? (
-      <ChevronUp size={14} />
+      <ChevronUp size={14} className="shrink-0" aria-hidden />
     ) : (
-      <ChevronDown size={14} />
+      <ChevronDown size={14} className="shrink-0" aria-hidden />
     );
   };
 
@@ -425,14 +425,14 @@ export function EmployeeTable({
         )}
       </div>
 
-      {/* Table */}
+      {/* Table — table-fixed + truncare pe laptop; coloana Acțiuni sticky la dreapta dacă apare scroll orizontal */}
       <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+        <div className="w-full min-w-0 overflow-x-auto xl:overflow-x-visible [scrollbar-gutter:stable]">
+          <table className="w-full max-w-full table-fixed border-separate border-spacing-0 text-sm max-2xl:text-[13px]">
             <thead>
               <tr className="border-b bg-gray-50">
                 {showBulkActions && (
-                  <th className="px-4 py-3 w-10">
+                  <th className="sticky left-0 z-30 w-10 px-2 py-2.5 max-2xl:px-2 max-2xl:py-2 bg-gray-50 border-r border-gray-200/80 shadow-[4px_0_8px_-4px_rgba(15,23,42,0.08)]">
                     <input
                       type="checkbox"
                       checked={
@@ -445,28 +445,32 @@ export function EmployeeTable({
                   </th>
                 )}
                 {[
-                  { key: "lastName", label: "Nume" },
-                  { key: "cnp", label: "CNP" },
-                  { key: "company", label: "Firmă" },
-                  { key: "position", label: "Funcție" },
-                  { key: "salaryType", label: "Tip plată" },
-                  { key: "salaryAmount", label: "Sumă" },
-                  { key: "salaryCurrency", label: "Monedă" },
-                  { key: "status", label: "Status" },
-                  { key: "documents", label: "Doc." },
-                  { key: "deployments", label: "Det." },
+                  { key: "lastName", label: "Nume", thClass: "w-[15%] min-w-0" },
+                  { key: "cnp", label: "CNP", thClass: "w-[9%] min-w-0 max-2xl:w-[8%]" },
+                  { key: "company", label: "Firmă", thClass: "w-[14%] min-w-0" },
+                  { key: "position", label: "Funcție", thClass: "w-[11%] min-w-0 max-2xl:w-[10%]" },
+                  { key: "salaryType", label: "Tip plată", thClass: "w-[8%] min-w-0" },
+                  { key: "salaryAmount", label: "Sumă", thClass: "w-[9%] min-w-0" },
+                  { key: "salaryCurrency", label: "Monedă", thClass: "w-[5%] min-w-0" },
+                  { key: "status", label: "Status", thClass: "w-[8%] min-w-0" },
+                  { key: "documents", label: "Doc.", thClass: "w-[5%] min-w-0" },
+                  { key: "deployments", label: "Det.", thClass: "w-[5%] min-w-0" },
                 ].map((col) => (
                   <th
                     key={col.key}
-                    className="px-4 py-3 text-left font-medium text-gray-600 cursor-pointer hover:text-gray-900 select-none"
+                    className={`px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-left font-medium text-gray-600 cursor-pointer hover:text-gray-900 select-none min-w-0 ${col.thClass ?? ""} ${
+                      col.key !== "documents" && col.key !== "deployments"
+                        ? ""
+                        : "cursor-default hover:text-gray-600"
+                    }`}
                     onClick={() =>
                       col.key !== "documents" &&
                       col.key !== "deployments" &&
                       toggleSort(col.key)
                     }
                   >
-                    <div className="flex items-center gap-1">
-                      {col.label}
+                    <div className="flex items-center gap-0.5 min-w-0">
+                      <span className="truncate">{col.label}</span>
                       {col.key !== "documents" &&
                         col.key !== "deployments" && (
                           <SortIcon field={col.key} />
@@ -474,7 +478,9 @@ export function EmployeeTable({
                     </div>
                   </th>
                 ))}
-                <th className="px-4 py-3 text-right">Acțiuni</th>
+                <th className="sticky right-0 z-20 w-[88px] max-2xl:w-[80px] px-2 py-2.5 max-2xl:px-1.5 text-right font-medium text-gray-600 bg-gray-50 border-l border-gray-200/80 shadow-[-6px_0_10px_-6px_rgba(15,23,42,0.1)]">
+                  Acțiuni
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -496,10 +502,10 @@ export function EmployeeTable({
                 employees.map((emp) => (
                   <tr
                     key={emp.id}
-                    className="border-b last:border-b-0 hover:bg-gray-50 transition-colors"
+                    className="group border-b last:border-b-0 hover:bg-gray-50 transition-colors"
                   >
                     {showBulkActions && (
-                      <td className="px-4 py-3">
+                      <td className="sticky left-0 z-20 w-10 px-2 py-2.5 max-2xl:px-2 max-2xl:py-2 bg-white group-hover:bg-gray-50 border-r border-gray-100 shadow-[4px_0_8px_-4px_rgba(15,23,42,0.06)]">
                         <input
                           type="checkbox"
                           checked={selectedIds.has(emp.id)}
@@ -508,74 +514,93 @@ export function EmployeeTable({
                         />
                       </td>
                     )}
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2">
+                      <div className="font-medium text-gray-900 truncate" title={`${emp.lastName} ${emp.firstName}`}>
                         {emp.lastName} {emp.firstName}
                       </div>
                       {emp.email && (
-                        <div className="text-xs text-gray-400">{emp.email}</div>
+                        <div className="text-xs text-gray-400 truncate" title={emp.email}>
+                          {emp.email}
+                        </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-mono text-gray-600">
-                      {emp.cnp}
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 font-mono text-xs text-gray-600 tabular-nums">
+                      <span className="block truncate" title={emp.cnp}>
+                        {emp.cnp}
+                      </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5 text-gray-600">
-                        <Building2 size={14} className="text-gray-400" />
-                        {emp.company?.name ?? "—"}
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2">
+                      <div
+                        className="flex items-center gap-1 min-w-0 text-gray-600"
+                        title={emp.company?.name ?? undefined}
+                      >
+                        <Building2 size={12} className="text-gray-400 shrink-0 max-2xl:hidden" />
+                        <span className="truncate text-xs max-2xl:text-[11px] leading-snug">
+                          {emp.company?.name ?? "—"}
+                        </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {emp.position ?? "—"}
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-gray-600">
+                      <span className="block truncate text-xs max-2xl:text-[11px]" title={emp.position ?? undefined}>
+                        {emp.position ?? "—"}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {emp.salaryType ?? "—"}
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-gray-600">
+                      <span className="block truncate text-xs" title={emp.salaryType ?? undefined}>
+                        {emp.salaryType ?? "—"}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {typeof emp.salaryAmount === "number"
-                        ? emp.salaryAmount.toLocaleString("ro-RO")
-                        : "—"}
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-gray-600 tabular-nums">
+                      <span className="block truncate text-xs">
+                        {typeof emp.salaryAmount === "number"
+                          ? emp.salaryAmount.toLocaleString("ro-RO")
+                          : "—"}
+                      </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {emp.salaryCurrency ?? "—"}
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-gray-600">
+                      <span className="block truncate text-xs">{emp.salaryCurrency ?? "—"}</span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2">
                       <StatusBadge status={emp.status} />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 text-gray-500">
-                        <FileText size={14} />
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2">
+                      <div className="flex items-center gap-0.5 text-gray-500 text-xs tabular-nums">
+                        <FileText size={12} className="shrink-0" />
                         {emp.documentCount}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 text-gray-500">
-                        <MapPin size={14} />
+                    <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2">
+                      <div className="flex items-center gap-0.5 text-gray-500 text-xs tabular-nums">
+                        <MapPin size={12} className="shrink-0" />
                         {emp.deploymentCount}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
+                    <td className="sticky right-0 z-10 w-[88px] max-2xl:w-[80px] px-1.5 py-2.5 max-2xl:py-2 bg-white group-hover:bg-gray-50 border-l border-gray-100 shadow-[-6px_0_10px_-6px_rgba(15,23,42,0.08)]">
+                      <div className="flex items-center justify-end gap-0.5">
                         <Link
                           href={`/angajati/${emp.id}`}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                          title="Vezi detalii"
+                          className="p-1 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors shrink-0"
+                          title="Vizualizare — deschide pagina angajatului"
+                          aria-label="Vizualizare angajat"
                         >
-                          <Eye size={16} />
+                          <Eye size={15} />
                         </Link>
                         <Link
                           href={`/angajati/${emp.id}`}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                          title="Editează"
+                          className="p-1 rounded-md text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors shrink-0"
+                          title="Editare — deschide pagina angajatului pentru modificări"
+                          aria-label="Editare angajat"
                         >
-                          <Pencil size={16} />
+                          <Pencil size={15} />
                         </Link>
                         <button
+                          type="button"
                           onClick={() => handleDelete(emp.id)}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Șterge"
+                          className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+                          title="Ștergere — elimină angajatul din evidență (ireversibil)"
+                          aria-label="Șterge angajat"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={15} />
                         </button>
                       </div>
                     </td>
@@ -623,7 +648,10 @@ function StatusBadge({ status }: { status: string }) {
   const c = config[status] ?? { bg: "bg-gray-100", text: "text-gray-700", label: status };
 
   return (
-    <span className={`inline-block text-xs font-medium px-2 py-1 rounded-full ${c.bg} ${c.text}`}>
+    <span
+      className={`inline-block max-w-full truncate text-xs font-medium px-1.5 py-0.5 max-2xl:px-1.5 rounded-full ${c.bg} ${c.text}`}
+      title={c.label}
+    >
       {c.label}
     </span>
   );

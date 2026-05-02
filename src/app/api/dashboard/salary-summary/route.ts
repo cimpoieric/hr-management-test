@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { salaryMonthlyToRon } from "@/lib/salaryCostRon";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
@@ -9,21 +10,22 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const result = await prisma.employee.aggregate({
+    const rows = await prisma.employee.findMany({
       where: {
         salaryType: "LUNAR",
         status: "ACTIVE",
-        salaryCurrency: "RON",
         salaryAmount: { not: null },
       },
-      _sum: { salaryAmount: true },
-      _count: { _all: true },
+      select: { salaryAmount: true, salaryCurrency: true },
     });
+    const totalMonthlySalaryRON = rows.reduce(
+      (s, e) => s + salaryMonthlyToRon(e.salaryAmount, e.salaryCurrency),
+      0
+    );
 
     return NextResponse.json({
-      totalMonthlySalaryRON:
-        result._sum.salaryAmount != null ? result._sum.salaryAmount.toNumber() : 0,
-      employeeCount: result._count._all ?? 0,
+      totalMonthlySalaryRON: Math.round(totalMonthlySalaryRON * 100) / 100,
+      employeeCount: rows.length,
     });
   } catch (error) {
     console.error("[DASHBOARD_SALARY_SUMMARY]", error);

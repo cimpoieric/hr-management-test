@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { getAppSettings } from "@/lib/appSettings";
+import { activeDeploymentKpiWhere } from "@/lib/activeDeployments";
+import { salaryMonthlyToRon } from "@/lib/salaryCostRon";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
@@ -24,14 +26,13 @@ export async function GET(request: NextRequest) {
       expiredDocuments,
       expiringSoonDocuments,
       pendingImports,
-      salaryAgg,
-      salaryCurrencyAgg,
+      salaryDashboardAgg,
       deploymentsByCountryRaw,
       recentAuditRaw,
     ] = await Promise.all([
       prisma.employee.count(),
       prisma.employee.count({ where: { status: "ACTIVE" } }),
-      prisma.deployment.count({ where: { status: "ACTIVE" } }),
+      prisma.deployment.count({ where: activeDeploymentKpiWhere }),
       prisma.document.count({
         where: {
           expiryDate: { not: null, lt: now },
@@ -47,29 +48,40 @@ export async function GET(request: NextRequest) {
         },
       }),
       prisma.pendingImport.count({ where: { status: "PENDING" } }),
-      prisma.employee.aggregate({
-        where: {
-          salaryType: "LUNAR",
-          status: "ACTIVE",
-          salaryAmount: { not: null },
-        },
-        _sum: { salaryAmount: true },
-        _count: { _all: true },
-      }),
-      prisma.employee.groupBy({
-        by: ["salaryCurrency"],
-        where: {
-          salaryType: "LUNAR",
-          status: "ACTIVE",
-          salaryAmount: { not: null },
-        },
-        _count: { _all: true },
-        orderBy: { _count: { salaryCurrency: "desc" } },
-        take: 1,
-      }),
+      prisma.employee
+        .findMany({
+          where: {
+            salaryType: "LUNAR",
+            status: "ACTIVE",
+            salaryAmount: { not: null },
+          },
+          select: { salaryAmount: true, salaryCurrency: true },
+        })
+        .then((rows) => {
+          let sumRon = 0;
+          const currencyCounts = new Map<string, number>();
+          for (const e of rows) {
+            sumRon += salaryMonthlyToRon(e.salaryAmount, e.salaryCurrency);
+            const c = (e.salaryCurrency ?? "RON").trim().toUpperCase() || "RON";
+            currencyCounts.set(c, (currencyCounts.get(c) ?? 0) + 1);
+          }
+          let predominant = "RON";
+          let best = 0;
+          for (const [c, n] of currencyCounts) {
+            if (n > best) {
+              best = n;
+              predominant = c;
+            }
+          }
+          return {
+            sumRon,
+            employeeCount: rows.length,
+            predominantCurrency: predominant,
+          };
+        }),
       prisma.deployment.groupBy({
         by: ["country"],
-        where: { status: "ACTIVE" },
+        where: activeDeploymentKpiWhere,
         _count: { _all: true },
         orderBy: { _count: { country: "desc" } },
         take: 6,
@@ -92,7 +104,9 @@ export async function GET(request: NextRequest) {
     const recentActivity = recentAuditRaw.map((item) => ({
       id: item.id,
       action: item.action,
-      detail: `${item.entity}${item.entityId ? ` #${item.entityId}` : ""}${item.userName ? ` · ${item.userName}` : ""}`,
+      entity: item.entity,
+      entityId: item.entityId,
+      userName: item.userName ?? null,
       createdAt: item.createdAt,
     }));
 
@@ -101,8 +115,6 @@ export async function GET(request: NextRequest) {
       code: item.country,
       count: item._count._all,
     }));
-    const predominantSalaryCurrency = salaryCurrencyAgg[0]?.salaryCurrency ?? "RON";
-
     return NextResponse.json({
       stats: {
         totalEmployees,
@@ -112,12 +124,10 @@ export async function GET(request: NextRequest) {
         expiredDocuments,
         expiringSoonDocuments,
         pendingImports,
-        monthlySalaryCost:
-          salaryAgg._sum.salaryAmount != null
-            ? salaryAgg._sum.salaryAmount.toNumber()
-            : 0,
-        monthlySalaryEmployeeCount: salaryAgg._count._all ?? 0,
-        monthlySalaryCurrency: predominantSalaryCurrency,
+        monthlySalaryCost: Math.round(salaryDashboardAgg.sumRon * 100) / 100,
+        monthlySalaryEmployeeCount: salaryDashboardAgg.employeeCount,
+        monthlySalaryCurrency: "RON",
+        monthlySalaryPredominantCurrency: salaryDashboardAgg.predominantCurrency,
         documentAlertDays: settings.alertExpiredDocumentsDays,
       },
       deploymentsByCountry,

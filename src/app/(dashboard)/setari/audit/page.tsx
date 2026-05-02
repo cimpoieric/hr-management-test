@@ -19,6 +19,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import Link from "next/link";
+import { ro, tAuditAction, tAuditEntity } from "@/messages";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,36 +48,47 @@ interface AuditFilters {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ACTIONS = [
-  { value: "", label: "Toate acțiunile" },
-  { value: "LOGIN", label: "Autentificare" },
-  { value: "LOGOUT", label: "Deconectare" },
-  { value: "LOGIN_FAILED", label: "Autentificare eșuată" },
-  { value: "CREATE", label: "Creare" },
-  { value: "UPDATE", label: "Modificare" },
-  { value: "DELETE", label: "Ștergere" },
-  { value: "VIEW", label: "Vizualizare sensibil" },
-  { value: "EXPORT_EXCEL", label: "Export Excel" },
-  { value: "EXPORT_PDF", label: "Export PDF" },
-  { value: "REPORT_GENERATE", label: "Generare raport" },
-  { value: "IMPORT_APPROVE", label: "Import aprobat" },
-  { value: "IMPORT_REJECT", label: "Import respins" },
-  { value: "BACKUP", label: "Backup" },
-  { value: "PASSWORD_CHANGE", label: "Schimbare parolă" },
-  { value: "SETTINGS_CHANGE", label: "Setări modificate" },
-];
+const ACTION_FILTER_VALUES = [
+  "",
+  "LOGIN",
+  "LOGOUT",
+  "LOGIN_FAILED",
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+  "VIEW",
+  "EXPORT_EXCEL",
+  "EXPORT_PDF",
+  "REPORT_GENERATE",
+  "IMPORT_APPROVE",
+  "IMPORT_REJECT",
+  "BACKUP",
+  "PASSWORD_CHANGE",
+  "SETTINGS_CHANGE",
+] as const;
 
-const ENTITIES = [
-  { value: "", label: "Toate entitățile" },
-  { value: "Employee", label: "Angajat" },
-  { value: "Document", label: "Document" },
-  { value: "Deployment", label: "Detasare" },
-  { value: "User", label: "Utilizator" },
-  { value: "Report", label: "Raport" },
-  { value: "System", label: "Sistem" },
-  { value: "PendingImport", label: "Import" },
-  { value: "Company", label: "Companie" },
-];
+const ACTIONS = ACTION_FILTER_VALUES.map((value) => ({
+  value,
+  label: value === "" ? ro.audit.allActions : tAuditAction(value),
+}));
+
+const ENTITY_FILTER_VALUES = [
+  "",
+  "Employee",
+  "Document",
+  "Deployment",
+  "User",
+  "Report",
+  "System",
+  "PendingImport",
+  "Company",
+  "Country",
+] as const;
+
+const ENTITIES = ENTITY_FILTER_VALUES.map((value) => ({
+  value,
+  label: value === "" ? ro.audit.allEntities : tAuditEntity(value),
+}));
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -392,7 +404,7 @@ export default function AuditLogPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-gray-600">
-                          {log.entity}
+                          {tAuditEntity(log.entity)}
                           {log.entityId && (
                             <span className="text-gray-400 ml-1">#{log.entityId}</span>
                           )}
@@ -497,29 +509,30 @@ export default function AuditLogPage() {
 // ─── Helper Components ───────────────────────────────────────────────────────
 
 function ActionBadge({ action }: { action: string }) {
-  const configs: Record<string, { bg: string; text: string; label: string }> = {
-    LOGIN:            { bg: "bg-green-100", text: "text-green-700", label: "Autentificare" },
-    LOGOUT:           { bg: "bg-gray-100",  text: "text-gray-700",  label: "Deconectare" },
-    LOGIN_FAILED:     { bg: "bg-red-100",   text: "text-red-700",   label: "Eșec login" },
-    CREATE:           { bg: "bg-blue-100",  text: "text-blue-700",  label: "Creare" },
-    UPDATE:           { bg: "bg-amber-100", text: "text-amber-700", label: "Modificare" },
-    DELETE:           { bg: "bg-red-100",   text: "text-red-700",   label: "Ștergere" },
-    VIEW:             { bg: "bg-purple-100",text: "text-purple-700",label: "Vizualizare" },
-    EXPORT_EXCEL:     { bg: "bg-emerald-100",text:"text-emerald-700",label:"Export Excel" },
-    EXPORT_PDF:       { bg: "bg-rose-100",  text: "text-rose-700",  label: "Export PDF" },
-    REPORT_GENERATE:  { bg: "bg-cyan-100",  text: "text-cyan-700",  label: "Raport" },
-    IMPORT_APPROVE:   { bg: "bg-teal-100",  text: "text-teal-700",  label: "Import OK" },
-    IMPORT_REJECT:    { bg: "bg-orange-100",text: "text-orange-700",label: "Import Respins" },
-    BACKUP:           { bg: "bg-indigo-100",text: "text-indigo-700",label: "Backup" },
-    PASSWORD_CHANGE:  { bg: "bg-pink-100",  text: "text-pink-700",  label: "Parolă" },
-    SETTINGS_CHANGE:  { bg: "bg-slate-100", text: "text-slate-700", label: "Setări" },
+  const styles: Record<string, { bg: string; text: string }> = {
+    LOGIN: { bg: "bg-green-100", text: "text-green-700" },
+    LOGOUT: { bg: "bg-gray-100", text: "text-gray-700" },
+    LOGIN_FAILED: { bg: "bg-red-100", text: "text-red-700" },
+    CREATE: { bg: "bg-blue-100", text: "text-blue-700" },
+    UPDATE: { bg: "bg-amber-100", text: "text-amber-700" },
+    DELETE: { bg: "bg-red-100", text: "text-red-700" },
+    VIEW: { bg: "bg-purple-100", text: "text-purple-700" },
+    EXPORT_EXCEL: { bg: "bg-emerald-100", text: "text-emerald-700" },
+    EXPORT_PDF: { bg: "bg-rose-100", text: "text-rose-700" },
+    REPORT_GENERATE: { bg: "bg-cyan-100", text: "text-cyan-700" },
+    IMPORT_APPROVE: { bg: "bg-teal-100", text: "text-teal-700" },
+    IMPORT_REJECT: { bg: "bg-orange-100", text: "text-orange-700" },
+    BACKUP: { bg: "bg-indigo-100", text: "text-indigo-700" },
+    PASSWORD_CHANGE: { bg: "bg-pink-100", text: "text-pink-700" },
+    SETTINGS_CHANGE: { bg: "bg-slate-100", text: "text-slate-700" },
   };
 
-  const c = configs[action] ?? { bg: "bg-gray-100", text: "text-gray-700", label: action };
+  const s = styles[action] ?? { bg: "bg-gray-100", text: "text-gray-700" };
+  const label = tAuditAction(action);
 
   return (
-    <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${c.bg} ${c.text}`}>
-      {c.label}
+    <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${s.bg} ${s.text}`}>
+      {label}
     </span>
   );
 }

@@ -55,9 +55,10 @@ export async function GET(request: NextRequest) {
       status: doc.status,
       fileSize: doc.fileSize,
       mimeType: doc.mimeType,
-      issueDate: doc.issueDate,
-      expiryDate: doc.expiryDate,
-      createdAt: doc.createdAt,
+      issueDate: doc.issueDate ? doc.issueDate.toISOString() : null,
+      expiryDate: doc.expiryDate ? doc.expiryDate.toISOString() : null,
+      uploadedAt: doc.uploadedAt.toISOString(),
+      createdAt: doc.createdAt.toISOString(),
       employee: doc.employee,
       downloadUrl: `/api/documents/${doc.id}/download`,
     }));

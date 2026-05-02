@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import { tImportStatus } from "@/messages";
 
 interface CronStatus {
   running: boolean;
@@ -371,7 +372,7 @@ export default function ImportEmailPage() {
       {/* Link către queue */}
       <div className="text-center">
         <Link
-          href="/importuri-in-asteptare"
+          href="/importuri"
           className="inline-flex items-center gap-2 text-sm text-slate-900 hover:underline font-medium"
         >
           <Eye size={16} />
@@ -429,7 +430,7 @@ function EmailStatusBadge({ status, error }: { status: string; error: string | n
   return (
     <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-gray-100 text-gray-600">
       <Clock size={12} />
-      Pending
+      {tImportStatus("PENDING")}
     </span>
   );
 }

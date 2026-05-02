@@ -78,7 +78,7 @@ export default function SchimbaParolaPage() {
       setSuccess(true);
       // Redirect după 2 secunde
       setTimeout(() => {
-        router.push("/dashboard");
+        router.push("/panou-de-control");
       }, 2000);
     } catch {
       setError("Eroare de rețea");
@@ -107,7 +107,7 @@ export default function SchimbaParolaPage() {
               <CheckCircle2 size={48} className="mx-auto text-green-500 mb-3" />
               <h2 className="text-lg font-semibold text-gray-900">Parolă schimbată!</h2>
               <p className="text-sm text-gray-500 mt-1">
-                Vei fi redirectat la dashboard...
+                Vei fi redirecționat către panoul de control...
               </p>
             </div>
           ) : (

@@ -13,6 +13,8 @@ import {
   CheckCircle2,
   Wallet,
 } from "lucide-react";
+import { ro, tAuditAction, formatAuditActivityDetail } from "@/messages";
+import { ROUTES } from "@/lib/routes";
 
 type DashboardStats = {
   totalEmployees: number;
@@ -25,6 +27,8 @@ type DashboardStats = {
   monthlySalaryCost: number;
   monthlySalaryEmployeeCount: number;
   monthlySalaryCurrency: string;
+  /** Moneda cea mai frecventă la angajați (afișare secundară); suma e în RON. */
+  monthlySalaryPredominantCurrency: string;
   documentAlertDays: number;
 };
 
@@ -37,7 +41,9 @@ type DeploymentCountry = {
 type ActivityItem = {
   id: number;
   action: string;
-  detail: string;
+  entity: string;
+  entityId: number | null;
+  userName: string | null;
   createdAt: string;
 };
 
@@ -52,6 +58,7 @@ const EMPTY_STATS: DashboardStats = {
   monthlySalaryCost: 0,
   monthlySalaryEmployeeCount: 0,
   monthlySalaryCurrency: "RON",
+  monthlySalaryPredominantCurrency: "RON",
   documentAlertDays: 30,
 };
 
@@ -200,9 +207,11 @@ function DocumentStatus({ stats }: { stats: DashboardStats }) {
         <div className="flex items-center gap-3 p-3 bg-green-50 rounded-lg border border-green-100">
           <CheckCircle2 size={18} className="text-green-600 shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-green-800">Valide</p>
+            <p className="text-sm font-medium text-green-800">
+              {ro.dashboard.documentsHealthyTitle}
+            </p>
             <p className="text-xs text-green-600">
-              Toate celelalte documente sunt în regulă
+              {ro.dashboard.documentsHealthyHint}
             </p>
           </div>
           <CheckCircle2 size={18} className="text-green-500 shrink-0" />
@@ -217,7 +226,7 @@ function EmployeeBreakdown({ stats }: { stats: DashboardStats }) {
     <div className="bg-white rounded-xl border p-5 shadow-sm">
       <div className="flex items-center gap-2 mb-4">
         <Users size={18} className="text-gray-400" />
-        <h3 className="font-semibold text-gray-900">Breakdown angajați</h3>
+        <h3 className="font-semibold text-gray-900">{ro.dashboard.employeeBreakdownTitle}</h3>
       </div>
 
       <div className="space-y-4">
@@ -261,6 +270,22 @@ function EmployeeBreakdown({ stats }: { stats: DashboardStats }) {
   );
 }
 
+function normalizeRecentActivityItem(raw: unknown): ActivityItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const id = Number(o.id);
+  if (!Number.isFinite(id)) return null;
+  const action = typeof o.action === "string" ? o.action : "";
+  const createdAt = typeof o.createdAt === "string" ? o.createdAt : "";
+  if (!action || !createdAt) return null;
+  const entity = typeof o.entity === "string" ? o.entity : "Unknown";
+  const entityIdRaw = o.entityId;
+  const entityId =
+    typeof entityIdRaw === "number" && Number.isFinite(entityIdRaw) ? entityIdRaw : null;
+  const userName = typeof o.userName === "string" ? o.userName : null;
+  return { id, action, entity, entityId, userName, createdAt };
+}
+
 // ─── Main Dashboard Page ──────────────────────────────────────────────────────
 
 export default function DashboardHomePage() {
@@ -283,10 +308,20 @@ export default function DashboardHomePage() {
           monthlySalaryCost: Number(data.stats?.monthlySalaryCost ?? 0),
           monthlySalaryEmployeeCount: Number(data.stats?.monthlySalaryEmployeeCount ?? 0),
           monthlySalaryCurrency: String(data.stats?.monthlySalaryCurrency ?? "RON"),
+          monthlySalaryPredominantCurrency: String(
+            data.stats?.monthlySalaryPredominantCurrency ??
+              data.stats?.monthlySalaryCurrency ??
+              "RON"
+          ),
           documentAlertDays: Number(data.stats?.documentAlertDays ?? 30),
         });
         setDeploymentsByCountry(Array.isArray(data.deploymentsByCountry) ? data.deploymentsByCountry : []);
-        setRecentActivity(Array.isArray(data.recentActivity) ? data.recentActivity : []);
+        const rawActivity = Array.isArray(data.recentActivity) ? data.recentActivity : [];
+        setRecentActivity(
+          rawActivity
+            .map((item: unknown) => normalizeRecentActivityItem(item))
+            .filter((x: ActivityItem | null): x is ActivityItem => x !== null)
+        );
       })
       .catch(() => {
         setStats(EMPTY_STATS);
@@ -300,10 +335,13 @@ export default function DashboardHomePage() {
       {/* Header secțiune */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">
-          Panou de control
+          {ro.dashboard.title}
         </h1>
         <p className="text-sm text-gray-500 mt-1">
-          Overview companie — date actualizate la {new Date().toLocaleDateString("ro-RO")}
+          {ro.dashboard.overviewLine.replace(
+            "{date}",
+            new Date().toLocaleDateString("ro-RO")
+          )}
         </p>
       </div>
 
@@ -315,7 +353,7 @@ export default function DashboardHomePage() {
           subtitle={`${stats.activeEmployees} activi`}
           icon={Users}
           accentColor="bg-blue-500"
-          href="/angajati"
+          href={ROUTES.employees}
           badge={{
             text: `${stats.inactiveEmployees} inactivi`,
             color: "bg-slate-100 text-slate-700",
@@ -328,7 +366,7 @@ export default function DashboardHomePage() {
           subtitle={`în ${deploymentsByCountry.length} țări`}
           icon={MapPin}
           accentColor="bg-orange-500"
-          href="/detasari"
+          href={ROUTES.deployments}
           badge={{
             text: `${stats.activeDeployments} angajați detașați`,
             color: "bg-orange-100 text-orange-700",
@@ -341,7 +379,7 @@ export default function DashboardHomePage() {
           subtitle="necesită atenție imediată"
           icon={AlertTriangle}
           accentColor="bg-red-500"
-          href="/documente?filter=expired"
+          href={`${ROUTES.documents}?filter=expired`}
           badge={{
             text: "Acțiune necesară",
             color: "bg-red-100 text-red-700",
@@ -354,7 +392,7 @@ export default function DashboardHomePage() {
           subtitle="așteaptă aprobare"
           icon={Download}
           accentColor="bg-purple-500"
-          href="/importuri"
+          href={ROUTES.imports}
           badge={{
             text: `${stats.pendingImports} de revizuit`,
             color: "bg-purple-100 text-purple-700",
@@ -367,9 +405,9 @@ export default function DashboardHomePage() {
           subtitle={`${stats.monthlySalaryEmployeeCount} angajați LUNAR`}
           icon={Wallet}
           accentColor="bg-emerald-500"
-          href="/angajati?salaryType=LUNAR"
+          href={`${ROUTES.employees}?salaryType=LUNAR`}
           badge={{
-            text: `Monedă predominantă: ${stats.monthlySalaryCurrency}`,
+            text: `In ${stats.monthlySalaryPredominantCurrency}, total estimat in RON (curs indicativ)`,
             color: "bg-emerald-100 text-emerald-700",
           }}
         />
@@ -387,14 +425,14 @@ export default function DashboardHomePage() {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <TrendingUp size={18} className="text-gray-400" />
-            <h3 className="font-semibold text-gray-900">Activitate recentă</h3>
+            <h3 className="font-semibold text-gray-900">{ro.dashboard.recentActivity}</h3>
           </div>
-          <span className="text-xs text-gray-400">Ultimele 7 zile</span>
+          <span className="text-xs text-gray-400">{ro.dashboard.last7Days}</span>
         </div>
 
         <div className="space-y-3">
           {recentActivity.length === 0 && (
-            <p className="text-sm text-gray-400">Nu există activitate recentă.</p>
+            <p className="text-sm text-gray-400">{ro.dashboard.noRecentActivity}</p>
           )}
           {recentActivity.map((item) => (
             <div
@@ -414,9 +452,11 @@ export default function DashboardHomePage() {
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900">
-                  {item.action.replaceAll("_", " ")}
+                  {tAuditAction(item.action)}
                 </p>
-                <p className="text-xs text-gray-500 truncate">{item.detail}</p>
+                <p className="text-xs text-gray-500 truncate">
+                  {formatAuditActivityDetail(item.entity, item.entityId, item.userName)}
+                </p>
               </div>
               <span className="text-xs text-gray-400 shrink-0">
                 {formatRelativeTime(item.createdAt)}
@@ -433,11 +473,11 @@ function formatRelativeTime(dateIso: string): string {
   const date = new Date(dateIso);
   const diffMs = Date.now() - date.getTime();
   const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return "Acum";
-  if (mins < 60) return `Acum ${mins} min`;
+  if (mins < 1) return ro.common.relativeNow;
+  if (mins < 60) return ro.common.relativeMins.replace("{n}", String(mins));
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `Acum ${hours} h`;
+  if (hours < 24) return ro.common.relativeHours.replace("{n}", String(hours));
   const days = Math.floor(hours / 24);
-  if (days < 7) return `Acum ${days} zile`;
+  if (days < 7) return ro.common.relativeDays.replace("{n}", String(days));
   return date.toLocaleDateString("ro-RO");
 }

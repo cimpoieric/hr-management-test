@@ -1,5 +1,5 @@
 /**
- * Layout pentru ruta canonică /dashboard (aceeași zonă autentificată ca grupul (dashboard)).
+ * Layout pentru redirect-ul /dashboard → /panou-de-control (aceeași zonă ca grupul (dashboard)).
  */
 
 import { AuthenticatedDashboardShell } from "@/components/layout/AuthenticatedDashboardShell";

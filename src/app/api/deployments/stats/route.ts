@@ -1,14 +1,15 @@
 /**
  * GET /api/deployments/stats
  *
- * Returnează numărul de detașări active per țară.
- * Util pentru cardul din dashboard.
+ * Numără detașările cu `status: ACTIVE` (același criteriu ca dashboard-ul și lista fără filtru de dată).
+ * Repartizare per țară doar pentru coduri din DEPLOYMENT_COUNTRIES.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
+import { activeDeploymentKpiWhere } from "@/lib/activeDeployments";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
@@ -20,10 +21,7 @@ export async function GET(request: NextRequest) {
     // Query brută — group by country pe status ACTIVE
     // SQLite Prisma nu are groupBy direct pentru count, facem în JS
     const activeDeployments = await prisma.deployment.findMany({
-      where: {
-        status: "ACTIVE",
-        OR: [{ endDate: null }, { endDate: { gte: new Date() } }],
-      },
+      where: activeDeploymentKpiWhere,
       select: { country: true },
     });
 

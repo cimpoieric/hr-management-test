@@ -24,6 +24,8 @@ interface Deployment {
   endDate: string | null;
   status: string;
   notes: string | null;
+  /** Ultima modificare (ex. moment anulare pentru CANCELLED). */
+  updatedAt?: string;
   employee: {
     id: number;
     firstName: string;
@@ -36,7 +38,7 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string; label: string }>
   PLANNED: { bg: "bg-blue-100", text: "text-blue-700", label: "Planificată" },
   ACTIVE: { bg: "bg-green-100", text: "text-green-700", label: "Activă" },
   COMPLETED: { bg: "bg-gray-100", text: "text-gray-700", label: "Finalizată" },
-  CANCELLED: { bg: "bg-red-100", text: "text-red-700", label: "Anulată" },
+  CANCELLED: { bg: "bg-gray-200", text: "text-gray-800", label: "Anulată" },
 };
 
 interface DeploymentListProps {
@@ -222,16 +224,33 @@ export function DeploymentList({
                     </p>
                   )}
 
-                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
-                    <span className="flex items-center gap-1">
-                      <Calendar size={12} />
-                      {formatDate(dep.startDate)} → {formatDate(dep.endDate)}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Globe size={12} />
-                      {duration(dep.startDate, dep.endDate)}
-                    </span>
-                  </div>
+                  {dep.status === "CANCELLED" ? (
+                    <div className="mt-2 space-y-1">
+                      <span className="inline-flex items-center rounded-full bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-800">
+                        Anulată la:{" "}
+                        {formatDate(
+                          dep.updatedAt ??
+                            dep.endDate ??
+                            dep.startDate
+                        )}
+                      </span>
+                      <p className="text-xs text-gray-400">
+                        Perioadă prevăzută: {formatDate(dep.startDate)} —{" "}
+                        {formatDate(dep.endDate)}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                      <span className="flex items-center gap-1">
+                        <Calendar size={12} />
+                        {formatDate(dep.startDate)} → {formatDate(dep.endDate)}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Globe size={12} />
+                        {duration(dep.startDate, dep.endDate)}
+                      </span>
+                    </div>
+                  )}
 
                   {dep.notes && (
                     <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">

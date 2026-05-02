@@ -47,7 +47,7 @@ export default function LoginPage() {
       }
 
       // Redirect normal
-      router.push("/dashboard");
+      router.push("/panou-de-control");
       router.refresh();
     } catch {
       setError("Eroare de rețea");

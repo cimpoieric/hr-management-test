@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { DOCUMENT_TYPES } from "@/lib/documentConstants";
+import { ro, tDocumentStatus } from "@/messages";
 
 interface DocumentItem {
   id: number;
@@ -24,9 +25,48 @@ interface DocumentItem {
   mimeType: string;
   issueDate: string | null;
   expiryDate: string | null;
+  uploadedAt?: string | null;
   createdAt: string;
   employee?: { id: number; firstName: string; lastName: string } | null;
   downloadUrl: string;
+}
+
+function mapApiDocument(raw: Record<string, unknown>): DocumentItem {
+  const str = (v: unknown): string | null =>
+    typeof v === "string" && v.length > 0 ? v : null;
+  const issue =
+    str(raw.issueDate) ?? str(raw.issue_date);
+  const expiry =
+    str(raw.expiryDate) ?? str(raw.expiry_date);
+  const uploaded =
+    str(raw.uploadedAt) ?? str(raw.uploaded_at);
+  const created =
+    str(raw.createdAt) ?? str(raw.created_at) ?? new Date().toISOString();
+  const num = raw.number;
+  const numberVal =
+    typeof num === "string" && num.trim().length > 0
+      ? num.trim()
+      : num != null && String(num).trim().length > 0
+        ? String(num).trim()
+        : null;
+
+  return {
+    id: Number(raw.id),
+    type: String(raw.type ?? ""),
+    number: numberVal,
+    fileName: String(raw.fileName ?? raw.file_name ?? ""),
+    status: String(raw.status ?? ""),
+    fileSize: Number(raw.fileSize ?? raw.file_size ?? 0),
+    mimeType: String(raw.mimeType ?? raw.mime_type ?? ""),
+    issueDate: issue,
+    expiryDate: expiry,
+    uploadedAt: uploaded,
+    createdAt: created,
+    employee: (raw.employee as DocumentItem["employee"]) ?? null,
+    downloadUrl: String(
+      raw.downloadUrl ?? raw.download_url ?? `/api/documents/${raw.id}/download`
+    ),
+  };
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -66,7 +106,8 @@ export function DocumentList({ employeeId, showEmployee = false }: DocumentListP
       const res = await fetch(`/api/documents?${params.toString()}`);
       if (!res.ok) throw new Error("Eroare");
       const data = await res.json();
-      setDocuments(data.documents ?? []);
+      const rawList = (data.documents ?? []) as Record<string, unknown>[];
+      setDocuments(rawList.map(mapApiDocument));
     } catch {
       setDocuments([]);
     } finally {
@@ -93,9 +134,19 @@ export function DocumentList({ employeeId, showEmployee = false }: DocumentListP
     }
   }
 
-  function formatDate(date: string | null): string {
-    if (!date) return "—";
-    return new Date(date).toLocaleDateString("ro-RO");
+  function formatDate(date: string | null | undefined): string {
+    if (date == null || date === "") return "—";
+    const d = new Date(date);
+    if (Number.isNaN(d.getTime())) return "—";
+    return d.toLocaleDateString("ro-RO");
+  }
+
+  function displayIssueDate(doc: DocumentItem): string {
+    const primary = formatDate(doc.issueDate);
+    if (primary !== "—") return primary;
+    const fromUpload = formatDate(doc.uploadedAt ?? null);
+    if (fromUpload !== "—") return fromUpload;
+    return formatDate(doc.createdAt);
   }
 
   function formatBytes(bytes: number): string {
@@ -125,7 +176,7 @@ export function DocumentList({ employeeId, showEmployee = false }: DocumentListP
           onChange={(e) => setTypeFilter(e.target.value)}
           className="px-3 py-1.5 rounded-lg border bg-white text-sm"
         >
-          <option value="">Toate tipurile</option>
+          <option value="">{ro.documents.filterAllTypes}</option>
           {DOCUMENT_TYPES.map((t) => (
             <option key={t} value={t}>
               {TYPE_LABELS[t] ?? t}
@@ -137,11 +188,11 @@ export function DocumentList({ employeeId, showEmployee = false }: DocumentListP
           onChange={(e) => setStatusFilter(e.target.value)}
           className="px-3 py-1.5 rounded-lg border bg-white text-sm"
         >
-          <option value="">Toate statusurile</option>
-          <option value="VALID">Valid</option>
-          <option value="EXPIRING_SOON">Expiră curând</option>
-          <option value="EXPIRED">Expirat</option>
-          <option value="PENDING">Pending</option>
+          <option value="">{ro.documents.filterAllStatuses}</option>
+          <option value="VALID">{tDocumentStatus("VALID")}</option>
+          <option value="EXPIRING_SOON">{tDocumentStatus("EXPIRING_SOON")}</option>
+          <option value="EXPIRED">{tDocumentStatus("EXPIRED")}</option>
+          <option value="PENDING">{tDocumentStatus("PENDING")}</option>
         </select>
         {(typeFilter || statusFilter) && (
           <button
@@ -241,7 +292,7 @@ export function DocumentList({ employeeId, showEmployee = false }: DocumentListP
                       </td>
 
                       <td className="px-4 py-3 text-gray-600">
-                        {formatDate(doc.issueDate)}
+                        {displayIssueDate(doc)}
                       </td>
 
                       <td className="px-4 py-3">
@@ -268,14 +319,17 @@ export function DocumentList({ employeeId, showEmployee = false }: DocumentListP
                             href={doc.downloadUrl}
                             download
                             className="p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
-                            title="Descarcă"
+                            title="Descărcare — salvează fișierul documentului"
+                            aria-label="Descarcă document"
                           >
                             <Download size={16} />
                           </a>
                           <button
+                            type="button"
                             onClick={() => handleDelete(doc.id)}
                             className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                            title="Șterge"
+                            title="Ștergere — elimină documentul din evidență (ireversibil)"
+                            aria-label="Șterge document"
                           >
                             <Trash2 size={16} />
                           </button>

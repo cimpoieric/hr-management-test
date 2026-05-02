@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MapPin, LayoutList, CalendarDays } from "lucide-react";
 import { DeploymentList } from "@/components/deployments/DeploymentList";
 import { DeploymentTimeline } from "@/components/deployments/DeploymentTimeline";
@@ -69,18 +69,29 @@ function StatsBar() {
     { code: string; name: string; flag: string; count: number }[]
   >([]);
   const [total, setTotal] = useState(0);
+  const [loaded, setLoaded] = useState(false);
 
-  useState(() => {
+  useEffect(() => {
+    let cancelled = false;
     fetch("/api/deployments/stats")
       .then((res) => res.json())
       .then((data) => {
-        setStats(data.stats ?? []);
-        setTotal(data.total ?? 0);
+        if (!cancelled) {
+          setStats(data.stats ?? []);
+          setTotal(Number(data.total ?? 0));
+        }
       })
-      .catch(() => {});
-  });
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  if (stats.length === 0) return null;
+  if (!loaded) return null;
+  if (total === 0) return null;
 
   return (
     <div className="bg-white rounded-xl border shadow-sm p-4">
@@ -114,24 +125,33 @@ function TimelineView() {
   >([]);
   const [loading, setLoading] = useState(true);
 
-  useState(() => {
+  useEffect(() => {
+    let cancelled = false;
     fetch("/api/deployments")
       .then((res) => res.json())
       .then((data) => {
-        setDeployments(
-          (data.deployments ?? []).map((d: Record<string, unknown>) => ({
-            id: d.id as number,
-            country: d.country as string,
-            city: d.city as string | null,
-            startDate: d.startDate as string,
-            endDate: d.endDate as string | null,
-            status: d.status as string,
-            employee: d.employee as { firstName: string; lastName: string } | null,
-          }))
-        );
+        if (!cancelled) {
+          setDeployments(
+            (data.deployments ?? []).map((d: Record<string, unknown>) => ({
+              id: d.id as number,
+              country: d.country as string,
+              city: d.city as string | null,
+              startDate: d.startDate as string,
+              endDate: d.endDate as string | null,
+              status: d.status as string,
+              updatedAt: typeof d.updatedAt === "string" ? d.updatedAt : undefined,
+              employee: d.employee as { firstName: string; lastName: string } | null,
+            }))
+          );
+        }
       })
-      .finally(() => setLoading(false));
-  });
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (loading) {
     return <div className="text-center py-12 text-gray-400">Se încarcă...</div>;

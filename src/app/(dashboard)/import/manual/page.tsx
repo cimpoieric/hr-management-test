@@ -71,7 +71,7 @@ export default function ImportManualPage() {
       }
 
       setProgress("Redirecționare...");
-      router.push(`/importuri-in-asteptare/${data.id}`);
+      router.push(`/importuri/${data.id}`);
     } catch {
       setError("Eroare de rețea. Încearcă din nou.");
       setUploading(false);

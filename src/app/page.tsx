@@ -2,7 +2,7 @@ import Link from "next/link";
 import { LogIn } from "lucide-react";
 
 /**
- * Pagină publică — acasă. Zona autentificată începe la /dashboard.
+ * Pagină publică — acasă. Zona autentificată începe la /panou-de-control.
  */
 export default function HomePage() {
   return (

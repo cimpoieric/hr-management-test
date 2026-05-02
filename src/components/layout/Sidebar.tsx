@@ -20,6 +20,26 @@ import {
   Globe2,
 } from "lucide-react";
 import type { UserRole } from "@/lib/auth";
+import { ro } from "@/messages";
+import { LEGACY_ROUTES, ROUTES } from "@/lib/routes";
+
+function isNavActive(pathname: string, href: string): boolean {
+  if (href === ROUTES.dashboard) {
+    return pathname === ROUTES.dashboard || pathname === LEGACY_ROUTES.dashboard;
+  }
+  if (href === ROUTES.imports) {
+    return (
+      pathname === ROUTES.imports ||
+      pathname.startsWith(`${ROUTES.imports}/`) ||
+      pathname === LEGACY_ROUTES.importsList ||
+      pathname.startsWith(`${LEGACY_ROUTES.importsList}/`)
+    );
+  }
+  if (href === ROUTES.settings) {
+    return pathname === ROUTES.settings;
+  }
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 interface RouteItem {
   href: string;
@@ -41,19 +61,19 @@ function PlataNavIcon({ size = 18 }: { size?: number }) {
 }
 
 const routes: RouteItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, adminOnly: false },
-  { href: "/angajati", label: "Angajați", icon: Users, adminOnly: false },
-  { href: "/documente", label: "Documente", icon: FileText, adminOnly: false },
-  { href: "/detasari", label: "Detașări", icon: MapPin, adminOnly: false },
-  { href: "/importuri-in-asteptare", label: "Importuri", icon: Download, adminOnly: false },
-  { href: "/rapoarte", label: "Rapoarte", icon: BarChart3, adminOnly: false },
-  { href: "/export", label: "Export", icon: FileSpreadsheet, adminOnly: false },
-  { href: "/plata", label: "Plată", icon: PlataNavIcon, adminOnly: false },
-  { href: "/setari", label: "Setări", icon: Settings, adminOnly: true },
-  { href: "/setari/firme", label: "Firme", icon: Factory, adminOnly: true },
-  { href: "/setari/tari", label: "Țări", icon: Globe2, adminOnly: true },
-  { href: "/utilizatori", label: "Utilizatori", icon: Shield, adminOnly: true },
-  { href: "/backup", label: "Backup", icon: Database, adminOnly: true },
+  { href: ROUTES.dashboard, label: ro.nav.dashboard, icon: LayoutDashboard, adminOnly: false },
+  { href: ROUTES.employees, label: ro.nav.employees, icon: Users, adminOnly: false },
+  { href: ROUTES.documents, label: ro.nav.documents, icon: FileText, adminOnly: false },
+  { href: ROUTES.deployments, label: ro.nav.deployments, icon: MapPin, adminOnly: false },
+  { href: ROUTES.imports, label: ro.nav.imports, icon: Download, adminOnly: false },
+  { href: ROUTES.reports, label: ro.nav.reports, icon: BarChart3, adminOnly: false },
+  { href: ROUTES.export, label: ro.nav.export, icon: FileSpreadsheet, adminOnly: false },
+  { href: ROUTES.pay, label: ro.nav.pay, icon: PlataNavIcon, adminOnly: false },
+  { href: ROUTES.settings, label: ro.nav.settings, icon: Settings, adminOnly: true },
+  { href: ROUTES.companies, label: ro.nav.companies, icon: Factory, adminOnly: true },
+  { href: ROUTES.countries, label: ro.nav.countries, icon: Globe2, adminOnly: true },
+  { href: ROUTES.users, label: ro.nav.users, icon: Shield, adminOnly: true },
+  { href: ROUTES.backup, label: ro.nav.backup, icon: Database, adminOnly: true },
 ];
 
 function SidebarNav({
@@ -70,14 +90,9 @@ function SidebarNav({
   const visibleRoutes = routes.filter((r) => !r.adminOnly || isAdmin);
 
   return (
-    <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+    <nav className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 py-3 lg:py-4 space-y-1">
       {visibleRoutes.map((route) => {
-        const isActive =
-          route.href === "/dashboard"
-            ? pathname === "/dashboard"
-            : route.href === "/setari"
-              ? pathname === "/setari"
-              : pathname === route.href || pathname.startsWith(`${route.href}/`);
+        const isActive = isNavActive(pathname, route.href);
 
         return (
           <Link
@@ -134,13 +149,13 @@ export function Sidebar({
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col transform transition-transform duration-200 lg:transform-none ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col min-h-0 h-dvh lg:h-full transform transition-transform duration-200 lg:transform-none ${
           isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
         {/* Logo */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-          <Link href="/dashboard" className="flex items-center gap-2.5">
+        <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-800">
+          <Link href={ROUTES.dashboard} className="flex items-center gap-2.5">
             <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
               <span className="text-slate-900 font-bold text-sm">HR</span>
             </div>
@@ -165,7 +180,7 @@ export function Sidebar({
         />
 
         {/* Footer */}
-        <div className="px-5 py-3 border-t border-slate-800 text-xs text-slate-500">
+        <div className="shrink-0 px-5 py-3 border-t border-slate-800 text-xs text-slate-500">
           HR Manager v0.1.0
         </div>
       </aside>

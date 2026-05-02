@@ -11,6 +11,7 @@ interface TimelineDeployment {
   startDate: string;
   endDate: string | null;
   status: string;
+  updatedAt?: string;
   employee?: { firstName: string; lastName: string } | null;
 }
 
@@ -68,9 +69,12 @@ export function DeploymentTimeline({
     let max = 0;
     for (const dep of deployments) {
       const start = new Date(dep.startDate).getTime();
-      const end = dep.endDate
-        ? new Date(dep.endDate).getTime()
-        : Date.now();
+      const end =
+        dep.status === "CANCELLED"
+          ? new Date(dep.updatedAt ?? dep.startDate).getTime()
+          : dep.endDate
+            ? new Date(dep.endDate).getTime()
+            : Date.now();
       max = Math.max(max, end - start);
     }
     return max;
@@ -92,7 +96,7 @@ export function DeploymentTimeline({
       case "COMPLETED":
         return "bg-gray-400";
       case "CANCELLED":
-        return "bg-red-400";
+        return "bg-gray-400";
       default:
         return "bg-gray-300";
     }
@@ -138,7 +142,12 @@ export function DeploymentTimeline({
                             dep.status
                           )}`}
                           style={{
-                            width: barWidth(dep.startDate, dep.endDate),
+                            width: barWidth(
+                              dep.startDate,
+                              dep.status === "CANCELLED"
+                                ? dep.updatedAt ?? dep.startDate
+                                : dep.endDate
+                            ),
                           }}
                         />
                       </div>
@@ -166,12 +175,29 @@ export function DeploymentTimeline({
                         )}
 
                         <p className="text-xs text-gray-400 mt-1">
-                          {new Date(dep.startDate).toLocaleDateString("ro-RO")}
-                          {dep.endDate
-                            ? ` → ${new Date(dep.endDate).toLocaleDateString(
-                                "ro-RO"
-                              )}`
-                            : " → în desfășurare"}
+                          {dep.status === "CANCELLED" ? (
+                            <>
+                              <span className="inline-flex items-center rounded-full bg-gray-200 px-1.5 py-0.5 font-medium text-gray-800">
+                                Anulată la:{" "}
+                                {new Date(
+                                  dep.updatedAt ?? dep.endDate ?? dep.startDate
+                                ).toLocaleDateString("ro-RO")}
+                              </span>
+                              <span className="block mt-0.5 text-gray-400">
+                                Prevăzut: {new Date(dep.startDate).toLocaleDateString("ro-RO")}
+                                {dep.endDate
+                                  ? ` — ${new Date(dep.endDate).toLocaleDateString("ro-RO")}`
+                                  : ""}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              {new Date(dep.startDate).toLocaleDateString("ro-RO")}
+                              {dep.endDate
+                                ? ` → ${new Date(dep.endDate).toLocaleDateString("ro-RO")}`
+                                : " → în desfășurare"}
+                            </>
+                          )}
                         </p>
                       </div>
 
@@ -206,7 +232,7 @@ export function DeploymentTimeline({
           Finalizată
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
+          <span className="w-2.5 h-2.5 rounded-full bg-gray-400" />
           Anulată
         </span>
       </div>

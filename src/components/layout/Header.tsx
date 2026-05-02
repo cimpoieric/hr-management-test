@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import {
   Bell,
   RefreshCw,
@@ -11,6 +11,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import type { AuthContext } from "@/lib/auth";
+import { ro } from "@/messages";
 
 interface HeaderProps {
   user: AuthContext;
@@ -26,6 +27,7 @@ type NotificationItem = {
 
 export function Header({ user }: HeaderProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -34,6 +36,11 @@ export function Header({ user }: HeaderProps) {
     { id: 2, type: "info", message: "Import nou în așteptare de aprobare.", time: "Acum 5 ore", read: false },
     { id: 3, type: "success", message: "Backup zilnic finalizat cu succes.", time: "Ieri, 22:10", read: true },
   ]);
+
+  useEffect(() => {
+    setDropdownOpen(false);
+    setNotificationsOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     fetch("/api/notifications", { cache: "no-store" })
@@ -74,7 +81,7 @@ export function Header({ user }: HeaderProps) {
 
       {/* Titlu pagină — placeholder, poate fi extins cu breadcrumb */}
       <div className="hidden md:flex items-center text-sm text-gray-500">
-        <span className="font-medium text-gray-900">Dashboard</span>
+        <span className="font-medium text-gray-900">{ro.nav.dashboard}</span>
       </div>
 
       {/* Acțiuni dreapta */}
