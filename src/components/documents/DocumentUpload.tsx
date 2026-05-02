@@ -1,32 +1,47 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Upload, FileText, X, CheckCircle2, AlertCircle, FileImage } from "lucide-react";
-import { DOCUMENT_TYPES } from "@/lib/documentConstants";
+import {
+  DOCUMENT_TYPE_OPTIONS,
+  isValidDocumentType,
+  type DocumentType,
+} from "@/lib/documentConstants";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { calculateStatus } from "@/lib/documentStatus";
+import { notifyDocumentsChanged } from "@/lib/documentsSync";
+
+interface EmployeeOption {
+  id: number;
+  firstName: string;
+  lastName: string;
+}
 
 interface DocumentUploadProps {
-  employeeId: number;
+  /**
+   * Dacă e setat și > 0 — același flux ca pe /angajati/[id] (angajat fix).
+   * Dacă lipsește sau e ≤ 0 — se afișează listă de selectare angajat (pagina /documente).
+   */
+  employeeId?: number;
   onSuccess?: () => void;
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  CONTRACT: "Contract de muncă",
-  ID: "Act identitate",
-  MEDICAL: "Certificat medical",
-  A1: "Formular A1",
-  AUTHORIZATION: "Autorizație",
-  VISA: "Viză",
-  OTHER: "Alt document",
-};
+export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: DocumentUploadProps) {
+  const fixedEmployeeId =
+    employeeIdProp != null && employeeIdProp > 0 ? employeeIdProp : null;
+  const needsEmployeePicker = fixedEmployeeId == null;
 
-export function DocumentUpload({ employeeId, onSuccess }: DocumentUploadProps) {
   const [file, setFile] = useState<File | null>(null);
-  const [type, setType] = useState("CONTRACT");
+  const [type, setType] = useState<DocumentType>("CONTRACT");
   const [number, setNumber] = useState("");
   const [issueDate, setIssueDate] = useState("");
   const [expiryDate, setExpiryDate] = useState("");
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [employeeFieldError, setEmployeeFieldError] = useState<string | null>(null);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
+  const [employeesError, setEmployeesError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<{
@@ -34,6 +49,79 @@ export function DocumentUpload({ employeeId, onSuccess }: DocumentUploadProps) {
     message: string;
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!needsEmployeePicker) return;
+    let cancelled = false;
+    setEmployeesLoading(true);
+    setEmployeesError(null);
+    const load = async () => {
+      try {
+        const all: EmployeeOption[] = [];
+        let page = 1;
+        let totalPages = 1;
+        do {
+          const params = new URLSearchParams({
+            page: String(page),
+            limit: "100",
+            sortBy: "lastName",
+            sortOrder: "asc",
+            status: "ACTIVE",
+          });
+          const res = await fetch(`/api/employees?${params}`, {
+            credentials: "include",
+          });
+          if (!res.ok) {
+            const err = (await res.json().catch(() => ({}))) as { error?: string };
+            throw new Error(err.error ?? "Nu s-a putut încărca lista de angajați");
+          }
+          const json = (await res.json()) as {
+            data?: Array<{ id: number; firstName: string; lastName: string }>;
+            totalPages?: number;
+          };
+          const chunk = json.data ?? [];
+          for (const e of chunk) {
+            all.push({
+              id: e.id,
+              firstName: e.firstName,
+              lastName: e.lastName,
+            });
+          }
+          totalPages = Math.max(1, Number(json.totalPages) || 1);
+          page += 1;
+        } while (page <= totalPages && page <= 20);
+        if (!cancelled) setEmployees(all);
+      } catch (e) {
+        if (!cancelled) {
+          setEmployees([]);
+          setEmployeesError(e instanceof Error ? e.message : "Eroare la încărcare");
+        }
+      } finally {
+        if (!cancelled) setEmployeesLoading(false);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [needsEmployeePicker]);
+
+  const resolvedDocumentType: DocumentType = isValidDocumentType(type) ? type : "CONTRACT";
+
+  useEffect(() => {
+    if (!isValidDocumentType(type)) {
+      setType("CONTRACT");
+    }
+  }, [type]);
+
+  const filteredEmployees = useMemo(() => {
+    const q = employeeSearch.trim().toLowerCase();
+    if (!q) return employees;
+    return employees.filter((e) => {
+      const full = `${e.lastName} ${e.firstName} ${e.firstName} ${e.lastName}`.toLowerCase();
+      return full.includes(q);
+    });
+  }, [employees, employeeSearch]);
 
   const previewStatus = expiryDate
     ? calculateStatus(new Date(expiryDate))
@@ -76,35 +164,84 @@ export function DocumentUpload({ employeeId, onSuccess }: DocumentUploadProps) {
     e.preventDefault();
     if (!file) return;
 
+    if (needsEmployeePicker) {
+      const trimmedSel = selectedEmployeeId.trim();
+      if (!trimmedSel) {
+        setEmployeeFieldError("Angajatul este obligatoriu");
+        setResult(null);
+        return;
+      }
+      setEmployeeFieldError(null);
+    }
+
+    const uploadEmployeeId = fixedEmployeeId ?? parseInt(selectedEmployeeId, 10);
+    if (!uploadEmployeeId || Number.isNaN(uploadEmployeeId)) {
+      setEmployeeFieldError("Angajatul este obligatoriu");
+      setResult(null);
+      return;
+    }
+
+    if (!number.trim()) {
+      setResult({ success: false, message: "Completează numărul documentului." });
+      return;
+    }
+    if (!issueDate) {
+      setResult({ success: false, message: "Selectează data emiterii." });
+      return;
+    }
+    if (!expiryDate) {
+      setResult({ success: false, message: "Selectează data expirării." });
+      return;
+    }
+
     setUploading(true);
     setResult(null);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("employeeId", String(employeeId));
-      formData.append("type", type);
-      if (number) formData.append("number", number);
-      if (issueDate) formData.append("issueDate", issueDate);
-      if (expiryDate) formData.append("expiryDate", expiryDate);
+      formData.append("employeeId", String(uploadEmployeeId));
+      formData.append("type", resolvedDocumentType);
+      formData.append("number", number.trim());
+      formData.append("issueDate", issueDate);
+      formData.append("expiryDate", expiryDate);
 
       const res = await fetch("/api/documents/upload", {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
 
-      const data = await res.json();
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        field?: string;
+        fileName?: string;
+      };
 
       if (res.ok) {
-        setResult({ success: true, message: `Document „${data.fileName}" încărcat cu succes` });
+        setEmployeeFieldError(null);
+        setResult({
+          success: true,
+          message: `Document „${data.fileName ?? "fișier"}" încărcat cu succes`,
+        });
         setFile(null);
+        setType("CONTRACT");
         setNumber("");
         setIssueDate("");
         setExpiryDate("");
+        setSelectedEmployeeId("");
+        setEmployeeSearch("");
         if (inputRef.current) inputRef.current.value = "";
         onSuccess?.();
+        notifyDocumentsChanged();
       } else {
-        setResult({ success: false, message: data.error ?? "Eroare la upload" });
+        if (data.field === "employeeId" && data.error) {
+          setEmployeeFieldError(data.error);
+          setResult(null);
+        } else {
+          setEmployeeFieldError(null);
+          setResult({ success: false, message: data.error ?? "Eroare la upload" });
+        }
       }
     } catch {
       setResult({ success: false, message: "Eroare de rețea" });
@@ -173,21 +310,108 @@ export function DocumentUpload({ employeeId, onSuccess }: DocumentUploadProps) {
         )}
       </div>
 
+      {needsEmployeePicker && (
+        <div className="rounded-xl border-2 border-slate-300 bg-white p-4 shadow-sm ring-1 ring-slate-100">
+          <label
+            htmlFor="upload-employee-select"
+            className="mb-2 block text-sm font-semibold text-slate-900"
+          >
+            Angajat *
+          </label>
+          <p className="mb-3 text-xs text-slate-600">
+            Selectați angajatul activ căruia îi aparține documentul (obligatoriu înainte de
+            încărcare).
+          </p>
+          {employeesLoading ? (
+            <div
+              className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-8 text-center text-sm text-slate-500"
+              aria-busy="true"
+            >
+              Se încarcă angajații activi…
+            </div>
+          ) : employeesError ? (
+            <p className="text-sm font-medium text-red-600" role="alert">
+              {employeesError}
+            </p>
+          ) : employees.length === 0 ? (
+            <p className="text-sm text-amber-800">
+              Nu există angajați activi în sistem. Adăugați un angajat sau activați unul
+              existent.
+            </p>
+          ) : (
+            <>
+              <input
+                type="search"
+                value={employeeSearch}
+                onChange={(e) => setEmployeeSearch(e.target.value)}
+                placeholder="Filtrați după nume…"
+                className="mb-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none ring-slate-400 focus:ring-2"
+                aria-label="Filtru nume angajat"
+              />
+              <select
+                id="upload-employee-select"
+                value={selectedEmployeeId}
+                onChange={(e) => {
+                  setSelectedEmployeeId(e.target.value);
+                  setEmployeeFieldError(null);
+                  setResult(null);
+                }}
+                className={`w-full rounded-lg border bg-white px-3 py-3 text-sm font-medium text-slate-900 shadow-inner outline-none focus:ring-2 focus:ring-slate-900 ${
+                  employeeFieldError ? "border-red-400 ring-1 ring-red-200" : "border-slate-300"
+                }`}
+                aria-invalid={employeeFieldError ? "true" : "false"}
+                aria-describedby={
+                  employeeFieldError ? "upload-employee-error" : undefined
+                }
+              >
+                <option value="">Selectați angajatul</option>
+                {filteredEmployees.map((emp) => (
+                  <option key={emp.id} value={String(emp.id)}>
+                    {emp.lastName} {emp.firstName}
+                  </option>
+                ))}
+              </select>
+              {employeeFieldError && (
+                <p
+                  id="upload-employee-error"
+                  className="mt-2 text-sm font-medium text-red-600"
+                  role="alert"
+                >
+                  {employeeFieldError}
+                </p>
+              )}
+              {employeeSearch.trim() && filteredEmployees.length === 0 && (
+                <p className="mt-2 text-xs text-slate-500">Niciun angajat nu se potrivește filtrului.</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {/* Form fields */}
       {file && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white rounded-xl border p-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label
+              htmlFor="upload-document-type"
+              className="mb-1 block text-sm font-medium text-gray-700"
+            >
               Tip document *
             </label>
             <select
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
+              id="upload-document-type"
+              key="upload-document-type-select"
+              name="documentType"
+              value={resolvedDocumentType}
+              onChange={(e) => {
+                const v = e.target.value;
+                setType(isValidDocumentType(v) ? v : "CONTRACT");
+              }}
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-slate-950"
             >
-              {DOCUMENT_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {TYPE_LABELS[t] ?? t}
+              {DOCUMENT_TYPE_OPTIONS.map(({ code, label }) => (
+                <option key={code} value={code}>
+                  {label}
                 </option>
               ))}
             </select>
@@ -195,37 +419,40 @@ export function DocumentUpload({ employeeId, onSuccess }: DocumentUploadProps) {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Număr document
+              Număr document *
             </label>
             <input
               type="text"
               value={number}
               onChange={(e) => setNumber(e.target.value)}
               placeholder="Ex: 123/2024"
+              required
               className="w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Data emitere
+              Data emitere *
             </label>
             <input
               type="date"
               value={issueDate}
               onChange={(e) => setIssueDate(e.target.value)}
+              required
               className="w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
             />
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Data expirare
+              Data expirare *
             </label>
             <input
               type="date"
               value={expiryDate}
               onChange={(e) => setExpiryDate(e.target.value)}
+              required
               className="w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
             />
           </div>

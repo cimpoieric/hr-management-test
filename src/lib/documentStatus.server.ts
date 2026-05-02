@@ -9,6 +9,7 @@ import "server-only";
 
 import { prisma } from "@/lib/prisma";
 import { calculateStatus } from "@/lib/documentStatus";
+import { documentsWhereVisible } from "@/lib/documentVisibility";
 
 /**
  * Actualizează statusurile tuturor documentelor din DB.
@@ -20,7 +21,7 @@ export async function updateDocumentStatuses(): Promise<{
   expiringSoon: number;
 }> {
   const documents = await prisma.document.findMany({
-    where: { status: { not: "EXPIRED" } },
+    where: documentsWhereVisible({ status: { not: "EXPIRED" } }),
     select: {
       id: true,
       status: true,
@@ -79,10 +80,18 @@ export async function getDocumentStatusSummary(): Promise<{
   total: number;
 }> {
   const [valid, expiringSoon, expired, pending] = await Promise.all([
-    prisma.document.count({ where: { status: "VALID" } }),
-    prisma.document.count({ where: { status: "EXPIRING_SOON" } }),
-    prisma.document.count({ where: { status: "EXPIRED" } }),
-    prisma.document.count({ where: { status: "PENDING" } }),
+    prisma.document.count({
+      where: documentsWhereVisible({ status: "VALID" }),
+    }),
+    prisma.document.count({
+      where: documentsWhereVisible({ status: "EXPIRING_SOON" }),
+    }),
+    prisma.document.count({
+      where: documentsWhereVisible({ status: "EXPIRED" }),
+    }),
+    prisma.document.count({
+      where: documentsWhereVisible({ status: "PENDING" }),
+    }),
   ]);
 
   return { valid, expiringSoon, expired, pending, total: valid + expiringSoon + expired + pending };

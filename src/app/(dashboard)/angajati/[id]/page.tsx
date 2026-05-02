@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, type FormEvent } from "react";
+import { Suspense, useState, useEffect, useCallback, type FormEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -586,7 +586,15 @@ function DocumentsTab({
         </div>
       )}
 
-      <DocumentList key={refreshKey} employeeId={employeeId} />
+      <Suspense
+        fallback={
+          <div className="text-center py-8 text-gray-400 text-sm bg-white rounded-xl border">
+            Se încarcă documentele…
+          </div>
+        }
+      >
+        <DocumentList key={refreshKey} employeeId={employeeId} />
+      </Suspense>
     </div>
   );
 }
@@ -661,7 +669,15 @@ function DeploymentsTab({
       )}
 
       {view === "list" ? (
-        <DeploymentList employeeId={employeeId} key={refreshKey} />
+        <Suspense
+          fallback={
+            <div className="text-center py-8 text-gray-400 text-sm bg-white rounded-xl border">
+              Se încarcă detașările…
+            </div>
+          }
+        >
+          <DeploymentList employeeId={employeeId} key={refreshKey} />
+        </Suspense>
       ) : (
         <div className="bg-white rounded-xl border shadow-sm p-6">
           <DeploymentTimeline deployments={timelineData} />

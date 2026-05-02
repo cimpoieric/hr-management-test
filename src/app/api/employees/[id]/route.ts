@@ -75,6 +75,7 @@ export async function GET(
         company: { select: { id: true, name: true, taxCode: true } },
         country: { select: { id: true, name: true, code: true, phoneCode: true } },
         documents: {
+          where: { deletedAt: null },
           select: { id: true, type: true, fileName: true, uploadedAt: true },
         },
         deployments: {

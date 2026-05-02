@@ -2,12 +2,13 @@ import Link from "next/link";
 import { Plus } from "lucide-react";
 import { EmployeeTable } from "@/components/employees/EmployeeTable";
 import { prisma } from "@/lib/prisma";
+import { getEmployeeStats } from "@/lib/employeeStats";
 
 export const dynamic = "force-dynamic";
 
 export default async function AngajatiPage() {
   // Fetch companies server-side for the filter dropdown
-  const [companies, countries] = await Promise.all([
+  const [companies, countries, canonicalKpi] = await Promise.all([
     prisma.company.findMany({
       where: { status: "Activ" },
       select: { id: true, name: true },
@@ -17,6 +18,7 @@ export default async function AngajatiPage() {
       select: { id: true, name: true, code: true },
       orderBy: { name: "asc" },
     }),
+    getEmployeeStats(),
   ]);
 
   return (
@@ -39,7 +41,13 @@ export default async function AngajatiPage() {
       </div>
 
       {/* Tabel cu filtre avansate și selecție bulk */}
-      <EmployeeTable companies={companies} countries={countries} showAdvancedFilters showBulkActions />
+      <EmployeeTable
+        companies={companies}
+        countries={countries}
+        showAdvancedFilters
+        showBulkActions
+        canonicalKpi={canonicalKpi}
+      />
     </div>
   );
 }

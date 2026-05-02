@@ -7,6 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { canEditEmployee } from "@/lib/permissions";
@@ -38,11 +39,39 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
 
     const file = formData.get("file") as File | null;
-    const employeeId = parseInt(formData.get("employeeId") as string, 10);
+    const employeeIdRaw = formData.get("employeeId");
+    const employeeIdStr =
+      typeof employeeIdRaw === "string"
+        ? employeeIdRaw.trim()
+        : employeeIdRaw != null
+          ? String(employeeIdRaw).trim()
+          : "";
+
+    const employeeIdParsed = z
+      .string()
+      .min(1, { message: "Angajatul este obligatoriu" })
+      .regex(/^\d+$/, {
+        message: "Selectați un angajat valid din listă.",
+      })
+      .transform((s) => parseInt(s, 10))
+      .pipe(z.number().int().positive({ message: "ID angajat invalid." }))
+      .safeParse(employeeIdStr);
+
+    if (!employeeIdParsed.success) {
+      const msg =
+        employeeIdParsed.error.issues[0]?.message ?? "Angajatul este obligatoriu";
+      return NextResponse.json(
+        { error: msg, field: "employeeId" },
+        { status: 400 }
+      );
+    }
+
+    const employeeId = employeeIdParsed.data;
     const type = formData.get("type") as string;
-    const number = (formData.get("number") as string) || null;
-    const issueDateStr = (formData.get("issueDate") as string) || null;
-    const expiryDateStr = (formData.get("expiryDate") as string) || null;
+    const numberRaw = (formData.get("number") as string) ?? "";
+    const number = numberRaw.trim() || null;
+    const issueDateStr = ((formData.get("issueDate") as string) ?? "").trim() || null;
+    const expiryDateStr = ((formData.get("expiryDate") as string) ?? "").trim() || null;
 
     // ─── Validare ────────────────────────────────────────────────
 
@@ -53,18 +82,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!employeeId || isNaN(employeeId)) {
-      return NextResponse.json(
-        { error: "ID angajat invalid" },
-        { status: 400 }
-      );
-    }
-
     if (!isValidDocumentType(type)) {
       return NextResponse.json(
         { error: "Tip document invalid", validTypes: ["CONTRACT", "ID", "MEDICAL", "A1", "AUTHORIZATION", "VISA", "OTHER"] },
         { status: 400 }
       );
+    }
+
+    if (!number) {
+      return NextResponse.json(
+        { error: "Număr document obligatoriu (ex. nr. contract, serie CI)" },
+        { status: 400 }
+      );
+    }
+    if (!issueDateStr) {
+      return NextResponse.json({ error: "Data emiterii este obligatorie" }, { status: 400 });
+    }
+    if (!expiryDateStr) {
+      return NextResponse.json({ error: "Data expirării este obligatorie" }, { status: 400 });
     }
 
     // Verifică employee există
@@ -97,10 +132,16 @@ export async function POST(request: NextRequest) {
 
     // ─── Parse date ──────────────────────────────────────────────
 
-    const issueDate = issueDateStr ? new Date(issueDateStr) : null;
-    const expiryDate = expiryDateStr ? new Date(expiryDateStr) : null;
+    const issueDate = new Date(issueDateStr!);
+    const expiryDate = new Date(expiryDateStr!);
+    if (Number.isNaN(issueDate.getTime())) {
+      return NextResponse.json({ error: "Data emiterii invalidă" }, { status: 400 });
+    }
+    if (Number.isNaN(expiryDate.getTime())) {
+      return NextResponse.json({ error: "Data expirării invalidă" }, { status: 400 });
+    }
 
-    if (expiryDate && issueDate && expiryDate < issueDate) {
+    if (expiryDate < issueDate) {
       return NextResponse.json(
         { error: "Data expirării trebuie să fie după data emiterii" },
         { status: 400 }
@@ -129,7 +170,7 @@ export async function POST(request: NextRequest) {
       data: {
         employeeId,
         type,
-        number: number || null,
+        number,
         fileName: file.name,
         storagePath: relativePath,
         fileSize: file.size,
@@ -158,15 +199,16 @@ export async function POST(request: NextRequest) {
       {
         id: document.id,
         type: document.type,
+        number: document.number,
         fileName: document.fileName,
         status: document.status,
         fileSize: document.fileSize,
         mimeType: document.mimeType,
-        issueDate: document.issueDate,
-        expiryDate: document.expiryDate,
+        issueDate: document.issueDate ? document.issueDate.toISOString() : null,
+        expiryDate: document.expiryDate ? document.expiryDate.toISOString() : null,
         employee: document.employee,
         downloadUrl: `/api/documents/${document.id}/download`,
-        createdAt: document.createdAt,
+        createdAt: document.createdAt.toISOString(),
       },
       { status: 201 }
     );

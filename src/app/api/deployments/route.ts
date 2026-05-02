@@ -5,7 +5,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { activeDeploymentKpiWhere } from "@/lib/activeDeployments";
 import { requireAuth } from "@/lib/auth";
 import { canEditEmployee } from "@/lib/permissions";
 import {
@@ -106,32 +108,29 @@ export async function GET(request: NextRequest) {
     const employeeId = searchParams.get("employeeId");
     const country = searchParams.get("country");
     const status = searchParams.get("status");
-    const active = searchParams.get("active"); // "true" = doar cele fără endDate sau endDate >= azi
+    const active = searchParams.get("active"); // "true" = același criteriu ca dashboard / stats (activeDeploymentKpiWhere)
 
-    const where: Record<string, unknown> = {};
+    const at = new Date();
+    const filters: Prisma.DeploymentWhereInput[] = [];
 
     if (employeeId) {
-      where.employeeId = parseInt(employeeId, 10);
+      filters.push({ employeeId: parseInt(employeeId, 10) });
     }
 
     if (country && isValidCountryCode(country)) {
-      where.country = country.toUpperCase();
+      filters.push({ country: country.toUpperCase() });
     }
 
     if (status && isValidDeploymentStatus(status)) {
-      where.status = status;
+      filters.push({ status });
     }
 
-    // Active = endDate is null OR endDate >= today
     if (active === "true") {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      where.OR = [
-        { endDate: null },
-        { endDate: { gte: today } },
-      ];
-      where.status = { not: "CANCELLED" };
+      filters.push(activeDeploymentKpiWhere(at));
     }
+
+    const where: Prisma.DeploymentWhereInput =
+      filters.length === 0 ? {} : filters.length === 1 ? filters[0]! : { AND: filters };
 
     const deployments = await prisma.deployment.findMany({
       where,

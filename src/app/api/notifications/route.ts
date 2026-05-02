@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { getAppSettings } from "@/lib/appSettings";
+import { documentsWhereVisible } from "@/lib/documentVisibility";
 
 type NotificationType = "warning" | "info" | "success";
 
@@ -25,9 +26,13 @@ export async function GET(request: NextRequest) {
     );
 
     const [expiredDocs, expiringDocs, expiringDeployments, pendingImports, recentAudit] = await Promise.all([
-      prisma.document.count({ where: { expiryDate: { not: null, lt: now } } }),
       prisma.document.count({
-        where: { expiryDate: { not: null, gte: now, lte: inDocAlertDays } },
+        where: documentsWhereVisible({ expiryDate: { not: null, lt: now } }),
+      }),
+      prisma.document.count({
+        where: documentsWhereVisible({
+          expiryDate: { not: null, gte: now, lte: inDocAlertDays },
+        }),
       }),
       prisma.deployment.count({
         where: {

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   Mail,
@@ -31,12 +32,27 @@ interface PendingImport {
   createdAt: string;
 }
 
-export default function ImporturiPage() {
+function ImporturiPageContent() {
+  const searchParams = useSearchParams();
   const [imports, setImports] = useState<PendingImport[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+
+  useEffect(() => {
+    const raw = searchParams.get("status")?.trim();
+    if (!raw) return;
+    const low = raw.toLowerCase();
+    if (low === "pending") {
+      setStatusFilter("PENDING");
+      return;
+    }
+    const up = raw.toUpperCase();
+    if (["PENDING", "DRAFT", "APPROVED", "REJECTED"].includes(up)) {
+      setStatusFilter(up);
+    }
+  }, [searchParams]);
 
   const fetchImports = useCallback(async () => {
     setLoading(true);
@@ -232,5 +248,17 @@ export default function ImporturiPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ImporturiPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-24 text-gray-400 text-sm">Se încarcă importurile…</div>
+      }
+    >
+      <ImporturiPageContent />
+    </Suspense>
   );
 }

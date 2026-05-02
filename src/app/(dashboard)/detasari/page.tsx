@@ -1,19 +1,31 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { MapPin, LayoutList, CalendarDays } from "lucide-react";
 import { DeploymentList } from "@/components/deployments/DeploymentList";
 import { DeploymentTimeline } from "@/components/deployments/DeploymentTimeline";
+import { isValidDeploymentStatus } from "@/lib/countries";
 
 type ViewMode = "list" | "timeline";
 
 export default function DetasariPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-24 text-gray-400 text-sm">Se încarcă detașările…</div>
+      }
+    >
+      <DetasariPageInner />
+    </Suspense>
+  );
+}
+
+function DetasariPageInner() {
   const [view, setView] = useState<ViewMode>("list");
-  const [refreshKey, setRefreshKey] = useState(0);
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Detașări</h1>
@@ -22,9 +34,9 @@ export default function DetasariPage() {
           </p>
         </div>
 
-        {/* View toggle */}
         <div className="flex items-center bg-white rounded-lg border overflow-hidden">
           <button
+            type="button"
             onClick={() => setView("list")}
             className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${
               view === "list"
@@ -36,6 +48,7 @@ export default function DetasariPage() {
             Listă
           </button>
           <button
+            type="button"
             onClick={() => setView("timeline")}
             className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors ${
               view === "timeline"
@@ -49,20 +62,16 @@ export default function DetasariPage() {
         </div>
       </div>
 
-      {/* Stats bar */}
-      <StatsBar key={refreshKey} />
+      <StatsBar />
 
-      {/* Content */}
       {view === "list" ? (
-        <DeploymentList showEmployee key={"list-" + refreshKey} />
+        <DeploymentList showEmployee />
       ) : (
-        <TimelineView key={"timeline-" + refreshKey} />
+        <TimelineView />
       )}
     </div>
   );
 }
-
-// ─── Stats Bar ───────────────────────────────────────────────────────────────
 
 function StatsBar() {
   const [stats, setStats] = useState<
@@ -98,9 +107,7 @@ function StatsBar() {
       <div className="flex items-center gap-6 flex-wrap">
         <div className="flex items-center gap-2">
           <MapPin size={18} className="text-slate-900" />
-          <span className="text-sm font-semibold text-gray-900">
-            {total} detașări active
-          </span>
+          <span className="text-sm font-semibold text-gray-900">{total} detașări active</span>
         </div>
         {stats.map((s) => (
           <div
@@ -117,9 +124,8 @@ function StatsBar() {
   );
 }
 
-// ─── Timeline View ───────────────────────────────────────────────────────────
-
 function TimelineView() {
+  const searchParams = useSearchParams();
   const [deployments, setDeployments] = useState<
     Parameters<typeof DeploymentTimeline>[0]["deployments"]
   >([]);
@@ -127,7 +133,14 @@ function TimelineView() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/deployments")
+    const params = new URLSearchParams();
+    const raw = searchParams.get("status")?.trim();
+    if (raw) {
+      const low = raw.toLowerCase();
+      const stat = low === "active" ? "ACTIVE" : raw.toUpperCase();
+      if (isValidDeploymentStatus(stat)) params.set("status", stat);
+    }
+    fetch(`/api/deployments?${params.toString()}`)
       .then((res) => res.json())
       .then((data) => {
         if (!cancelled) {
@@ -151,7 +164,7 @@ function TimelineView() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [searchParams]);
 
   if (loading) {
     return <div className="text-center py-12 text-gray-400">Se încarcă...</div>;

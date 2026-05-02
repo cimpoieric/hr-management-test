@@ -2,40 +2,60 @@
 
 import { CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-react";
 import type { DocumentStatus } from "@/lib/documentStatus";
+import { getDocumentExpiryBucket, type DocumentExpiryBucket } from "@/lib/documentExpiryUi";
 import { tDocumentStatus } from "@/messages";
 
 interface DocumentStatusBadgeProps {
   status: DocumentStatus | string;
   size?: "sm" | "md";
+  expiryDate?: string | null;
+  /** Implicit 30 — aliniat la setări / listă documente. */
+  expiringSoonDays?: number;
 }
 
-const styleByStatus: Record<string, { icon: React.ElementType; bg: string; text: string }> = {
-  VALID: {
+const styleByBucket: Record<
+  DocumentExpiryBucket,
+  { icon: React.ElementType; bg: string; text: string; label: string }
+> = {
+  valid: {
     icon: CheckCircle2,
     bg: "bg-green-100",
     text: "text-green-700",
+    label: "Valabil",
   },
-  EXPIRING_SOON: {
+  expiring_soon: {
     icon: AlertTriangle,
     bg: "bg-amber-100",
-    text: "text-amber-700",
+    text: "text-amber-800",
+    label: "Expiră curând",
   },
-  EXPIRED: {
+  expired: {
     icon: XCircle,
     bg: "bg-red-100",
     text: "text-red-700",
+    label: "Expirat",
   },
-  PENDING: {
+  pending: {
     icon: Clock,
     bg: "bg-gray-100",
     text: "text-gray-600",
+    label: tDocumentStatus("PENDING"),
   },
 };
 
-export function DocumentStatusBadge({ status, size = "sm" }: DocumentStatusBadgeProps) {
-  const c = styleByStatus[status] ?? styleByStatus["PENDING"]!;
+export function DocumentStatusBadge({
+  status,
+  size = "sm",
+  expiryDate,
+  expiringSoonDays = 30,
+}: DocumentStatusBadgeProps) {
+  const bucket = getDocumentExpiryBucket(
+    String(status),
+    expiryDate ?? null,
+    expiringSoonDays
+  );
+  const c = styleByBucket[bucket];
   const Icon = c.icon;
-  const label = tDocumentStatus(String(status));
 
   return (
     <span
@@ -44,10 +64,17 @@ export function DocumentStatusBadge({ status, size = "sm" }: DocumentStatusBadge
       }`}
     >
       <Icon size={size === "sm" ? 12 : 14} />
-      {label}
+      {c.label}
     </span>
   );
 }
+
+const styleByStatus: Record<string, { icon: React.ElementType; text: string }> = {
+  VALID: { icon: CheckCircle2, text: "text-green-700" },
+  EXPIRING_SOON: { icon: AlertTriangle, text: "text-amber-700" },
+  EXPIRED: { icon: XCircle, text: "text-red-700" },
+  PENDING: { icon: Clock, text: "text-gray-600" },
+};
 
 /** Icon-only variant pentru tabele compacte */
 export function DocumentStatusIcon({ status }: { status: DocumentStatus | string }) {
@@ -56,7 +83,7 @@ export function DocumentStatusIcon({ status }: { status: DocumentStatus | string
   const label = tDocumentStatus(String(status));
   return (
     <span title={label}>
-      <Icon size={16} className={c.text.replace("text-", "text-")} />
+      <Icon size={16} className={c.text} />
     </span>
   );
 }

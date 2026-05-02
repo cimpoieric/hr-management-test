@@ -28,6 +28,7 @@ import {
   parseSalaryTypeInput,
   salaryAmountToJson,
 } from "@/lib/salaryFields";
+import { documentsWhereVisible } from "@/lib/documentVisibility";
 
 /** Body JSON la POST /api/employees — câmpuri opționale, tipuri ca la `JSON.parse`. */
 export interface EmployeeFormData {
@@ -284,6 +285,7 @@ const employeeListSelect = {
   createdAt: true,
   company: { select: { id: true, name: true } },
   documents: {
+    where: { deletedAt: null },
     select: { id: true, type: true, status: true, expiryDate: true },
   },
   deployments: {
@@ -294,7 +296,12 @@ const employeeListSelect = {
     orderBy: { startDate: "desc" },
     take: 3,
   },
-  _count: { select: { documents: true, deployments: true } },
+  _count: {
+    select: {
+      documents: { where: { deletedAt: null } },
+      deployments: true,
+    },
+  },
 } as unknown as Prisma.EmployeeSelect;
 
 /**
@@ -456,12 +463,10 @@ export async function GET(request: NextRequest) {
     let employeeIdsWithExpiredDoc: number[] | null = null;
     if (expiredDocType) {
       const today = new Date();
-      const docWhere: Record<string, unknown> = {
+      const docWhere: Prisma.DocumentWhereInput = documentsWhereVisible({
         status: "EXPIRED",
-      };
-      if (expiredDocType !== "ANY") {
-        docWhere.type = expiredDocType;
-      }
+        ...(expiredDocType !== "ANY" ? { type: expiredDocType } : {}),
+      });
       const docs = await prisma.document.findMany({
         where: docWhere,
         select: { employeeId: true },
@@ -477,7 +482,7 @@ export async function GET(request: NextRequest) {
     // ─── Expiring soon documents ──────────────────────────────
     if (expiringSoon) {
       const docs = await prisma.document.findMany({
-        where: { status: "EXPIRING_SOON" },
+        where: documentsWhereVisible({ status: "EXPIRING_SOON" }),
         select: { employeeId: true },
         distinct: ["employeeId"],
       });

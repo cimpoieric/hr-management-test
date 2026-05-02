@@ -1,7 +1,7 @@
 /**
  * DELETE /api/documents/[id]
  *
- * Soft delete: șterge record DB + mută fișier în _deleted/.
+ * Soft delete: `deletedAt` în DB + mută fișier în _deleted/.
  * Doar ADMIN și OPERATOR.
  */
 
@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { canEditEmployee } from "@/lib/permissions";
 import { fileExists, softDeleteFile } from "@/lib/storage";
+import { employeeHasActiveDeployment } from "@/lib/deploymentGuards";
 
 export async function DELETE(
   request: NextRequest,
@@ -31,14 +32,15 @@ export async function DELETE(
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
 
-    const document = await prisma.document.findUnique({
-      where: { id: documentId },
+    const document = await prisma.document.findFirst({
+      where: { id: documentId, deletedAt: null },
       select: {
         id: true,
         fileName: true,
         storagePath: true,
         type: true,
         employeeId: true,
+        status: true,
       },
     });
 
@@ -46,16 +48,38 @@ export async function DELETE(
       return NextResponse.json({ error: "Document negăsit" }, { status: 404 });
     }
 
-    // Mută fișierul în _deleted/ (soft delete)
+    if (user.role !== "ADMIN") {
+      if (document.status === "EXPIRED") {
+        return NextResponse.json(
+          {
+            error:
+              "Documentele expirate pot fi șterse doar de administrator.",
+          },
+          { status: 403 }
+        );
+      }
+      const hasActive = await employeeHasActiveDeployment(document.employeeId);
+      if (hasActive) {
+        return NextResponse.json(
+          {
+            error:
+              "Documentele angajaților cu detașare activă pot fi șterse doar de administrator.",
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     const fileOnDisk = await fileExists(document.storagePath);
     if (fileOnDisk) {
       await softDeleteFile(document.storagePath);
     }
 
-    // Șterge din DB
-    await prisma.document.delete({ where: { id: documentId } });
+    await prisma.document.update({
+      where: { id: documentId },
+      data: { deletedAt: new Date() },
+    });
 
-    // Audit log
     await prisma.auditLog.create({
       data: {
         action: "DELETE",
@@ -65,6 +89,7 @@ export async function DELETE(
           fileName: document.fileName,
           type: document.type,
           employeeId: document.employeeId,
+          status: document.status,
         }),
       },
     });

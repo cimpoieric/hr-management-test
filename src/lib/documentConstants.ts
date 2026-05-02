@@ -25,6 +25,35 @@ export const DOCUMENT_TYPES = [
 
 export type DocumentType = (typeof DOCUMENT_TYPES)[number];
 
+/** Etichete UI — aceeași sursă pentru upload, tabele, filtre. */
+export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+  CONTRACT: "Contract",
+  ID: "Act identitate",
+  MEDICAL: "Certificat medical",
+  A1: "Formular A1",
+  AUTHORIZATION: "Autorizație",
+  VISA: "Viză",
+  OTHER: "Alt document",
+};
+
+/** Pentru `<select>`: `value` = cod trimis la API (`CONTRACT`, …), conținut = text afișat. */
+export const DOCUMENT_TYPE_OPTIONS: ReadonlyArray<{
+  code: DocumentType;
+  label: string;
+}> = DOCUMENT_TYPES.map((code) => ({
+  code,
+  label: DOCUMENT_TYPE_LABELS[code],
+}));
+
+export function getDocumentTypeLabel(code: string | null | undefined): string {
+  if (code == null || code === "") return "—";
+  const upper = code.toUpperCase();
+  if (DOCUMENT_TYPES.includes(upper as DocumentType)) {
+    return DOCUMENT_TYPE_LABELS[upper as DocumentType];
+  }
+  return code;
+}
+
 export function isValidDocumentType(type: string): type is DocumentType {
   return DOCUMENT_TYPES.includes(type as DocumentType);
 }

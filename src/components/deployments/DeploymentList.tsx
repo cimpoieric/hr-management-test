@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   MapPin,
   Trash2,
@@ -14,6 +15,7 @@ import {
   DEPLOYMENT_STATUSES,
   getCountryLabel,
   getCountryName,
+  isValidDeploymentStatus,
 } from "@/lib/countries";
 
 interface Deployment {
@@ -50,10 +52,23 @@ export function DeploymentList({
   employeeId,
   showEmployee = false,
 }: DeploymentListProps) {
+  const searchParams = useSearchParams();
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [loading, setLoading] = useState(true);
   const [countryFilter, setCountryFilter] = useState<string[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
+
+  useEffect(() => {
+    const raw = searchParams.get("status")?.trim();
+    if (!raw) return;
+    const low = raw.toLowerCase();
+    if (low === "active") {
+      setStatusFilter("ACTIVE");
+      return;
+    }
+    const up = raw.toUpperCase();
+    if (isValidDeploymentStatus(up)) setStatusFilter(up);
+  }, [searchParams]);
 
   const fetchDeployments = useCallback(async () => {
     setLoading(true);

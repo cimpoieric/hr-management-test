@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { AdvancedFilter, defaultFilters, type FilterState } from "@/components/filters/AdvancedFilter";
 import { BulkSelectionBar } from "@/components/tables/BulkSelection";
+import type { EmployeeKpiStats } from "@/lib/employeeStats";
 
 interface Employee {
   id: number;
@@ -91,6 +92,8 @@ interface EmployeeTableProps {
   countries?: CountryOpt[];
   showAdvancedFilters?: boolean;
   showBulkActions?: boolean;
+  /** KPI din aceleași funcții ca panoul (fără filtre pe listă). */
+  canonicalKpi?: EmployeeKpiStats | null;
 }
 
 export function EmployeeTable({
@@ -100,6 +103,7 @@ export function EmployeeTable({
   countries = [],
   showAdvancedFilters = true,
   showBulkActions = true,
+  canonicalKpi = null,
 }: EmployeeTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -315,6 +319,19 @@ export function EmployeeTable({
           companies={companies}
           countries={countries}
         />
+      )}
+
+      {canonicalKpi && (
+        <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          <span className="font-semibold text-slate-800">KPI (ca în panou de control):</span>{" "}
+          {canonicalKpi.totalEmployees} angajați în total, {canonicalKpi.activeEmployees} activi, cost
+          lunar estimat{" "}
+          <span className="font-mono font-medium tabular-nums">
+            {canonicalKpi.monthlySalaryCostRon.toLocaleString("ro-RO")} RON
+          </span>
+          . Numărul „rezultate” de mai jos respectă filtrele; fără filtre, coincide cu totalul din
+          KPI.
+        </p>
       )}
 
       {/* Quick search bar (always visible) */}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
-import { salaryMonthlyToRon } from "@/lib/salaryCostRon";
+import { equivalentMonthlyGrossToRon } from "@/lib/salaryCostRon";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
@@ -12,14 +12,19 @@ export async function GET(request: NextRequest) {
   try {
     const rows = await prisma.employee.findMany({
       where: {
-        salaryType: "LUNAR",
         status: "ACTIVE",
         salaryAmount: { not: null },
       },
-      select: { salaryAmount: true, salaryCurrency: true },
+      select: { salaryAmount: true, salaryCurrency: true, salaryType: true },
     });
     const totalMonthlySalaryRON = rows.reduce(
-      (s, e) => s + salaryMonthlyToRon(e.salaryAmount, e.salaryCurrency),
+      (s, e) =>
+        s +
+        equivalentMonthlyGrossToRon(
+          e.salaryAmount,
+          e.salaryType != null ? String(e.salaryType) : null,
+          e.salaryCurrency
+        ),
       0
     );
 

@@ -6,9 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { DOCUMENT_TYPES } from "@/lib/documentConstants";
+import { expiredDocumentsWhere } from "@/lib/documentStats";
+import { documentsWhereVisible } from "@/lib/documentVisibility";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
@@ -23,43 +26,85 @@ export async function GET(request: NextRequest) {
     const type = searchParams.get("type");
     const status = searchParams.get("status");
 
-    const where: Record<string, unknown> = {};
+    const where: Prisma.DocumentWhereInput = {};
+    const now = new Date();
 
     if (employeeId) {
       where.employeeId = parseInt(employeeId, 10);
     }
 
-    if (type && DOCUMENT_TYPES.includes(type as typeof DOCUMENT_TYPES[number])) {
+    if (type && DOCUMENT_TYPES.includes(type as (typeof DOCUMENT_TYPES)[number])) {
       where.type = type;
     }
 
-    if (status && ["VALID", "EXPIRING_SOON", "EXPIRED", "PENDING"].includes(status)) {
-      where.status = status;
+    if (status) {
+      const raw = status.trim();
+      const low = raw.toLowerCase();
+      if (low === "expired" || raw.toUpperCase() === "EXPIRED") {
+        Object.assign(where, expiredDocumentsWhere(now));
+      } else {
+        const upper = raw.toUpperCase();
+        if (["VALID", "EXPIRING_SOON", "PENDING"].includes(upper)) {
+          where.status = upper;
+        }
+      }
     }
 
     const documents = await prisma.document.findMany({
-      where,
+      where: documentsWhereVisible(where),
       orderBy: { createdAt: "desc" },
-      include: {
+      select: {
+        id: true,
+        employeeId: true,
+        type: true,
+        number: true,
+        fileName: true,
+        fileSize: true,
+        mimeType: true,
+        status: true,
+        issueDate: true,
+        expiryDate: true,
+        uploadedAt: true,
+        createdAt: true,
         employee: {
           select: { id: true, firstName: true, lastName: true, cnp: true },
         },
       },
     });
 
+    const empIds = [...new Set(documents.map((d) => d.employeeId))];
+    const activeDeploymentRows =
+      empIds.length === 0
+        ? []
+        : await prisma.deployment.findMany({
+            where: {
+              employeeId: { in: empIds },
+              status: "ACTIVE",
+              OR: [{ endDate: null }, { endDate: { gte: now } }],
+            },
+            select: { employeeId: true },
+          });
+    const employeesWithActiveDeployment = new Set(
+      activeDeploymentRows.map((r) => r.employeeId)
+    );
+
     const mapped = documents.map((doc) => ({
       id: doc.id,
+      employeeId: doc.employeeId,
       type: doc.type,
       number: doc.number,
       fileName: doc.fileName,
       status: doc.status,
       fileSize: doc.fileSize,
       mimeType: doc.mimeType,
-      issueDate: doc.issueDate ? doc.issueDate.toISOString() : null,
-      expiryDate: doc.expiryDate ? doc.expiryDate.toISOString() : null,
+      issueDate: doc.issueDate != null ? doc.issueDate.toISOString() : null,
+      expiryDate: doc.expiryDate != null ? doc.expiryDate.toISOString() : null,
       uploadedAt: doc.uploadedAt.toISOString(),
       createdAt: doc.createdAt.toISOString(),
       employee: doc.employee,
+      employeeHasActiveDeployment: employeesWithActiveDeployment.has(
+        doc.employeeId
+      ),
       downloadUrl: `/api/documents/${doc.id}/download`,
     }));
 

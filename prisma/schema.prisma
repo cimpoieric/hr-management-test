@@ -129,11 +129,13 @@ model Document {
   uploadedAt  DateTime @default(now())
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  deletedAt   DateTime? // soft-delete — rândul rămâne pentru audit; fișier mutat în _deleted/
 
   @@index([employeeId])
   @@index([type])
   @@index([status])
   @@index([expiryDate])
+  @@index([deletedAt])
 }
 
 model Deployment {

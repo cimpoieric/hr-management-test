@@ -113,8 +113,16 @@ function StatCard({
   );
 }
 
-function DeploymentChart({ deploymentsByCountry }: { deploymentsByCountry: DeploymentCountry[] }) {
-  const total = deploymentsByCountry.reduce((s, d) => s + d.count, 0);
+function DeploymentChart({
+  deploymentsByCountry,
+  totalActiveDeployments,
+}: {
+  deploymentsByCountry: DeploymentCountry[];
+  /** Total real (toate țările); barele pot fi doar top 6. */
+  totalActiveDeployments: number;
+}) {
+  const displayedSum = deploymentsByCountry.reduce((s, d) => s + d.count, 0);
+  const total = totalActiveDeployments > 0 ? totalActiveDeployments : displayedSum;
   const colors = [
     "bg-orange-500",
     "bg-yellow-500",
@@ -136,7 +144,7 @@ function DeploymentChart({ deploymentsByCountry }: { deploymentsByCountry: Deplo
           <p className="text-sm text-gray-400">Nu există detașări active.</p>
         )}
         {deploymentsByCountry.map((d, idx) => {
-          const pct = Math.round((d.count / total) * 100);
+          const pct = total > 0 ? Math.round((d.count / total) * 100) : 0;
           return (
             <div key={d.code}>
               <div className="flex items-center justify-between text-sm mb-1">
@@ -294,40 +302,55 @@ export default function DashboardHomePage() {
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
 
   useEffect(() => {
-    fetch("/api/dashboard/overview", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
-      .then((data) => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [statsRes, overviewRes] = await Promise.all([
+          fetch("/api/dashboard/stats", { cache: "no-store" }),
+          fetch("/api/dashboard/overview", { cache: "no-store" }),
+        ]);
+        if (cancelled) return;
+        if (!statsRes.ok) throw new Error("stats failed");
+        const statsPayload = await statsRes.json();
+        const s = statsPayload.stats ?? statsPayload;
         setStats({
-          totalEmployees: Number(data.stats?.totalEmployees ?? 0),
-          activeEmployees: Number(data.stats?.activeEmployees ?? 0),
-          inactiveEmployees: Number(data.stats?.inactiveEmployees ?? 0),
-          activeDeployments: Number(data.stats?.activeDeployments ?? 0),
-          expiredDocuments: Number(data.stats?.expiredDocuments ?? 0),
-          expiringSoonDocuments: Number(data.stats?.expiringSoonDocuments ?? 0),
-          pendingImports: Number(data.stats?.pendingImports ?? 0),
-          monthlySalaryCost: Number(data.stats?.monthlySalaryCost ?? 0),
-          monthlySalaryEmployeeCount: Number(data.stats?.monthlySalaryEmployeeCount ?? 0),
-          monthlySalaryCurrency: String(data.stats?.monthlySalaryCurrency ?? "RON"),
+          totalEmployees: Number(s.totalEmployees ?? 0),
+          activeEmployees: Number(s.activeEmployees ?? 0),
+          inactiveEmployees: Number(s.inactiveEmployees ?? 0),
+          activeDeployments: Number(s.activeDeployments ?? 0),
+          expiredDocuments: Number(s.expiredDocuments ?? 0),
+          expiringSoonDocuments: Number(s.expiringSoonDocuments ?? 0),
+          pendingImports: Number(s.pendingImports ?? 0),
+          monthlySalaryCost: Number(s.monthlySalaryCost ?? 0),
+          monthlySalaryEmployeeCount: Number(s.monthlySalaryEmployeeCount ?? 0),
+          monthlySalaryCurrency: String(s.monthlySalaryCurrency ?? "RON"),
           monthlySalaryPredominantCurrency: String(
-            data.stats?.monthlySalaryPredominantCurrency ??
-              data.stats?.monthlySalaryCurrency ??
-              "RON"
+            s.monthlySalaryPredominantCurrency ?? s.monthlySalaryCurrency ?? "RON"
           ),
-          documentAlertDays: Number(data.stats?.documentAlertDays ?? 30),
+          documentAlertDays: Number(s.documentAlertDays ?? 30),
         });
-        setDeploymentsByCountry(Array.isArray(data.deploymentsByCountry) ? data.deploymentsByCountry : []);
-        const rawActivity = Array.isArray(data.recentActivity) ? data.recentActivity : [];
+
+        const overviewData = overviewRes.ok ? await overviewRes.json() : {};
+        setDeploymentsByCountry(
+          Array.isArray(overviewData.deploymentsByCountry) ? overviewData.deploymentsByCountry : []
+        );
+        const rawActivity = Array.isArray(overviewData.recentActivity) ? overviewData.recentActivity : [];
         setRecentActivity(
           rawActivity
             .map((item: unknown) => normalizeRecentActivityItem(item))
             .filter((x: ActivityItem | null): x is ActivityItem => x !== null)
         );
-      })
-      .catch(() => {
-        setStats(EMPTY_STATS);
-        setDeploymentsByCountry([]);
-        setRecentActivity([]);
-      });
+      } catch {
+        if (!cancelled) {
+          setStats(EMPTY_STATS);
+          setDeploymentsByCountry([]);
+          setRecentActivity([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (
@@ -366,7 +389,7 @@ export default function DashboardHomePage() {
           subtitle={`în ${deploymentsByCountry.length} țări`}
           icon={MapPin}
           accentColor="bg-orange-500"
-          href={ROUTES.deployments}
+          href={`${ROUTES.deployments}?status=active`}
           badge={{
             text: `${stats.activeDeployments} angajați detașați`,
             color: "bg-orange-100 text-orange-700",
@@ -379,7 +402,7 @@ export default function DashboardHomePage() {
           subtitle="necesită atenție imediată"
           icon={AlertTriangle}
           accentColor="bg-red-500"
-          href={`${ROUTES.documents}?filter=expired`}
+          href={`${ROUTES.documents}?status=expired`}
           badge={{
             text: "Acțiune necesară",
             color: "bg-red-100 text-red-700",
@@ -392,7 +415,7 @@ export default function DashboardHomePage() {
           subtitle="așteaptă aprobare"
           icon={Download}
           accentColor="bg-purple-500"
-          href={ROUTES.imports}
+          href={`${ROUTES.imports}?status=pending`}
           badge={{
             text: `${stats.pendingImports} de revizuit`,
             color: "bg-purple-100 text-purple-700",
@@ -402,12 +425,12 @@ export default function DashboardHomePage() {
         <StatCard
           title="Cost salarial lunar estimat"
           value={`${stats.monthlySalaryCost.toLocaleString("ro-RO")} ${stats.monthlySalaryCurrency}`}
-          subtitle={`${stats.monthlySalaryEmployeeCount} angajați LUNAR`}
+          subtitle={`${stats.activeEmployees} angajați activi`}
           icon={Wallet}
           accentColor="bg-emerald-500"
-          href={`${ROUTES.employees}?salaryType=LUNAR`}
+          href={ROUTES.pay}
           badge={{
-            text: `In ${stats.monthlySalaryPredominantCurrency}, total estimat in RON (curs indicativ)`,
+            text: `LUNAR + SAPTAMANAL + ORA → echivalent lunar în RON (EUR = 5 RON; moneda predominantă: ${stats.monthlySalaryPredominantCurrency})`,
             color: "bg-emerald-100 text-emerald-700",
           }}
         />
@@ -415,7 +438,10 @@ export default function DashboardHomePage() {
 
       {/* Rând 2 — 3 coloane */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <DeploymentChart deploymentsByCountry={deploymentsByCountry} />
+        <DeploymentChart
+          deploymentsByCountry={deploymentsByCountry}
+          totalActiveDeployments={stats.activeDeployments}
+        />
         <DocumentStatus stats={stats} />
         <EmployeeBreakdown stats={stats} />
       </div>

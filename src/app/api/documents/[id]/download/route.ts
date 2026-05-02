@@ -30,8 +30,8 @@ export async function GET(
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
 
-    const document = await prisma.document.findUnique({
-      where: { id: documentId },
+    const document = await prisma.document.findFirst({
+      where: { id: documentId, deletedAt: null },
       select: {
         id: true,
         fileName: true,

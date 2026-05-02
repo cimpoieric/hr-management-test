@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
 
-    const status = searchParams.get("status");
+    const statusRaw = searchParams.get("status");
+    const status = statusRaw?.trim() ? statusRaw.trim().toUpperCase() : null;
     const source = searchParams.get("source");
     const limit = Math.min(100, parseInt(searchParams.get("limit") ?? "50", 10));
     const offset = parseInt(searchParams.get("offset") ?? "0", 10);

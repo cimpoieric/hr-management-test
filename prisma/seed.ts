@@ -7,6 +7,7 @@
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../src/lib/auth";
 import { encrypt, hashSha256 } from "../src/lib/encryption";
+import { calculateStatus } from "../src/lib/documentStatus";
 
 const prisma = new PrismaClient();
 
@@ -99,7 +100,14 @@ interface SeedEmployee {
   countryCode: string;
   cnp: string;
   companyIndex: number;
-  documents: { type: string; fileName: string; filePath: string }[];
+  documents: {
+    type: string;
+    fileName: string;
+    filePath: string;
+    number: string;
+    issueDate: Date;
+    expiryDate: Date;
+  }[];
   deployment: {
     country: string;
     city: string;
@@ -128,8 +136,18 @@ function buildSeedEmployees(): SeedEmployee[] {
           type: "CONTRACT",
           fileName: "contract_ion_popescu_2024.pdf",
           filePath: "uploads/contracts/contract_ion_popescu_2024.pdf",
+          number: "CTR-RO-POP-2024-001",
+          issueDate: new Date("2024-02-01"),
+          expiryDate: new Date("2026-05-01"),
         },
-        { type: "ID", fileName: "ci_ion_popescu_fata.jpg", filePath: "uploads/ids/ci_ion_popescu_fata.jpg" },
+        {
+          type: "ID",
+          fileName: "ci_ion_popescu_fata.jpg",
+          filePath: "uploads/ids/ci_ion_popescu_fata.jpg",
+          number: "CI-RX 123456",
+          issueDate: new Date("2019-03-15"),
+          expiryDate: new Date("2029-03-15"),
+        },
       ],
       deployment: {
         country: "NL",
@@ -156,8 +174,18 @@ function buildSeedEmployees(): SeedEmployee[] {
           type: "CONTRACT",
           fileName: "contract_maria_ionescu_2024.pdf",
           filePath: "uploads/contracts/contract_maria_ionescu_2024.pdf",
+          number: "CTR-DE-ION-2024-88",
+          issueDate: new Date("2024-03-10"),
+          expiryDate: new Date("2026-12-31"),
         },
-        { type: "ID", fileName: "ci_maria_ionescu_fata.jpg", filePath: "uploads/ids/ci_maria_ionescu_fata.jpg" },
+        {
+          type: "ID",
+          fileName: "ci_maria_ionescu_fata.jpg",
+          filePath: "uploads/ids/ci_maria_ionescu_fata.jpg",
+          number: "CI-RX 987654",
+          issueDate: new Date("2021-06-01"),
+          expiryDate: new Date("2031-06-01"),
+        },
       ],
       deployment: {
         country: "DE",
@@ -184,11 +212,17 @@ function buildSeedEmployees(): SeedEmployee[] {
           type: "CONTRACT",
           fileName: "contract_andrei_georgescu_2024.pdf",
           filePath: "uploads/contracts/contract_andrei_georgescu_2024.pdf",
+          number: "CTR-NL-GEO-2024-12",
+          issueDate: new Date("2024-01-20"),
+          expiryDate: new Date("2027-01-19"),
         },
         {
           type: "ID",
           fileName: "ci_andrei_georgescu_fata.jpg",
           filePath: "uploads/ids/ci_andrei_georgescu_fata.jpg",
+          number: "CI-RX 456789",
+          issueDate: new Date("2020-11-10"),
+          expiryDate: new Date("2030-11-10"),
         },
       ],
       deployment: {
@@ -317,15 +351,19 @@ async function main() {
           where: { employeeId: employee.id, type: doc.type },
         });
         if (!existing) {
+          const status = calculateStatus(doc.expiryDate);
           await prisma.document.create({
             data: {
               type: doc.type,
               fileName: doc.fileName,
               employeeId: employee.id,
               storagePath: `/documents/${doc.type}_${employee.id}.pdf`,
-              fileSize: 1024,
-              mimeType: "application/pdf",
-              status: "VALID",
+              fileSize: doc.type === "ID" ? 2048 : 102400,
+              mimeType: doc.type === "ID" ? "image/jpeg" : "application/pdf",
+              status,
+              number: doc.number,
+              issueDate: doc.issueDate,
+              expiryDate: doc.expiryDate,
             },
           });
         }
