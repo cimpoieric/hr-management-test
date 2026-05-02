@@ -1,7 +1,10 @@
 /**
- * POST /api/export/weekly-pay — Excel „Plată săptămânală” (angajați ORA + ore lucrate)
+ * POST /api/export/weekly-pay — Excel „Plată săptămânală”
  *
- * Body: { employeeIds: number[], hoursByEmployeeId?: Record<string, number> }
+ * Body: { employeeIds: number[], unitsByEmployeeId?: Record<string, number | string> }
+ * Compat: hoursByEmployeeId (interpretat ca unități)
+ *
+ * Total: ORA = ore×sumă; SAPTAMANAL = săptămâni×sumă; LUNAR = (zile/21)×sumă (zile goale → 21).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -10,7 +13,12 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
-import { salaryAmountToJson } from "@/lib/salaryFields";
+import {
+  salaryAmountToJson,
+  weeklyPaySalaryDataComplete,
+  computeWeeklyPayTotal,
+  parseWeeklyPayUnitsFromRequest,
+} from "@/lib/salaryFields";
 import { decrypt } from "@/lib/encryption";
 
 function getClientIp(request: NextRequest): string {
@@ -30,16 +38,6 @@ function safeDecrypt(value: string | null | undefined): string {
   }
 }
 
-function isOraSalaryComplete(emp: {
-  salaryType: "LUNAR" | "SAPTAMANAL" | "ORA" | null;
-  salaryAmount: Parameters<typeof salaryAmountToJson>[0];
-  salaryCurrency: string | null;
-}): boolean {
-  if (emp.salaryType !== "ORA") return false;
-  const rate = salaryAmountToJson(emp.salaryAmount);
-  return rate != null && rate > 0 && !!(emp.salaryCurrency?.trim());
-}
-
 export async function POST(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
@@ -56,10 +54,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Niciun angajat selectat" }, { status: 400 });
     }
 
-    const rawHours: Record<string, unknown> =
-      body.hoursByEmployeeId && typeof body.hoursByEmployeeId === "object"
-        ? body.hoursByEmployeeId
-        : {};
+    const rawUnits: Record<string, unknown> =
+      body.unitsByEmployeeId && typeof body.unitsByEmployeeId === "object"
+        ? body.unitsByEmployeeId
+        : body.hoursByEmployeeId && typeof body.hoursByEmployeeId === "object"
+          ? body.hoursByEmployeeId
+          : {};
 
     const employees = await prisma.employee.findMany({
       where: { id: { in: employeeIds } },
@@ -82,41 +82,45 @@ export async function POST(request: NextRequest) {
 
     const appSettings = await getAppSettings();
     const headers = [
-      "Nume complet",
+      "Nume",
+      "Prenume",
       "CNP",
       "IBAN",
       "Bancă",
-      "Suma brută/oră",
-      "Ore lucrate",
+      "Tip plată",
+      "Sumă brută",
+      "Perioada lucrată",
       "Total de plată",
       "Monedă",
     ];
 
     const rows: (string | number)[][] = employees.map((emp) => {
-      const nume = `${emp.lastName} ${emp.firstName}`.trim();
+      const nume = String(emp.lastName ?? "").trim();
+      const prenume = String(emp.firstName ?? "").trim();
       const cnp = emp.cnp ?? "";
       const iban = safeDecrypt(emp.iban);
       const bank = emp.bankName ?? "";
-      const currency = (emp.salaryCurrency ?? "").trim().toUpperCase();
-      const ready = isOraSalaryComplete(emp);
-      const rate = ready ? salaryAmountToJson(emp.salaryAmount) : null;
-      const hoursRaw = rawHours[String(emp.id)];
-      const hours =
-        typeof hoursRaw === "number" && Number.isFinite(hoursRaw)
-          ? hoursRaw
-          : typeof hoursRaw === "string"
-            ? Number(hoursRaw.replace(",", ".")) || 0
-            : 0;
-      const total = ready && rate != null ? Math.round(hours * rate * 100) / 100 : "";
+      const currency = (emp.salaryCurrency ?? "").trim();
+      const payTypeLabel = String(emp.salaryType ?? "").trim();
+      const ready = weeklyPaySalaryDataComplete(emp);
+      const basis = ready ? salaryAmountToJson(emp.salaryAmount) : null;
+      const raw = rawUnits[String(emp.id)];
+      const units = ready ? parseWeeklyPayUnitsFromRequest(raw, emp.salaryType) : 0;
+      const total =
+        ready && basis != null
+          ? computeWeeklyPayTotal(emp.salaryType, units, emp.salaryAmount)
+          : null;
 
       return [
         nume,
+        prenume,
         cnp,
         iban,
         bank,
-        ready && rate != null ? rate : "",
-        ready ? hours : "",
-        total === "" ? "" : total,
+        ready ? payTypeLabel : "",
+        ready && basis != null ? basis : "",
+        ready ? units : "",
+        total != null ? total : "",
         ready ? currency : "",
       ];
     });
@@ -125,24 +129,28 @@ export async function POST(request: NextRequest) {
       [`Plată săptămânală — ${appSettings.companyName || "Companie"}`],
       [`CUI/Reg. Com.: ${appSettings.companyCuiReg || "-"}`],
       [`Generat la: ${new Date().toLocaleString("ro-RO")} (${appSettings.timezone})`],
-      [`Doar angajații cu tip plată ORA și date complete au ore și total calculate.`],
+      [
+        `Coloana „Perioada lucrată”: ORA = ore; SAPTAMANAL = săptămâni; LUNAR = zile (gol = 21). Total: ORA = ore×sumă; SAPTAMANAL = săptămâni×sumă săpt.; LUNAR = (zile/21)×sumă lunară.`,
+      ],
       [],
     ];
 
     const ws = XLSX.utils.aoa_to_sheet([...metadataRows, headers, ...rows]);
     ws["!cols"] = [
-      { wch: 26 },
+      { wch: 14 },
+      { wch: 14 },
       { wch: 15 },
       { wch: 28 },
       { wch: 18 },
-      { wch: 14 },
       { wch: 12 },
+      { wch: 14 },
+      { wch: 14 },
       { wch: 14 },
       { wch: 8 },
     ];
 
-    const cnpCol = 1;
-    const ibanCol = 2;
+    const cnpCol = 2;
+    const ibanCol = 3;
     const dataStartRow = metadataRows.length + 1;
     for (let rowOffset = 0; rowOffset < rows.length; rowOffset++) {
       const r = dataStartRow + rowOffset;

@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaTyped } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { canEditEmployee, canViewIban } from "@/lib/permissions";
 import {
@@ -43,7 +43,7 @@ export interface EmployeeFormData {
   position?: unknown;
   address?: unknown;
   city?: unknown;
-  country?: unknown;
+  countryId?: unknown;
   status?: unknown;
   observations?: unknown;
   salaryType?: unknown;
@@ -108,7 +108,7 @@ interface ValidatedEmployeeCreate {
   position: string | null | undefined;
   address: string | null | undefined;
   city: string | null | undefined;
-  country: string;
+  countryId: number | null;
   status: string;
   observations: string | null | undefined;
   salaryTypeRaw: unknown;
@@ -155,14 +155,12 @@ function parseEmployeeCreateBody(
   const observations = parseOptionalString(b.observations, "observations", 1000);
   if (!observations.ok) issues.push(...observations.issues);
 
-  let country = "RO";
-  if (b.country !== undefined && b.country !== null) {
-    if (typeof b.country !== "string") {
-      issues.push(issue("country", "Trebuie să fie text"));
+  let countryId: number | null = null;
+  if (b.countryId !== undefined && b.countryId !== null) {
+    if (typeof b.countryId !== "number" || !Number.isInteger(b.countryId) || b.countryId <= 0) {
+      issues.push(issue("countryId", "ID țară invalid"));
     } else {
-      const t = b.country.trim();
-      if (t.length > 2) issues.push(issue("country", "Maxim 2 caractere"));
-      else country = t || "RO";
+      countryId = b.countryId;
     }
   }
 
@@ -204,7 +202,7 @@ function parseEmployeeCreateBody(
       position: position.ok ? position.value : undefined,
       address: address.ok ? address.value : undefined,
       city: city.ok ? city.value : undefined,
-      country,
+      countryId,
       status,
       observations: observations.ok ? observations.value : undefined,
       salaryTypeRaw: b.salaryType,
@@ -275,7 +273,8 @@ const employeeListSelect = {
   status: true,
   address: true,
   city: true,
-  country: true,
+  countryId: true,
+  country: { select: { id: true, name: true, code: true } },
   hiredAt: true,
   observations: true,
   salaryType: true,
@@ -296,7 +295,49 @@ const employeeListSelect = {
     take: 3,
   },
   _count: { select: { documents: true, deployments: true } },
-} satisfies Prisma.EmployeeSelect;
+} as unknown as Prisma.EmployeeSelect;
+
+/**
+ * Formă așteptată de la `findMany` + `employeeListSelect`.
+ * Definită explicit (fără `Prisma.Employee`) ca să rămână stabilă dacă clientul
+ * generat e dezaxat față de schema (ex. câmp vechi `country: string` pe model).
+ */
+interface EmployeeListQueryRow {
+  id: number;
+  firstName: string;
+  lastName: string;
+  cnp: string;
+  seriesCI: string | null;
+  numberCI: string | null;
+  email: string | null;
+  phone: string | null;
+  iban: string | null;
+  bankName: string | null;
+  position: string | null;
+  status: string;
+  address: string | null;
+  city: string | null;
+  countryId: number | null;
+  country: { id: number; name: string; code: string } | null;
+  hiredAt: Date;
+  observations: string | null;
+  salaryType: "LUNAR" | "SAPTAMANAL" | "ORA" | null;
+  salaryAmount: unknown;
+  salaryCurrency: string;
+  salaryStartDate: Date | null;
+  createdAt: Date;
+  company: { id: number; name: string };
+  documents: Array<{ id: number; type: string; status: string; expiryDate: Date | null }>;
+  deployments: Array<{
+    id: number;
+    country: string;
+    city: string | null;
+    startDate: Date;
+    endDate: Date | null;
+    status: string;
+  }>;
+  _count: { documents: number; deployments: number };
+}
 
 // ─── GET /api/employees ──────────────────────────────────────────────────────
 
@@ -314,7 +355,8 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get("search")?.trim();
     const statusFilter = searchParams.get("status"); // "ACTIVE,TERMINATED"
     const companyFilter = searchParams.get("company"); // "1,2,3"
-    const countryFilter = searchParams.get("country"); // "NL,DE"
+    const countryFilter = searchParams.get("country"); // detașare: "NL,DE"
+    const employeeCountryFilter = searchParams.get("employeeCountry"); // domiciliu: "1,2,3" (id țară)
     const salaryTypeFilter = searchParams.get("salaryType"); // "LUNAR|SAPTAMANAL|ORA"
     const expiredDocType = searchParams.get("expiredDocumentType"); // "A1|MEDICAL|CONTRACT|ANY"
     const expiringSoon = searchParams.get("expiringSoon") === "true";
@@ -357,6 +399,16 @@ export async function GET(request: NextRequest) {
       const companyIds = companyFilter.split(",").map(Number).filter(Boolean);
       if (companyIds.length > 0) {
         andConditions.push({ companyId: { in: companyIds } });
+      }
+    }
+
+    if (employeeCountryFilter) {
+      const cids = employeeCountryFilter
+        .split(",")
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => !Number.isNaN(n) && n > 0);
+      if (cids.length > 0) {
+        andConditions.push({ countryId: { in: cids } } as Prisma.EmployeeWhereInput);
       }
     }
 
@@ -447,16 +499,17 @@ export async function GET(request: NextRequest) {
       : { createdAt: sortOrder as "asc" | "desc" };
 
     // ─── Query ────────────────────────────────────────────────
-    const [employees, total] = await Promise.all([
-      prisma.employee.findMany({
+    const [employeesRaw, total] = await Promise.all([
+      prismaTyped.employee.findMany({
         where,
         orderBy,
         skip: (page - 1) * limit,
         take: limit,
         select: employeeListSelect,
       }),
-      prisma.employee.count({ where }),
+      prismaTyped.employee.count({ where }),
     ]);
+    const employees = employeesRaw as unknown as EmployeeListQueryRow[];
 
     const canSeeIban = canViewIban(user.role);
     const maskedEmployees = employees.map((e) =>
@@ -476,6 +529,7 @@ export async function GET(request: NextRequest) {
           status: e.status,
           address: e.address,
           city: e.city,
+          countryId: e.countryId,
           country: e.country,
           hiredAt: e.hiredAt,
           observations: e.observations,
@@ -541,7 +595,7 @@ export async function POST(request: NextRequest) {
     const normalizedCnp = data.cnp;
 
     const cnpHash = hashSha256(normalizedCnp);
-    const existing = await prisma.employee.findFirst({
+    const existing = await prismaTyped.employee.findFirst({
       where: { cnpHash },
       select: { id: true, firstName: true, lastName: true, cnp: true, status: true },
     });
@@ -605,7 +659,7 @@ export async function POST(request: NextRequest) {
     const salaryAmountForCreate: string | undefined =
       normalizedSalaryAmount !== null ? normalizedSalaryAmount.toString() : undefined;
 
-    const createData: Prisma.EmployeeCreateInput = {
+    const createData = {
       cnp: normalizedCnp,
       cnpEncrypted,
       cnpHash,
@@ -621,19 +675,24 @@ export async function POST(request: NextRequest) {
       position: data.position,
       address: data.address,
       city: data.city,
-      country: data.country,
+      countryId: data.countryId ?? null,
       status: data.status,
       salaryType: normalizedSalaryType,
-      salaryAmount: salaryAmountForCreate as Prisma.EmployeeCreateInput["salaryAmount"],
+      salaryAmount: salaryAmountForCreate as Prisma.EmployeeUncheckedCreateInput["salaryAmount"],
       salaryCurrency: normalizedSalaryCurrency,
       salaryStartDate,
       observations: data.observations,
-      company: { connect: { id: data.companyId } },
-    };
+      companyId: data.companyId,
+    } as unknown as Prisma.EmployeeUncheckedCreateInput;
 
-    const employee = await prisma.employee.create({
+    const employeeCreateInclude = {
+      company: { select: { id: true, name: true } },
+      country: { select: { id: true, name: true, code: true } },
+    } as unknown as Prisma.EmployeeInclude;
+
+    const employee = await prismaTyped.employee.create({
       data: createData,
-      include: { company: { select: { id: true, name: true } } },
+      include: employeeCreateInclude,
     });
 
     await logAudit("CREATE", "Employee", employee.id, data, getClientIp(request));

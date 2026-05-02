@@ -72,7 +72,8 @@ export async function GET(
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
       include: {
-        company: { select: { id: true, name: true, cui: true } },
+        company: { select: { id: true, name: true, taxCode: true } },
+        country: { select: { id: true, name: true, code: true, phoneCode: true } },
         documents: {
           select: { id: true, type: true, fileName: true, uploadedAt: true },
         },
@@ -101,6 +102,7 @@ export async function GET(
       position: employee.position,
       address: employee.address,
       city: employee.city,
+      countryId: employee.countryId,
       country: employee.country,
       status: employee.status,
       observations: employee.observations,
@@ -158,10 +160,9 @@ export async function GET(
       response.iban = employee.iban ? maskIBAN(employee.iban) : null;
     }
 
-    // BankName doar pentru cei cu permisiune IBAN
-    if (!canSeeIban) {
-      response.bankName = null;
-    }
+    // Bancă (bankName): vizibil pentru contabilitate (IBAN) sau pentru roluri care editează angajați (ex. OPERATOR), ca să vadă ce au salvat
+    response.bankName =
+      canSeeIban || canEditEmployee(user.role) ? employee.bankName : null;
 
     return NextResponse.json(response, { status: 200 });
   } catch (error) {
@@ -175,18 +176,19 @@ export async function GET(
 // ══════════════════════════════════════════════════════════════════════════════
 
 const updateSchema = z.object({
-  firstName: z.string().min(1).max(100).optional(),
-  lastName: z.string().min(1).max(100).optional(),
+  firstName: z.string().max(100).optional(),
+  lastName: z.string().max(100).optional(),
   seriesCI: z.string().max(10).nullable().optional(),
   numberCI: z.string().max(20).nullable().optional(),
-  email: z.string().email().nullable().optional(),
+  /** Acceptă orice string; validarea de format e soft pe client */
+  email: z.string().max(255).nullable().optional(),
   phone: z.string().max(20).nullable().optional(),
   iban: z.string().max(34).nullable().optional(),
   bankName: z.string().max(100).nullable().optional(),
   position: z.string().max(100).nullable().optional(),
   address: z.string().max(255).nullable().optional(),
   city: z.string().max(100).nullable().optional(),
-  country: z.string().max(2).optional(),
+  countryId: z.number().int().positive().nullable().optional(),
   status: z.string().max(20).optional(),
   observations: z.string().max(1000).nullable().optional(),
   salaryType: z
@@ -203,7 +205,7 @@ const updateSchema = z.object({
     .union([z.number(), z.string(), z.literal(""), z.null(), z.undefined()])
     .optional(),
   salaryCurrency: z.string().max(10).nullable().optional(),
-  salaryStartDate: z.string().trim().min(1).nullable().optional(),
+  salaryStartDate: z.union([z.string(), z.literal(""), z.null(), z.undefined()]).optional(),
   companyId: z.number().int().positive().optional(),
 });
 
@@ -240,6 +242,7 @@ export async function PUT(
     }
 
     const data = parsed.data;
+    const softWarnings: string[] = [];
 
     // Verifică existența
     const existing = await prisma.employee.findUnique({
@@ -249,23 +252,7 @@ export async function PUT(
       return NextResponse.json({ error: "Angajat negăsit" }, { status: 404 });
     }
 
-    // ─── Validare email ──────────────────────────────────────────
-    if (data.email && !validateEmail(data.email)) {
-      return NextResponse.json(
-        { error: "EMAIL_INVALID", message: "Email invalid" },
-        { status: 400 }
-      );
-    }
-
-    // ─── Validare telefon ────────────────────────────────────────
-    if (data.phone && !validatePhone(data.phone)) {
-      return NextResponse.json(
-        { error: "PHONE_INVALID", message: "Telefon invalid" },
-        { status: 400 }
-      );
-    }
-
-    // ─── Validare + criptare IBAN ────────────────────────────────
+    // ─── Email / telefon / IBAN — salvare permisă și cu valori „invalide” (avertismente) ───
     let ibanEncrypted: string | undefined;
     let ibanHash: string | null | undefined;
     if (data.iban !== undefined) {
@@ -276,14 +263,23 @@ export async function PUT(
         ibanEncrypted = undefined;
         ibanHash = null;
       } else {
-        if (!validateIBAN(data.iban)) {
-          return NextResponse.json(
-            { error: "IBAN_INVALID", message: "IBAN invalid" },
-            { status: 400 }
-          );
+        const trimmed = data.iban.trim();
+        if (!validateIBAN(trimmed)) {
+          softWarnings.push("IBAN cu format neobișnuit — salvat criptat.");
         }
-        ibanEncrypted = encrypt(data.iban);
-        ibanHash = hashSha256(data.iban);
+        ibanEncrypted = encrypt(trimmed);
+        ibanHash = hashSha256(trimmed);
+      }
+    }
+
+    if (data.email !== undefined && data.email !== null && String(data.email).trim() !== "") {
+      if (!validateEmail(data.email)) {
+        softWarnings.push("Email cu format neobișnuit — salvat.");
+      }
+    }
+    if (data.phone !== undefined && data.phone !== null && String(data.phone).trim() !== "") {
+      if (!validatePhone(data.phone)) {
+        softWarnings.push("Telefon cu format neobișnuit — salvat.");
       }
     }
 
@@ -299,7 +295,13 @@ export async function PUT(
     if (data.position !== undefined) updateData.position = data.position;
     if (data.address !== undefined) updateData.address = data.address;
     if (data.city !== undefined) updateData.city = data.city;
-    if (data.country !== undefined) updateData.country = data.country;
+    if (data.countryId !== undefined) {
+      if (data.countryId === null) {
+        updateData.country = { disconnect: true };
+      } else {
+        updateData.country = { connect: { id: data.countryId } };
+      }
+    }
     if (data.status !== undefined) updateData.status = data.status;
     if (data.observations !== undefined) updateData.observations = data.observations;
     if (data.salaryType !== undefined) {
@@ -332,7 +334,10 @@ export async function PUT(
     const updated = await prisma.employee.update({
       where: { id: employeeId },
       data: updateData,
-      include: { company: { select: { id: true, name: true } } },
+      include: {
+        company: { select: { id: true, name: true } },
+        country: { select: { id: true, name: true, code: true } },
+      },
     });
 
     // ─── Audit log (via Prisma middleware + manual fallback) ─────
@@ -355,8 +360,11 @@ export async function PUT(
       lastName: updated.lastName,
       cnp: maskCNP(updated.cnp),
       company: updated.company,
+      countryId: updated.countryId,
+      country: updated.country,
       status: updated.status,
       updatedAt: updated.updatedAt,
+      ...(softWarnings.length > 0 ? { warnings: softWarnings } : {}),
     });
   } catch (error) {
     console.error("[EMPLOYEE_PUT]", error);

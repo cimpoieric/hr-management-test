@@ -1,17 +1,14 @@
 /**
  * GET /api/companies
  *
- * Lista firme active. Orice utilizator autentificat poate accesa.
+ * Lista firme cu status Activ (dropdown angajați). Orice utilizator autentificat.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 
-const prisma = new PrismaClient();
-
 export async function GET(request: NextRequest) {
-  // ─── Auth ────────────────────────────────────────────────────────────
   const { user, response: authError } = await requireAuth(request);
 
   if (authError || !user) {
@@ -19,15 +16,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const { searchParams } = new URL(request.url);
+    const includeInactive = searchParams.get("all") === "1";
+
     const companies = await prisma.company.findMany({
-      where: { isActive: true },
+      where: includeInactive ? undefined : { status: "Activ" },
       orderBy: { name: "asc" },
       select: {
         id: true,
         name: true,
-        cui: true,
-        city: true,
-        country: true,
+        taxCode: true,
+        address: true,
+        status: true,
+        country: { select: { id: true, name: true, code: true } },
         _count: { select: { employees: true } },
       },
     });
@@ -35,9 +36,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ companies }, { status: 200 });
   } catch (error) {
     console.error("[COMPANIES_GET]", error);
-    return NextResponse.json(
-      { error: "Eroare server intern" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Eroare server intern" }, { status: 500 });
   }
 }

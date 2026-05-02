@@ -367,7 +367,7 @@ export default function DashboardHomePage() {
           subtitle={`${stats.monthlySalaryEmployeeCount} angajați LUNAR`}
           icon={Wallet}
           accentColor="bg-emerald-500"
-          href="/angajati?status=ACTIVE&salaryType=LUNAR"
+          href="/angajati?salaryType=LUNAR"
           badge={{
             text: `Monedă predominantă: ${stats.monthlySalaryCurrency}`,
             color: "bg-emerald-100 text-emerald-700",

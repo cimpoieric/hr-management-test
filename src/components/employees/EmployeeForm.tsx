@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Save, X, ChevronDown, ChevronUp, AlertCircle, AlertTriangle, Calculator } from "lucide-react";
+import { Save, X, ChevronDown, ChevronUp, AlertTriangle, Calculator } from "lucide-react";
 import { DuplicateWarning } from "./DuplicateWarning";
 import { validateCNP } from "@/lib/validation";
 import { SalaryCalculatorModal } from "@/components/salary/SalaryCalculatorModal";
@@ -20,7 +20,8 @@ interface FormData {
   position: string;
   address: string;
   city: string;
-  country: string;
+  /** ID țară din DB; "" = neales */
+  countryId: number | "";
   status: string;
   observations: string;
   companyId: number;
@@ -54,10 +55,10 @@ const initialForm: FormData = {
   position: "",
   address: "",
   city: "",
-  country: "RO",
+  countryId: "",
   status: "ACTIVE",
   observations: "",
-  companyId: 1,
+  companyId: 0,
   salaryType: "",
   salaryAmount: "",
   salaryCurrency: "RON",
@@ -67,11 +68,22 @@ const initialForm: FormData = {
 interface EmployeeFormProps {
   employeeId?: number;
   isAdmin?: boolean;
+  /** `infoOnly` = doar personal, bancă, contract, firmă (fără salarizare) — pentru tab Informații */
+  variant?: "full" | "infoOnly";
+  onSaved?: () => void | Promise<void>;
+  onCancel?: () => void;
 }
 
-export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps) {
+export function EmployeeForm({
+  employeeId,
+  isAdmin = false,
+  variant = "full",
+  onSaved,
+  onCancel,
+}: EmployeeFormProps) {
   const router = useRouter();
   const isEdit = !!employeeId;
+  const infoOnly = variant === "infoOnly";
 
   const [form, setForm] = useState<FormData>(initialForm);
   const [errors, setErrors] = useState<FormErrors>({});
@@ -83,8 +95,47 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
   const [submitSuccess, setSubmitSuccess] = useState("");
   const [submitWarning, setSubmitWarning] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmCriticalFields, setConfirmCriticalFields] = useState<string[]>([]);
   const [salaryCalculatorOpen, setSalaryCalculatorOpen] = useState(false);
+  const [companyOptions, setCompanyOptions] = useState<{ value: string; label: string }[]>([]);
+  const [countryOptions, setCountryOptions] = useState<{ value: string; label: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetch("/api/companies", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/countries", { cache: "no-store" }).then((r) => r.json()),
+    ])
+      .then(([compRes, ctryRes]) => {
+        if (cancelled) return;
+        const comps = compRes.companies ?? [];
+        const ctr = ctryRes.countries ?? [];
+        setCompanyOptions(
+          comps.map((c: { id: number; name: string }) => ({
+            value: String(c.id),
+            label: c.name,
+          }))
+        );
+        setCountryOptions([
+          { value: "", label: "— Fără selecție —" },
+          ...ctr.map((c: { id: number; name: string; code: string }) => ({
+            value: String(c.id),
+            label: `${c.name} (${c.code})`,
+          })),
+        ]);
+        if (!employeeId && comps.length > 0) {
+          setForm((prev) => ({
+            ...prev,
+            companyId: prev.companyId <= 0 ? comps[0].id : prev.companyId,
+          }));
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [employeeId]);
 
   // Încarcă date existente la edit
   useEffect(() => {
@@ -111,10 +162,15 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
           position: data.position ?? "",
           address: data.address ?? "",
           city: data.city ?? "",
-          country: data.country ?? "RO",
+          countryId:
+            data.country?.id != null
+              ? data.country.id
+              : typeof data.countryId === "number"
+                ? data.countryId
+                : "",
           status: data.status ?? "ACTIVE",
           observations: data.observations ?? "",
-          companyId: data.company?.id ?? 1,
+          companyId: data.company?.id ?? 0,
           salaryType: data.salaryType ?? "",
           salaryAmount:
             typeof data.salaryAmount === "number" ? String(data.salaryAmount) : "",
@@ -214,11 +270,13 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
     const softIban = validateField("iban", form.iban);
     if (softIban) newErrors.iban = softIban;
 
-    const amtRaw = form.salaryAmount.trim();
-    if (amtRaw) {
-      const n = Number(amtRaw.replace(",", "."));
-      if (!Number.isFinite(n) || n <= 0) {
-        newErrors.salaryAmount = "Sumă invalidă sau ≤ 0";
+    if (!infoOnly) {
+      const amtRaw = form.salaryAmount.trim();
+      if (amtRaw) {
+        const n = Number(amtRaw.replace(",", "."));
+        if (!Number.isFinite(n) || n <= 0) {
+          newErrors.salaryAmount = "Sumă invalidă sau ≤ 0";
+        }
       }
     }
 
@@ -228,7 +286,7 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
         personal: ["cnp", "firstName", "lastName", "seriesCI", "numberCI", "phone", "email", "address", "city"],
         bank: ["iban", "bankName", "companyId"],
         contract: ["position", "status", "observations"],
-        salary: ["salaryType", "salaryAmount", "salaryCurrency", "salaryStartDate"],
+        ...(infoOnly ? {} : { salary: ["salaryType", "salaryAmount", "salaryCurrency", "salaryStartDate"] }),
       };
       const firstErrorField = Object.keys(newErrors)[0] ?? "";
       const targetSection =
@@ -272,28 +330,8 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
     const { fieldIssues } = collectValidationIssues();
     const issueKeys = Object.keys(fieldIssues);
     if (issueKeys.length > 0 && !force) {
-      const labels: Record<string, string> = {
-        cnp: "CNP",
-        firstName: "Prenume",
-        lastName: "Nume",
-        companyId: "Firmă",
-        email: "Email",
-        phone: "Telefon",
-        iban: "IBAN",
-        salaryType: "Tip plată",
-        salaryAmount: "Sumă brută",
-        salaryCurrency: "Monedă",
-        salaryStartDate: "Valabil de la",
-      };
-      setConfirmCriticalFields(issueKeys.map((k) => labels[k] ?? k));
       setConfirmOpen(true);
       return;
-    }
-
-    if (Object.keys(fieldIssues).length > 0) {
-      setSubmitWarning(
-        "Există câmpuri cu format incorect. Salvarea continuă, iar valorile invalide pot fi ignorate de server."
-      );
     }
 
     setSaving(true);
@@ -301,9 +339,10 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
 
     try {
       const hasSalaryCore =
-        !!form.salaryType ||
-        !!form.salaryAmount.trim() ||
-        !!form.salaryStartDate.trim();
+        !infoOnly &&
+        (!!form.salaryType ||
+          !!form.salaryAmount.trim() ||
+          !!form.salaryStartDate.trim());
 
       const salaryAmountPayload =
         form.salaryAmount.trim() === ""
@@ -323,18 +362,24 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
         position: form.position.trim() || null,
         address: form.address.trim() || null,
         city: form.city.trim() || null,
-        country: form.country || "RO",
+        countryId:
+          form.countryId === "" ? null : Number(form.countryId),
         status: form.status || "ACTIVE",
         observations: form.observations.trim() || null,
         companyId: Number(form.companyId),
-        salaryType: form.salaryType || null,
-        salaryAmount:
-          salaryAmountPayload != null && Number.isFinite(salaryAmountPayload)
-            ? salaryAmountPayload
-            : null,
-        salaryCurrency: hasSalaryCore ? form.salaryCurrency || "RON" : null,
-        salaryStartDate: form.salaryStartDate.trim() || null,
       };
+
+      if (!infoOnly) {
+        Object.assign(payload, {
+          salaryType: form.salaryType || null,
+          salaryAmount:
+            salaryAmountPayload != null && Number.isFinite(salaryAmountPayload)
+              ? salaryAmountPayload
+              : null,
+          salaryCurrency: hasSalaryCore ? form.salaryCurrency || "RON" : null,
+          salaryStartDate: form.salaryStartDate.trim() || null,
+        });
+      }
 
       const url = isEdit
         ? `/api/employees/${employeeId}`
@@ -358,15 +403,7 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
       }
 
       if (!res.ok) {
-        if (data.error === "CNP_INVALID") {
-          setErrors((p) => ({ ...p, cnp: data.message }));
-        } else if (data.error === "IBAN_INVALID") {
-          setErrors((p) => ({ ...p, iban: data.message }));
-        } else if (data.error === "EMAIL_INVALID") {
-          setErrors((p) => ({ ...p, email: data.message }));
-        } else if (data.error === "PHONE_INVALID") {
-          setErrors((p) => ({ ...p, phone: data.message }));
-        } else if (Array.isArray(data.issues) && data.issues.length > 0) {
+        if (Array.isArray(data.issues) && data.issues.length > 0) {
           setSubmitError(data.issues[0]?.message ?? "Date invalide");
         } else {
           setSubmitError(data.error ?? "Eroare la salvare");
@@ -381,10 +418,17 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
       if (Array.isArray(data.warnings) && data.warnings.length > 0) {
         setSubmitWarning(`Avertizări: ${data.warnings.join(" | ")}`);
       }
-      setTimeout(() => {
-        router.push("/angajati");
-        router.refresh();
-      }, 1200);
+      setSaving(false);
+      if (onSaved) {
+        setTimeout(() => {
+          void Promise.resolve(onSaved());
+        }, 500);
+      } else {
+        setTimeout(() => {
+          router.push("/angajati");
+          router.refresh();
+        }, 1200);
+      }
     } catch {
       setSubmitError("Eroare de rețea");
       setSaving(false);
@@ -521,6 +565,16 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
               onChange={(v) => updateField("city", v)}
               placeholder="București"
             />
+            <Field
+              label="Țară"
+              name="countryId"
+              value={form.countryId === "" ? "" : String(form.countryId)}
+              onChange={(v) =>
+                updateField("countryId", v === "" ? "" : Number(v))
+              }
+              type="select"
+              options={countryOptions}
+            />
           </div>
         </FormSection>
 
@@ -551,16 +605,16 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
             <Field
               label="Firmă angajatoare *"
               name="companyId"
-              value={String(form.companyId)}
+              value={form.companyId > 0 ? String(form.companyId) : ""}
               onChange={(v) => updateField("companyId", Number(v))}
               onBlur={() => handleBlur("companyId")}
               error={errors.companyId}
               type="select"
-              options={[
-                { value: "1", label: "RomForce Detașări SRL" },
-                { value: "2", label: "EuroWork HR Solutions" },
-                { value: "3", label: "BuildTeam Internațional" },
-              ]}
+              options={
+                companyOptions.length > 0
+                  ? [{ value: "", label: "— Selectează firma —" }, ...companyOptions]
+                  : [{ value: "", label: "Se încarcă firmele..." }]
+              }
             />
           </div>
         </FormSection>
@@ -604,7 +658,8 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
           </div>
         </FormSection>
 
-        {/* Secțiune 4: Date salariale (pliată implicit — openSection inițial nu e „salary”) */}
+        {/* Secțiune 4: Date salariale (doar formular complet) */}
+        {!infoOnly && (
         <FormSection
           title="Date salariale"
           isOpen={openSection === "salary"}
@@ -688,12 +743,13 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
             </button>
           </div>
         </FormSection>
+        )}
 
         {/* Acțiuni */}
         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 border-t">
           <button
             type="button"
-            onClick={() => router.push("/angajati")}
+            onClick={() => (onCancel ? onCancel() : router.push("/angajati"))}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium text-gray-700 hover:bg-white transition-colors"
           >
             <X size={16} />
@@ -728,7 +784,6 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
 
       {confirmOpen && (
         <ConfirmSaveModal
-          criticalFields={confirmCriticalFields}
           onConfirm={() => {
             setConfirmOpen(false);
             handleSubmit(true);
@@ -739,6 +794,7 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
         />
       )}
 
+      {!infoOnly && (
       <SalaryCalculatorModal
         isOpen={salaryCalculatorOpen}
         onClose={() => setSalaryCalculatorOpen(false)}
@@ -750,6 +806,7 @@ export function EmployeeForm({ employeeId, isAdmin = false }: EmployeeFormProps)
         salaryAmount={form.salaryAmount ? Number(form.salaryAmount.replace(",", ".")) : null}
         salaryCurrency={form.salaryCurrency || "RON"}
       />
+      )}
     </>
   );
 }
@@ -822,7 +879,9 @@ function Field({
 }: FieldProps) {
   const inputClass =
     "w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950 " +
-    (error ? "border-red-300 focus:ring-red-500" : "border-gray-200");
+    (error
+      ? "border-amber-300 focus:ring-amber-500/80"
+      : "border-gray-200");
 
   return (
     <div className={className}>
@@ -876,9 +935,9 @@ function Field({
         </div>
       )}
       {error && (
-        <div className="flex items-center gap-1 mt-1">
-          <AlertCircle size={12} className="text-red-500 shrink-0" />
-          <span className="text-xs text-red-600">{error}</span>
+        <div className="flex items-start gap-1 mt-1">
+          <AlertTriangle size={12} className="text-amber-600 shrink-0 mt-0.5" />
+          <span className="text-xs text-amber-800">{error}</span>
         </div>
       )}
     </div>
@@ -886,11 +945,9 @@ function Field({
 }
 
 function ConfirmSaveModal({
-  criticalFields,
   onConfirm,
   onCancel,
 }: {
-  criticalFields: string[];
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -902,28 +959,22 @@ function ConfirmSaveModal({
             <AlertTriangle size={18} className="text-amber-600" />
             <h3 className="text-base font-semibold text-gray-900">Confirmare salvare</h3>
           </div>
-          <p className="text-sm text-gray-600 mt-2">
-            Există probleme la următoarele câmpuri (incomplete sau invalide):
-          </p>
-          <p className="text-sm font-medium text-amber-700 mt-1">
-            {criticalFields.join(", ")}
-          </p>
-          <p className="text-sm text-gray-600 mt-2">
-            Poți reveni să corectezi sau poți continua — serverul poate ignora unele valori.
+          <p className="text-sm text-gray-700 mt-3">
+            Există câmpuri cu valori invalide. Poți salva totuși sau revizui formularul.
           </p>
         </div>
-        <div className="px-6 py-4 flex items-center justify-end gap-2">
+        <div className="px-6 py-4 flex items-center justify-end gap-2 border-t bg-gray-50">
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-white"
           >
-            Completează
+            Revizuiește
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800"
+            className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700"
           >
             Salvează oricum
           </button>

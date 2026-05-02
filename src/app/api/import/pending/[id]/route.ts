@@ -158,6 +158,16 @@ export async function POST(
 
     // ─── Creează Employee ────────────────────────────────────────
     const companyId = parseInt(editedFields.companyId ?? "1", 10);
+    const countryIdRaw = editedFields.countryId?.trim();
+    const countryIdParsed = countryIdRaw ? parseInt(countryIdRaw, 10) : NaN;
+    const roDefault = await prisma.country.findFirst({
+      where: { code: "RO" },
+      select: { id: true },
+    });
+    const countryId =
+      !Number.isNaN(countryIdParsed) && countryIdParsed > 0
+        ? countryIdParsed
+        : roDefault?.id ?? null;
 
     const employee = await prisma.employee.create({
       data: {
@@ -176,7 +186,7 @@ export async function POST(
         position: editedFields.position?.trim() || null,
         address: editedFields.address?.trim() || null,
         city: editedFields.city?.trim() || null,
-        country: "RO",
+        ...(countryId != null ? { countryId } : {}),
         status: "ACTIVE",
         companyId,
       },

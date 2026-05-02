@@ -9,7 +9,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+import { prismaTyped } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
@@ -100,13 +101,27 @@ export async function POST(request: NextRequest) {
 
     // Query employees
     const appSettings = await getAppSettings();
-    const employees = await prisma.employee.findMany({
+    /** Rând export Excel — nu moștenim `Employee` din client ca să evităm conflicte cu tipuri vechi. */
+    interface EmployeeExcelRow {
+      iban: string | null;
+      bankName: string | null;
+      salaryType: string | null;
+      salaryAmount: unknown;
+      salaryCurrency: string | null;
+      salaryStartDate: Date | null;
+      company: { id: number; name: string };
+      country: { id: number; name: string; code: string } | null;
+      [key: string]: unknown;
+    }
+
+    const employees = (await prismaTyped.employee.findMany({
       where: { id: { in: employeeIds } },
       orderBy: { lastName: "asc" },
       include: {
-        company: { select: { id: true, name: true } },
-      },
-    });
+        company: true,
+        country: true,
+      } as Prisma.EmployeeInclude,
+    })) as unknown as EmployeeExcelRow[];
 
     if (employees.length === 0) {
       return NextResponse.json({ error: "Angajați negăsiți" }, { status: 404 });
@@ -125,6 +140,9 @@ export async function POST(request: NextRequest) {
     const rows = employees.map((emp) => {
       const flatEmp: Record<string, unknown> = {
         ...emp,
+        country: emp.country
+          ? `${emp.country.name} (${emp.country.code})`
+          : "",
         iban: safeDecrypt(emp.iban),
         companyName: emp.company?.name ?? "—",
         salaryType: emp.salaryType ?? "",

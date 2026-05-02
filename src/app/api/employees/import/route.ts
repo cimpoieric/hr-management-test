@@ -8,14 +8,12 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { PrismaClient } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { canApproveImport } from "@/lib/permissions";
 import { dedupeEmployee } from "@/lib/dedupe";
 import { encrypt, hashSha256 } from "@/lib/encryption";
 import { validateCNP, validateIBAN } from "@/lib/validation";
-
-const prisma = new PrismaClient();
 
 const importRowSchema = z.object({
   cnp: z.string().regex(/^[0-9]{13}$/, "CNP invalid"),
@@ -27,7 +25,7 @@ const importRowSchema = z.object({
   bankName: z.string().max(100).nullable().optional(),
   address: z.string().max(255).nullable().optional(),
   city: z.string().max(100).nullable().optional(),
-  country: z.string().max(2).default("RO"),
+  countryId: z.number().int().positive().nullable().optional(),
   companyId: z.number().int().positive(),
 });
 
@@ -155,7 +153,7 @@ export async function POST(request: NextRequest) {
                 bankName: item.bankName ?? null,
                 address: item.address ?? null,
                 city: item.city ?? null,
-                country: item.country,
+                ...(item.countryId != null ? { countryId: item.countryId } : {}),
                 companyId: item.companyId,
               },
             });
@@ -197,7 +195,7 @@ export async function POST(request: NextRequest) {
                 bankName: item.bankName ?? null,
                 address: item.address ?? null,
                 city: item.city ?? null,
-                country: item.country,
+                countryId: item.countryId ?? null,
                 companyId: item.companyId,
               },
             });

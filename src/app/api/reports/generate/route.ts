@@ -229,6 +229,7 @@ export async function POST(request: NextRequest) {
         orderBy: { lastName: "asc" },
         include: {
           company: { select: { id: true, name: true } },
+          country: { select: { name: true, code: true } },
           _count: { select: { documents: true, deployments: true } },
         },
       });
@@ -244,7 +245,9 @@ export async function POST(request: NextRequest) {
         position: e.position,
         status: e.status,
         companyName: e.company?.name ?? null,
-        country: e.country,
+        country: e.country
+          ? `${e.country.name} (${e.country.code})`
+          : null,
         city: e.city,
         hiredAt: e.hiredAt,
         cnp: e.cnp,
@@ -440,6 +443,7 @@ export async function POST(request: NextRequest) {
         where: { id: employeeId },
         include: {
           company: { select: { name: true } },
+          country: { select: { name: true, code: true } },
           documents: {
             orderBy: { type: "asc" },
             select: {
@@ -482,7 +486,9 @@ export async function POST(request: NextRequest) {
           position: employee.position,
           status: employee.status,
           companyName: employee.company?.name ?? null,
-          country: employee.country,
+          country: employee.country
+            ? `${employee.country.name} (${employee.country.code})`
+            : "—",
           city: employee.city,
           address: employee.address,
           hiredAt: employee.hiredAt,

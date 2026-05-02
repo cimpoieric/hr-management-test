@@ -16,6 +16,8 @@ import {
   Database,
   Menu,
   X,
+  Factory,
+  Globe2,
 } from "lucide-react";
 import type { UserRole } from "@/lib/auth";
 
@@ -26,6 +28,18 @@ interface RouteItem {
   adminOnly: boolean;
 }
 
+function PlataNavIcon({ size = 18 }: { size?: number }) {
+  return (
+    <span
+      className="flex items-center justify-center shrink-0 leading-none"
+      style={{ fontSize: size }}
+      aria-hidden
+    >
+      💰
+    </span>
+  );
+}
+
 const routes: RouteItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, adminOnly: false },
   { href: "/angajati", label: "Angajați", icon: Users, adminOnly: false },
@@ -34,7 +48,10 @@ const routes: RouteItem[] = [
   { href: "/importuri-in-asteptare", label: "Importuri", icon: Download, adminOnly: false },
   { href: "/rapoarte", label: "Rapoarte", icon: BarChart3, adminOnly: false },
   { href: "/export", label: "Export", icon: FileSpreadsheet, adminOnly: false },
+  { href: "/plata", label: "Plată", icon: PlataNavIcon, adminOnly: false },
   { href: "/setari", label: "Setări", icon: Settings, adminOnly: true },
+  { href: "/setari/firme", label: "Firme", icon: Factory, adminOnly: true },
+  { href: "/setari/tari", label: "Țări", icon: Globe2, adminOnly: true },
   { href: "/utilizatori", label: "Utilizatori", icon: Shield, adminOnly: true },
   { href: "/backup", label: "Backup", icon: Database, adminOnly: true },
 ];
@@ -58,7 +75,9 @@ function SidebarNav({
         const isActive =
           route.href === "/dashboard"
             ? pathname === "/dashboard"
-            : pathname.startsWith(route.href);
+            : route.href === "/setari"
+              ? pathname === "/setari"
+              : pathname === route.href || pathname.startsWith(`${route.href}/`);
 
         return (
           <Link

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   FileSpreadsheet,
@@ -13,7 +14,6 @@ import {
   AlertCircle,
   ChevronRight,
   ArrowLeft,
-  CalendarDays,
 } from "lucide-react";
 import { AdvancedFilter, defaultFilters, type FilterState } from "@/components/filters/AdvancedFilter";
 import { BulkSelectionBar } from "@/components/tables/BulkSelection";
@@ -33,7 +33,8 @@ interface Employee {
   status: string;
   address?: string | null;
   city: string | null;
-  country: string | null;
+  countryId: number | null;
+  country: { id: number; name: string; code: string } | null;
   company: { id: number; name: string } | null;
   documentCount: number;
   deploymentCount: number;
@@ -51,6 +52,12 @@ interface Employee {
 interface Company {
   id: number;
   name: string;
+}
+
+interface CountryOpt {
+  id: number;
+  name: string;
+  code: string;
 }
 
 interface ColumnOption {
@@ -93,18 +100,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   meta: "Altele",
 };
 
-/** Pentru export „Plată săptămânală”: ORA + sumă orară + monedă */
-function weeklySalaryComplete(
-  emp: Pick<Employee, "salaryType" | "salaryAmount" | "salaryCurrency">
-): boolean {
-  return (
-    emp.salaryType === "ORA" &&
-    emp.salaryAmount != null &&
-    Number(emp.salaryAmount) > 0 &&
-    !!(emp.salaryCurrency?.trim())
-  );
-}
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function ExportPage() {
@@ -113,6 +108,7 @@ export default function ExportPage() {
   // ── State ──
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [countries, setCountries] = useState<CountryOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
 
@@ -121,22 +117,23 @@ export default function ExportPage() {
   const [selectedColumns, setSelectedColumns] = useState<Set<string>>(
     new Set(["id", "lastName", "firstName", "cnp", "email", "phone", "status", "position", "company"])
   );
-  const [showPreview, setShowPreview] = useState(false);
   const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
   const [salaryExporting, setSalaryExporting] = useState<"csv" | "xlsx" | null>(null);
   const [salaryTypeFilter, setSalaryTypeFilter] = useState("");
   const [salaryCurrencyFilter, setSalaryCurrencyFilter] = useState("");
   const [salaryCompleteOnly, setSalaryCompleteOnly] = useState(false);
-  const [weeklyHours, setWeeklyHours] = useState<Record<string, string>>({});
-  const [weeklyPayExporting, setWeeklyPayExporting] = useState(false);
   const [step, setStep] = useState<"select" | "configure" | "preview">("select");
 
-  // ── Fetch companies ──
+  // ── Fetch companies + countries ──
   useEffect(() => {
     fetch("/api/companies")
       .then((r) => r.json())
-      .then((data) => setCompanies(Array.isArray(data) ? data : data.data ?? []))
+      .then((data) => setCompanies(data.companies ?? []))
       .catch(() => setCompanies([]));
+    fetch("/api/countries")
+      .then((r) => r.json())
+      .then((data) => setCountries(data.countries ?? []))
+      .catch(() => setCountries([]));
   }, []);
 
   // ── Fetch employees with filters ──
@@ -150,13 +147,17 @@ export default function ExportPage() {
       if (filters.status.length > 0) params.set("status", filters.status.join(","));
       if (filters.company.length > 0) params.set("company", filters.company.join(","));
       if (filters.country.length > 0) params.set("country", filters.country.join(","));
+      if (filters.employeeCountry.length > 0)
+        params.set("employeeCountry", filters.employeeCountry.join(","));
       if (filters.expiredDocumentType) params.set("expiredDocumentType", filters.expiredDocumentType);
       if (filters.expiringSoon) params.set("expiringSoon", "true");
       if (filters.hireDateFrom) params.set("hireDateFrom", filters.hireDateFrom);
       if (filters.hireDateTo) params.set("hireDateTo", filters.hireDateTo);
       if (filters.hasAssignment) params.set("hasAssignment", "true");
 
-      const res = await fetch(`/api/employees?${params.toString()}`);
+      const res = await fetch(`/api/employees?${params.toString()}`, {
+        cache: "no-store",
+      });
       if (!res.ok) throw new Error("Eroare fetch");
       const data = await res.json();
       setEmployees(data.data ?? []);
@@ -172,18 +173,6 @@ export default function ExportPage() {
   useEffect(() => {
     fetchEmployees();
   }, [fetchEmployees]);
-
-  useEffect(() => {
-    setWeeklyHours((prev) => {
-      const next = { ...prev };
-      for (const emp of employees) {
-        if (weeklySalaryComplete(emp) && next[String(emp.id)] === undefined) {
-          next[String(emp.id)] = "40";
-        }
-      }
-      return next;
-    });
-  }, [employees]);
 
   // ── Selection helpers ──
   function toggleSelect(id: number) {
@@ -317,70 +306,45 @@ export default function ExportPage() {
     }
   }
 
-  async function handleWeeklyPayExport() {
-    if (selectedIds.size === 0) {
-      alert("Selectează cel puțin un angajat");
-      return;
-    }
-    setWeeklyPayExporting(true);
-    try {
-      const hoursByEmployeeId: Record<string, number> = {};
-      for (const id of selectedIds) {
-        const raw = weeklyHours[String(id)] ?? "0";
-        const n = Number(String(raw).replace(",", "."));
-        hoursByEmployeeId[String(id)] = Number.isFinite(n) ? n : 0;
-      }
-      const res = await fetch("/api/export/weekly-pay", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          employeeIds: Array.from(selectedIds),
-          hoursByEmployeeId,
-        }),
-      });
-      if (!res.ok) {
-        const d = await res.json();
-        alert(d.error ?? "Eroare la export plată săptămânală");
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `plata-saptamanala-${new Date().toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch {
-      alert("Eroare la export plată săptămânală");
-    } finally {
-      setWeeklyPayExporting(false);
-    }
-  }
-
   // ── Preview data ──
-  const previewEmployees = employees.slice(0, 5);
+  const selectedEmployees = employees.filter((e) => selectedIds.has(e.id));
+  const previewEmployees = selectedEmployees.slice(0, 5);
   const previewColumns = COLUMN_OPTIONS.filter((c) => selectedColumns.has(c.key));
 
   // ── Render ──
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Header */}
       <div className="flex items-center gap-3">
         <Download size={24} className="text-gray-400" />
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Export Date</h1>
           <p className="text-sm text-gray-500">
-            Selectează angajați și coloane, apoi exportă în Excel sau PDF
+            Filtre pentru lista de angajați. Export contabilitate (CSV/Excel) și export personalizat pe coloane
+            (pași 1–3).             Pentru plată săptămânală folosește pagina{" "}
+            <Link href="/plata" className="text-violet-600 hover:underline font-medium">
+              Plată
+            </Link>
+            .
           </p>
         </div>
       </div>
 
-      {/* Export salarii — independent de pașii de export general */}
-      <div className="bg-white rounded-xl border shadow-sm p-6">
-            <h2 className="text-sm font-semibold text-gray-900 mb-1">Export contabilitate / Fișă plăți</h2>
+      <AdvancedFilter
+        filters={filters}
+        onChange={setFilters}
+        onApply={fetchEmployees}
+        onReset={() => setFilters({ ...defaultFilters })}
+        companies={companies}
+        countries={countries}
+      />
+
+      {/* Secțiunea 1: contabilitate + export personalizat (pași 1–3) */}
+      <section className="rounded-2xl border-2 border-slate-200 bg-slate-50/50 p-6 md:p-8 space-y-8 shadow-sm">
+      {/* Export salarii */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+            <h2 className="text-base font-semibold text-gray-900 mb-1">Export contabilitate / Fișă plăți</h2>
         <p className="text-xs text-gray-500 mb-4">
           Toți angajații din baza de date (cu filtre opționale). Lipsesc date salariale → celulele rămân goale.
         </p>
@@ -452,20 +416,11 @@ export default function ExportPage() {
         </p>
       </div>
 
-      {/* Plată săptămânală — instrucțiuni (tabelul cu ore e la pasul 1) */}
-      <div className="bg-white rounded-xl border border-violet-200 shadow-sm p-6">
-        <div className="flex items-center gap-2 mb-2">
-          <CalendarDays size={18} className="text-violet-600" />
-          <h2 className="text-sm font-semibold text-gray-900">Plată săptămânală</h2>
-        </div>
-        <p className="text-xs text-gray-600 mb-2">
-          La pasul <strong>1. Selectează angajați</strong>: bifează angajații, completează{" "}
-          <strong>Ore lucrate</strong> pentru cei cu tip plată <strong>ORA</strong> și date salariale complete.
-          Rândurile fără date salariale complete sunt evidențiate în galben. Apoi apasă{" "}
-          <strong>Generează export plată săptămânală</strong> — fișier Excel cu: Nume complet, CNP, IBAN, Bancă,
-          Suma brută/oră, Ore lucrate, Total de plată, Monedă.
+      <div>
+        <h2 className="text-base font-semibold text-gray-900">Export personalizat (Excel / PDF)</h2>
+        <p className="text-xs text-gray-500 mt-1 mb-4">
+          Pași 1 → 2 → 3: selectare angajați, coloane, previzualizare și descărcare.
         </p>
-      </div>
 
       {/* Step indicator */}
       <div className="flex items-center gap-2 text-sm">
@@ -493,14 +448,6 @@ export default function ExportPage() {
       {/* ── STEP 1: Select employees ── */}
       {step === "select" && (
         <div className="space-y-4">
-          <AdvancedFilter
-            filters={filters}
-            onChange={setFilters}
-            onApply={fetchEmployees}
-            onReset={() => setFilters({ ...defaultFilters })}
-            companies={companies}
-          />
-
           {selectedIds.size > 0 && (
             <BulkSelectionBar
               selectedIds={Array.from(selectedIds)}
@@ -538,9 +485,6 @@ export default function ExportPage() {
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Nume</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">CNP</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Tip plată</th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-600 min-w-[9rem]">
-                      Ore lucrate
-                    </th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Funcție</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
                     <th className="px-4 py-3 text-left font-medium text-gray-600">Firmă</th>
@@ -549,26 +493,23 @@ export default function ExportPage() {
                 <tbody>
                   {loading ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
+                      <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
                         <Loader2 size={20} className="inline animate-spin mr-2" />
                         Se încarcă...
                       </td>
                     </tr>
                   ) : employees.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-12 text-center text-gray-400">
+                      <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
                         <AlertCircle size={20} className="inline mr-2" />
                         Niciun angajat găsit. Ajustează filtrele.
                       </td>
                     </tr>
                   ) : (
                     employees.map((emp) => {
-                      const incomplete = !weeklySalaryComplete(emp);
-                      const rowHighlight = incomplete
-                        ? "bg-amber-50 border-l-4 border-amber-400"
-                        : selectedIds.has(emp.id)
-                          ? "bg-blue-50"
-                          : "hover:bg-gray-50";
+                      const rowHighlight = selectedIds.has(emp.id)
+                        ? "bg-blue-50"
+                        : "hover:bg-gray-50";
                       return (
                         <tr
                           key={emp.id}
@@ -595,31 +536,6 @@ export default function ExportPage() {
                           <td className="px-4 py-3 text-gray-700">
                             {emp.salaryType ?? "—"}
                           </td>
-                          <td
-                            className="px-4 py-3"
-                            onClick={(e) => e.stopPropagation()}
-                            onKeyDown={(e) => e.stopPropagation()}
-                          >
-                            {weeklySalaryComplete(emp) ? (
-                              <input
-                                type="number"
-                                min={0}
-                                step={0.5}
-                                value={weeklyHours[String(emp.id)] ?? "40"}
-                                onChange={(e) =>
-                                  setWeeklyHours((p) => ({
-                                    ...p,
-                                    [String(emp.id)]: e.target.value,
-                                  }))
-                                }
-                                className="w-24 rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-                              />
-                            ) : (
-                              <span className="text-xs font-medium text-amber-800">
-                                Lipsesc date salariale
-                              </span>
-                            )}
-                          </td>
                           <td className="px-4 py-3 text-gray-600">{emp.position ?? "—"}</td>
                           <td className="px-4 py-3">
                             <StatusBadge status={emp.status} />
@@ -635,25 +551,9 @@ export default function ExportPage() {
               </table>
             </div>
 
-            {/* Next step button */}
             <div className="px-4 py-3 border-t flex flex-wrap items-center justify-end gap-2 bg-gray-50">
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void handleWeeklyPayExport();
-                }}
-                disabled={weeklyPayExporting || selectedIds.size === 0}
-                className="flex items-center gap-2 px-5 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {weeklyPayExporting ? (
-                  <Loader2 size={16} className="animate-spin" />
-                ) : (
-                  <FileSpreadsheet size={16} />
-                )}
-                Generează export plată săptămânală
-              </button>
-              <button
                 onClick={() => setStep("configure")}
                 disabled={selectedIds.size === 0}
                 className="flex items-center gap-2 px-5 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
@@ -772,7 +672,7 @@ export default function ExportPage() {
             <div className="px-4 py-3 border-b flex items-center gap-2 bg-gray-50">
               <Eye size={16} className="text-gray-500" />
               <span className="text-sm font-medium text-gray-700">
-                Preview primele 5 rânduri
+                Preview primele 5 rânduri din angajații selectați ({selectedEmployees.length} în total)
               </span>
             </div>
 
@@ -800,13 +700,13 @@ export default function ExportPage() {
                       ))}
                     </tr>
                   ))}
-                  {employees.length === 0 && (
+                  {selectedEmployees.length === 0 && (
                     <tr>
                       <td
                         colSpan={previewColumns.length || 1}
                         className="px-4 py-8 text-center text-gray-400"
                       >
-                        Niciun angajat de previzualizat
+                        Niciun angajat selectat la pasul 1 — revino și bifează cel puțin un angajat.
                       </td>
                     </tr>
                   )}
@@ -814,9 +714,9 @@ export default function ExportPage() {
               </table>
             </div>
 
-            {employees.length > 5 && (
+            {selectedEmployees.length > 5 && (
               <div className="px-4 py-2 border-t text-xs text-gray-500 bg-gray-50 text-center">
-                ... și încă {employees.length - 5} angajați
+                ... și încă {selectedEmployees.length - 5} angajați selectați
               </div>
             )}
           </div>
@@ -878,6 +778,8 @@ export default function ExportPage() {
 
         </div>
       )}
+      </div>
+      </section>
     </div>
   );
 }
@@ -912,7 +814,10 @@ function getPreviewValue(emp: Employee, key: string): string {
     case "company": return emp.company?.name ?? "—";
     case "address": return emp.address ?? "—";
     case "city": return emp.city ?? "—";
-    case "country": return emp.country ?? "—";
+    case "country":
+      return emp.country
+        ? `${emp.country.name} (${emp.country.code})`
+        : "—";
     case "hiredAt": return emp.hiredAt ? new Date(emp.hiredAt).toLocaleDateString("ro-RO") : "—";
     case "iban": return emp.iban ?? "—";
     case "bankName": return emp.bankName ?? "—";

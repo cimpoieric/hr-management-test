@@ -173,3 +173,9 @@ export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.prisma = prisma;
 }
+
+/**
+ * Același client la runtime ca `prisma`. Cast la `PrismaClient` pentru tipuri corecte la
+ * `select` / `include` / `where` (extensia `$extends` poate distorsiona `EmployeeSelect` etc. în TS).
+ */
+export const prismaTyped = prisma as unknown as PrismaClient;

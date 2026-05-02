@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useState, useEffect, useCallback, type FormEvent } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -20,6 +20,7 @@ import {
   Briefcase,
   CreditCard,
   Trash2,
+  Wallet,
 } from "lucide-react";
 import { EmployeeForm } from "@/components/employees/EmployeeForm";
 import { DocumentList } from "@/components/documents/DocumentList";
@@ -43,7 +44,8 @@ type EmployeeDetail = {
   position?: string | null;
   address?: string | null;
   city?: string | null;
-  country?: string;
+  countryId?: number | null;
+  country?: { id: number; name: string; code: string; phoneCode?: string | null } | null;
   status: string;
   observations?: string | null;
   salaryType?: "LUNAR" | "SAPTAMANAL" | "ORA" | null;
@@ -53,7 +55,7 @@ type EmployeeDetail = {
   hiredAt?: string;
   createdAt?: string;
   updatedAt?: string;
-  company?: { id: number; name: string; cui?: string | null } | null;
+  company?: { id: number; name: string; taxCode?: string | null } | null;
   deployments?: { id: number; country: string; city?: string | null; startDate: string; endDate?: string | null; status: string; notes?: string | null }[];
 };
 
@@ -70,6 +72,7 @@ type SalaryCalculationItem = {
 
 const tabs = [
   { key: "info", label: "Informații" },
+  { key: "salary", label: "Date salariale" },
   { key: "documents", label: "Documente" },
   { key: "deployments", label: "Detașări" },
   { key: "history", label: "Istoric" },
@@ -78,13 +81,12 @@ const tabs = [
 export default function AngajatDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const editMode = searchParams.get("edit") === "true";
 
   const employeeId = parseInt(params.id, 10);
   const [employee, setEmployee] = useState<EmployeeDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("info");
+  const [infoEditing, setInfoEditing] = useState(false);
   const [docRefreshKey, setDocRefreshKey] = useState(0);
   const [depRefreshKey, setDepRefreshKey] = useState(0);
   const [salaryCalculatorOpen, setSalaryCalculatorOpen] = useState(false);
@@ -92,7 +94,7 @@ export default function AngajatDetailPage() {
   const [exportingSheet, setExportingSheet] = useState(false);
 
   useEffect(() => {
-    fetch(`/api/employees/${employeeId}`)
+    fetch(`/api/employees/${employeeId}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
@@ -104,6 +106,16 @@ export default function AngajatDetailPage() {
       .catch(() => router.push("/angajati"))
       .finally(() => setLoading(false));
   }, [employeeId, router]);
+
+  const refreshEmployee = useCallback(async () => {
+    const res = await fetch(`/api/employees/${employeeId}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.error) setEmployee(data);
+  }, [employeeId]);
+
+  useEffect(() => {
+    if (activeTab !== "info") setInfoEditing(false);
+  }, [activeTab]);
 
   if (loading) {
     return (
@@ -156,25 +168,6 @@ export default function AngajatDetailPage() {
     }
   }
 
-  if (editMode) {
-    return (
-      <div className="max-w-3xl mx-auto space-y-6">
-        <div className="flex items-center gap-3">
-          <Link
-            href={`/angajati/${employeeId}`}
-            className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 transition-colors"
-          >
-            <ArrowLeft size={18} />
-          </Link>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Editează: {employee.lastName} {employee.firstName}
-          </h1>
-        </div>
-        <EmployeeForm employeeId={employeeId} />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -219,13 +212,6 @@ export default function AngajatDetailPage() {
             <Calculator size={16} />
             Calculează plată
           </button>
-          <Link
-            href={`/angajati/${employeeId}?edit=true`}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            <Pencil size={16} />
-            Editează
-          </Link>
         </div>
       </div>
 
@@ -250,7 +236,22 @@ export default function AngajatDetailPage() {
 
       {/* Tab content */}
       <div>
-        {activeTab === "info" && <InfoTab employee={employee} />}
+        {activeTab === "info" && (
+          <InfoTab
+            employee={employee}
+            employeeId={employeeId}
+            editing={infoEditing}
+            onStartEdit={() => setInfoEditing(true)}
+            onCancelEdit={() => setInfoEditing(false)}
+            onSaved={async () => {
+              await refreshEmployee();
+              setInfoEditing(false);
+            }}
+          />
+        )}
+        {activeTab === "salary" && (
+          <SalaryTab employee={employee} employeeId={employeeId} onUpdated={refreshEmployee} />
+        )}
         {activeTab === "documents" && (
           <DocumentsTab
             employeeId={employeeId}
@@ -288,48 +289,250 @@ export default function AngajatDetailPage() {
   );
 }
 
+// ─── Salary Tab — editare tip plată, sumă, monedă, valabil de la ─────────────
+
+function SalaryTab({
+  employee,
+  employeeId,
+  onUpdated,
+}: {
+  employee: EmployeeDetail;
+  employeeId: number;
+  onUpdated: () => void | Promise<void>;
+}) {
+  const [salaryType, setSalaryType] = useState<string>(() => employee.salaryType ?? "");
+  const [salaryAmount, setSalaryAmount] = useState(() =>
+    employee.salaryAmount != null ? String(employee.salaryAmount) : ""
+  );
+  const [salaryCurrency, setSalaryCurrency] = useState(employee.salaryCurrency ?? "");
+  const [salaryStartDate, setSalaryStartDate] = useState(() =>
+    employee.salaryStartDate ? employee.salaryStartDate.slice(0, 10) : ""
+  );
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+
+  useEffect(() => {
+    setSalaryType(employee.salaryType ?? "");
+    setSalaryAmount(employee.salaryAmount != null ? String(employee.salaryAmount) : "");
+    setSalaryCurrency(employee.salaryCurrency ?? "");
+    setSalaryStartDate(
+      employee.salaryStartDate ? employee.salaryStartDate.slice(0, 10) : ""
+    );
+  }, [employee]);
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    setMessage(null);
+    try {
+      const body: Record<string, unknown> = {};
+      body.salaryType = salaryType === "" ? null : salaryType;
+
+      const amt = salaryAmount.trim();
+      if (amt === "") body.salaryAmount = null;
+      else {
+        const n = Number(amt.replace(",", "."));
+        if (!Number.isFinite(n) || n < 0) {
+          setMessage({ type: "err", text: "Sumă brută invalidă." });
+          setSaving(false);
+          return;
+        }
+        body.salaryAmount = n;
+      }
+
+      const cur = salaryCurrency.trim();
+      body.salaryCurrency = cur === "" ? null : cur.toUpperCase();
+
+      if (salaryStartDate.trim() === "") body.salaryStartDate = null;
+      else body.salaryStartDate = salaryStartDate.trim();
+
+      const res = await fetch(`/api/employees/${employeeId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({
+          type: "err",
+          text: typeof data.error === "string" ? data.error : "Eroare la salvare",
+        });
+        return;
+      }
+      setMessage({ type: "ok", text: "Date salariale salvate." });
+      await onUpdated();
+    } catch {
+      setMessage({ type: "err", text: "Eroare de rețea" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl border shadow-sm p-6 max-w-xl">
+      <div className="flex items-center gap-2 mb-1">
+        <Wallet size={18} className="text-slate-600" />
+        <h3 className="text-base font-semibold text-gray-900">Date salariale</h3>
+      </div>
+      <p className="text-xs text-gray-500 mb-4">
+        Toate câmpurile sunt opționale. Tip plată gol = nesetat; sumă goală = fără sumă brută.
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Tip plată</label>
+          <select
+            value={salaryType}
+            onChange={(e) => setSalaryType(e.target.value)}
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          >
+            <option value="">— Nesetat —</option>
+            <option value="LUNAR">Lunar (LUNAR)</option>
+            <option value="SAPTAMANAL">Săptămânal (SAPTAMANAL)</option>
+            <option value="ORA">Pe oră (ORA)</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Sumă brută</label>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={salaryAmount}
+            onChange={(e) => setSalaryAmount(e.target.value)}
+            placeholder="ex. 50"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Monedă</label>
+          <input
+            type="text"
+            value={salaryCurrency}
+            onChange={(e) => setSalaryCurrency(e.target.value)}
+            placeholder="RON, EUR…"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Valabil de la</label>
+          <input
+            type="date"
+            value={salaryStartDate}
+            onChange={(e) => setSalaryStartDate(e.target.value)}
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
+          />
+        </div>
+        {message && (
+          <p
+            className={`text-sm ${message.type === "ok" ? "text-green-700" : "text-red-600"}`}
+            role="alert"
+          >
+            {message.text}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={saving}
+          className="px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-50"
+        >
+          {saving ? "Se salvează…" : "Salvează date salariale"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
 // ─── Info Tab ────────────────────────────────────────────────────────────────
 
-function InfoTab({ employee }: { employee: EmployeeDetail }) {
-  const salaryTypeLabel =
-    employee.salaryType === "LUNAR"
-      ? "Lunar"
-      : employee.salaryType === "SAPTAMANAL"
-      ? "Săptămânal"
-      : employee.salaryType === "ORA"
-      ? "Pe oră"
-      : null;
-
-  const salaryValue =
-    typeof employee.salaryAmount === "number"
-      ? `${employee.salaryAmount.toLocaleString("ro-RO")} ${employee.salaryCurrency ?? "RON"}`
-      : null;
+function InfoTab({
+  employee,
+  employeeId,
+  editing,
+  onStartEdit,
+  onCancelEdit,
+  onSaved,
+}: {
+  employee: EmployeeDetail;
+  employeeId: number;
+  editing: boolean;
+  onStartEdit: () => void;
+  onCancelEdit: () => void;
+  onSaved: () => void | Promise<void>;
+}) {
+  if (editing) {
+    return (
+      <div className="max-w-3xl space-y-3">
+        <p className="text-sm text-gray-600">
+          Editează date personale, bancare și contract. Salarizarea este în tab-ul{" "}
+          <strong>Date salariale</strong>.
+        </p>
+        <EmployeeForm
+          employeeId={employeeId}
+          variant="infoOnly"
+          onSaved={onSaved}
+          onCancel={onCancelEdit}
+        />
+      </div>
+    );
+  }
 
   const fields = [
     { icon: Hash, label: "CNP", value: employee.cnp },
-    { icon: CreditCard, label: "CI", value: employee.seriesCI && employee.numberCI ? `${employee.seriesCI} ${employee.numberCI}` : null },
+    {
+      icon: CreditCard,
+      label: "CI",
+      value:
+        employee.seriesCI && employee.numberCI
+          ? `${employee.seriesCI} ${employee.numberCI}`
+          : null,
+    },
     { icon: Phone, label: "Telefon", value: employee.phone },
     { icon: Mail, label: "Email", value: employee.email },
     { icon: CreditCard, label: "IBAN", value: employee.iban },
     { icon: Building2, label: "Bancă", value: employee.bankName },
-    { icon: CreditCard, label: "Tip plată", value: salaryTypeLabel },
-    { icon: CreditCard, label: "Salariu brut", value: salaryValue },
+    { icon: Building2, label: "Firmă", value: employee.company?.name },
+    { icon: Briefcase, label: "Funcție", value: employee.position },
     {
-      icon: Calendar,
-      label: "Salariu valabil de la",
-      value: employee.salaryStartDate
-        ? new Date(employee.salaryStartDate).toLocaleDateString("ro-RO")
+      icon: Briefcase,
+      label: "Status",
+      value: employee.status === "ACTIVE" ? "Activ" : employee.status === "TERMINATED" ? "Terminat" : employee.status,
+    },
+    {
+      icon: Globe,
+      label: "Țară",
+      value: employee.country
+        ? `${employee.country.name} (${employee.country.code})`
         : null,
     },
-    { icon: Building2, label: "Firmă", value: employee.company?.name },
-    { icon: Globe, label: "Țară", value: employee.country },
-    { icon: MapPin, label: "Adresă", value: employee.address ? `${employee.address}${employee.city ? `, ${employee.city}` : ""}` : null },
-    { icon: Calendar, label: "Data angajării", value: employee.hiredAt ? new Date(employee.hiredAt).toLocaleDateString("ro-RO") : null },
+    {
+      icon: MapPin,
+      label: "Adresă",
+      value: employee.address
+        ? `${employee.address}${employee.city ? `, ${employee.city}` : ""}`
+        : null,
+    },
+    {
+      icon: Calendar,
+      label: "Data angajării",
+      value: employee.hiredAt
+        ? new Date(employee.hiredAt).toLocaleDateString("ro-RO")
+        : null,
+    },
     { icon: StickyNote, label: "Observații", value: employee.observations },
   ];
 
   return (
     <div className="bg-white rounded-xl border shadow-sm p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <h3 className="text-sm font-semibold text-gray-900">Informații angajat</h3>
+        <button
+          type="button"
+          onClick={onStartEdit}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-slate-200 text-sm font-medium text-slate-800 hover:bg-slate-50"
+        >
+          <Pencil size={16} />
+          Editează
+        </button>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {fields.map((f, i) => (
           <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50">

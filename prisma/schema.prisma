@@ -34,6 +34,16 @@ enum SalaryType {
   ORA
 }
 
+model Country {
+  id         Int       @id @default(autoincrement())
+  name       String    @unique
+  code       String    @unique // RO, DE, NL
+  phoneCode  String?
+  companies  Company[]
+  employees  Employee[]
+  createdAt  DateTime  @default(now())
+}
+
 model Employee {
   id           Int           @id @default(autoincrement())
   cnp          String        @unique
@@ -51,7 +61,8 @@ model Employee {
   position     String?
   address      String?
   city         String?
-  country      String        @default("RO")
+  countryId    Int?
+  country      Country?      @relation(fields: [countryId], references: [id])
   status       String        @default("ACTIVE")
   observations String?
   salaryType   SalaryType?
@@ -70,6 +81,7 @@ model Employee {
 
   @@index([cnpHash])
   @@index([companyId])
+  @@index([countryId])
   @@index([status])
 }
 
@@ -90,14 +102,13 @@ model SalaryCalculation {
 
 model Company {
   id          Int        @id @default(autoincrement())
-  name        String
-  cui         String?    @unique
-  regCom      String?
+  name        String     @unique
+  taxCode     String?
   address     String?
-  city        String?
-  country     String     @default("RO")
+  countryId   Int?
+  country     Country?   @relation(fields: [countryId], references: [id])
+  status      String     @default("Activ") // Activ | Inactiv
   employees   Employee[]
-  isActive    Boolean    @default(true)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 }

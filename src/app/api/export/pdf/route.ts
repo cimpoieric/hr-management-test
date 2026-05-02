@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prismaTyped } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
@@ -18,6 +18,7 @@ import { decrypt } from "@/lib/encryption";
 import { salaryAmountToJson } from "@/lib/salaryFields";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import { registerRobotoFonts } from "@/lib/pdf/registerRobotoForJsPdf";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -60,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     const appSettings = await getAppSettings();
     // Query employees
-    const employees = await prisma.employee.findMany({
+    const employees = await prismaTyped.employee.findMany({
       where: { id: { in: employeeIds } },
       orderBy: { lastName: "asc" },
       include: {
@@ -107,10 +108,11 @@ export async function POST(request: NextRequest) {
     const title = `Raport salarial — ${appSettings.companyName || "Companie"}`;
     const tableColWidths = [28, 78, 78, 92, 128, 78, 64, 66, 44, 58];
     const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-    doc.setFont("helvetica", "bold");
+    registerRobotoFonts(doc);
+    doc.setFont("Roboto", "bold");
     doc.setFontSize(12);
     doc.text(title, 24, 24);
-    doc.setFont("helvetica", "normal");
+    doc.setFont("Roboto", "normal");
     doc.setFontSize(9);
     doc.text(`${appSettings.companyCuiReg || "CUI nedefinit"} · ${generatedAt}`, 24, 40);
 
@@ -118,13 +120,24 @@ export async function POST(request: NextRequest) {
       startY: 54,
       head: [headers],
       body: rows,
-      styles: { font: "helvetica", fontSize: 8, cellPadding: 3, overflow: "linebreak" },
-      headStyles: { fillColor: [235, 240, 248], textColor: [25, 25, 25] },
+      styles: {
+        font: "Roboto",
+        fontStyle: "normal",
+        fontSize: 8,
+        cellPadding: 3,
+        overflow: "linebreak",
+      },
+      headStyles: {
+        font: "Roboto",
+        fontStyle: "bold",
+        fillColor: [235, 240, 248],
+        textColor: [25, 25, 25],
+      },
       columnStyles: Object.fromEntries(tableColWidths.map((w, i) => [i, { cellWidth: w }])),
       margin: { left: 24, right: 24 },
       didDrawPage: () => {
         const pageHeight = doc.internal.pageSize.getHeight();
-        doc.setFont("helvetica", "normal");
+        doc.setFont("Roboto", "normal");
         doc.setFontSize(9);
         doc.text(`Generat la ${generatedAt} — Total angajați: ${rows.length}`, 24, pageHeight - 12);
       },

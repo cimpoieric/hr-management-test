@@ -7,10 +7,17 @@ export const dynamic = "force-dynamic";
 
 export default async function AngajatiPage() {
   // Fetch companies server-side for the filter dropdown
-  const companies = await prisma.company.findMany({
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  });
+  const [companies, countries] = await Promise.all([
+    prisma.company.findMany({
+      where: { status: "Activ" },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.country.findMany({
+      select: { id: true, name: true, code: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -32,7 +39,7 @@ export default async function AngajatiPage() {
       </div>
 
       {/* Tabel cu filtre avansate și selecție bulk */}
-      <EmployeeTable companies={companies} showAdvancedFilters showBulkActions />
+      <EmployeeTable companies={companies} countries={countries} showAdvancedFilters showBulkActions />
     </div>
   );
 }

@@ -34,7 +34,8 @@ interface Employee {
   status: string;
   address?: string | null;
   city: string | null;
-  country: string | null;
+  countryId: number | null;
+  country: { id: number; name: string; code: string } | null;
   company: { id: number; name: string } | null;
   documentCount: number;
   deploymentCount: number;
@@ -49,6 +50,12 @@ interface Employee {
 interface Company {
   id: number;
   name: string;
+}
+
+interface CountryOpt {
+  id: number;
+  name: string;
+  code: string;
 }
 
 function statusesEqual(a: string[], b: string[]): boolean {
@@ -81,6 +88,7 @@ interface EmployeeTableProps {
   initialData?: Employee[];
   initialTotal?: number;
   companies?: Company[];
+  countries?: CountryOpt[];
   showAdvancedFilters?: boolean;
   showBulkActions?: boolean;
 }
@@ -89,6 +97,7 @@ export function EmployeeTable({
   initialData = [],
   initialTotal = 0,
   companies = [],
+  countries = [],
   showAdvancedFilters = true,
   showBulkActions = true,
 }: EmployeeTableProps) {
@@ -161,6 +170,8 @@ export function EmployeeTable({
     if (filters.status.length > 0) params.set("status", filters.status.join(","));
     if (filters.company.length > 0) params.set("company", filters.company.join(","));
     if (filters.country.length > 0) params.set("country", filters.country.join(","));
+    if (filters.employeeCountry.length > 0)
+      params.set("employeeCountry", filters.employeeCountry.join(","));
     if (filters.expiredDocumentType) params.set("expiredDocumentType", filters.expiredDocumentType);
     if (filters.expiringSoon) params.set("expiringSoon", "true");
     if (filters.hireDateFrom) params.set("hireDateFrom", filters.hireDateFrom);
@@ -284,6 +295,7 @@ export function EmployeeTable({
     filters.status.length > 0,
     filters.company.length > 0,
     filters.country.length > 0,
+    filters.employeeCountry.length > 0,
     filters.expiredDocumentType,
     filters.expiringSoon,
     filters.hireDateFrom,
@@ -301,6 +313,7 @@ export function EmployeeTable({
           onApply={handleApplyFilters}
           onReset={handleResetFilters}
           companies={companies}
+          countries={countries}
         />
       )}
 
@@ -551,7 +564,7 @@ export function EmployeeTable({
                           <Eye size={16} />
                         </Link>
                         <Link
-                          href={`/angajati/${emp.id}?edit=true`}
+                          href={`/angajati/${emp.id}`}
                           className="p-1.5 rounded-lg text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
                           title="Editează"
                         >

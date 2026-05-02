@@ -9,6 +9,7 @@ import {
   FileText,
   Globe,
   Building2,
+  MapPin,
   ChevronDown,
   ChevronUp,
   RotateCcw,
@@ -19,7 +20,10 @@ export interface FilterState {
   search: string;
   status: string[];
   company: string[];
+  /** Detașare: coduri țară (ex. NL, DE) */
   country: string[];
+  /** Domiciliu: id-uri din tabelul Country */
+  employeeCountry: string[];
   expiredDocumentType: string;
   expiringSoon: boolean;
   hireDateFrom: string;
@@ -33,6 +37,7 @@ interface AdvancedFilterProps {
   onApply: () => void;
   onReset: () => void;
   companies: { id: number; name: string }[];
+  countries: { id: number; name: string; code: string }[];
 }
 
 const STATUS_OPTIONS = [
@@ -53,6 +58,7 @@ export const defaultFilters: FilterState = {
   status: [],
   company: [],
   country: [],
+  employeeCountry: [],
   expiredDocumentType: "",
   expiringSoon: false,
   hireDateFrom: "",
@@ -66,6 +72,7 @@ export function AdvancedFilter({
   onApply,
   onReset,
   companies,
+  countries,
 }: AdvancedFilterProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -83,6 +90,7 @@ export function AdvancedFilter({
     filters.status.length > 0,
     filters.company.length > 0,
     filters.country.length > 0,
+    filters.employeeCountry.length > 0,
     filters.expiredDocumentType,
     filters.expiringSoon,
     filters.hireDateFrom,
@@ -211,16 +219,42 @@ export function AdvancedFilter({
               </div>
             </div>
 
-            {/* Țară detașare */}
+            {/* Țară domiciliu (angajat) */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
                 <Globe size={12} className="inline mr-1" />
+                Țară (domiciliu)
+              </label>
+              <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+                {countries.map((c) => (
+                  <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={filters.employeeCountry.includes(String(c.id))}
+                      onChange={() =>
+                        update("employeeCountry", toggleArrayItem(filters.employeeCountry, String(c.id)))
+                      }
+                      className="rounded"
+                    />
+                    <span className="text-sm text-gray-700 truncate">
+                      {c.name} ({c.code})
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Țară detașare */}
+            <div>
+              <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
+                <MapPin size={12} className="inline mr-1" />
                 Țară detașare
               </label>
               <div className="flex flex-wrap gap-1.5">
                 {DEPLOYMENT_COUNTRIES.slice(0, 6).map((c) => (
                   <button
                     key={c.code}
+                    type="button"
                     onClick={() => update("country", toggleArrayItem(filters.country, c.code))}
                     className={`px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
                       filters.country.includes(c.code)

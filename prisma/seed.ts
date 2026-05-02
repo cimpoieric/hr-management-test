@@ -1,14 +1,6 @@
 /**
  * Seed script — date inițiale pentru HR Management.
  *
- * Creează:
- *   1. Utilizator admin default
- *   2. 3 firme de test
- *   3. 3 angajați români cu CNP-uri valide, IBAN-uri RO, date criptate
- *   4. Documente per angajat (CONTRACT, ID)
- *   5. Detașări per angajat (Olanda, Germania, Italia)
- *
- * Idempotent: folosește upsert (CNP unique) și findFirst → create (documente/detașări).
  * Usage: npm run seed
  */
 
@@ -17,8 +9,6 @@ import { hashPassword } from "../src/lib/auth";
 import { encrypt, hashSha256 } from "../src/lib/encryption";
 
 const prisma = new PrismaClient();
-
-// ─── CNP Validator & Generator ───────────────────────────────────────────────
 
 const CNP_WEIGHTS = [2, 7, 9, 1, 4, 6, 3, 5, 8, 2, 7, 9];
 
@@ -51,8 +41,6 @@ function generateCnp(
   return `${partial}${checksum}`;
 }
 
-// ─── IBAN Generator ──────────────────────────────────────────────────────────
-
 const IBAN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 function generateIbanRo(): string {
@@ -63,15 +51,41 @@ function generateIbanRo(): string {
   return `RO49${body}`;
 }
 
-// ─── Seed Data ───────────────────────────────────────────────────────────────
-
 const ADMIN_EMAIL = "admin@firma.local";
 const ADMIN_PASSWORD = "AdminTemp123!";
 
-const SEED_COMPANIES = [
-  { name: "RomForce Detașări SRL", cui: "RO12345678", city: "București", address: "Str. Victoriei nr. 10, Sector 1" },
-  { name: "EuroWork HR Solutions", cui: "RO87654321", city: "Cluj-Napoca", address: "Str. Memorandumului nr. 45" },
-  { name: "BuildTeam Internațional", cui: "RO55443322", city: "Timișoara", address: "Bld. Republicii nr. 22" },
+const SEED_COUNTRIES = [
+  { name: "România", code: "RO", phoneCode: "+40" },
+  { name: "Germania", code: "DE", phoneCode: "+49" },
+  { name: "Olanda", code: "NL", phoneCode: "+31" },
+  { name: "Italia", code: "IT", phoneCode: "+39" },
+];
+
+/** Firme inițiale — legate de România */
+const SEED_COMPANIES: {
+  name: string;
+  taxCode: string;
+  address: string;
+  countryCode: string;
+}[] = [
+  {
+    name: "RomForce Detașări SRL",
+    taxCode: "RO12345678",
+    address: "Str. Victoriei nr. 10, Sector 1, București",
+    countryCode: "RO",
+  },
+  {
+    name: "EuroWork HR Solutions",
+    taxCode: "RO87654321",
+    address: "Str. Memorandumului nr. 45, Cluj-Napoca",
+    countryCode: "RO",
+  },
+  {
+    name: "BuildTeam Internațional",
+    taxCode: "RO55443322",
+    address: "Bld. Republicii nr. 22, Timișoara",
+    countryCode: "RO",
+  },
 ];
 
 interface SeedEmployee {
@@ -82,7 +96,7 @@ interface SeedEmployee {
   bankName: string;
   address: string;
   city: string;
-  country: string;
+  countryCode: string;
   cnp: string;
   companyIndex: number;
   documents: { type: string; fileName: string; filePath: string }[];
@@ -106,11 +120,15 @@ function buildSeedEmployees(): SeedEmployee[] {
       bankName: "Banca Transilvania",
       address: "Str. Lalelelor nr. 5, Bl. 3, Ap. 12",
       city: "București",
-      country: "RO",
+      countryCode: "RO",
       cnp: generateCnp(1, 1985, 3, 15, 40, 123),
       companyIndex: 0,
       documents: [
-        { type: "CONTRACT", fileName: "contract_ion_popescu_2024.pdf", filePath: "uploads/contracts/contract_ion_popescu_2024.pdf" },
+        {
+          type: "CONTRACT",
+          fileName: "contract_ion_popescu_2024.pdf",
+          filePath: "uploads/contracts/contract_ion_popescu_2024.pdf",
+        },
         { type: "ID", fileName: "ci_ion_popescu_fata.jpg", filePath: "uploads/ids/ci_ion_popescu_fata.jpg" },
       ],
       deployment: {
@@ -130,11 +148,15 @@ function buildSeedEmployees(): SeedEmployee[] {
       bankName: "ING Bank",
       address: "Str. Trandafirilor nr. 12",
       city: "Cluj-Napoca",
-      country: "RO",
+      countryCode: "RO",
       cnp: generateCnp(2, 1990, 7, 22, 12, 456),
       companyIndex: 1,
       documents: [
-        { type: "CONTRACT", fileName: "contract_maria_ionescu_2024.pdf", filePath: "uploads/contracts/contract_maria_ionescu_2024.pdf" },
+        {
+          type: "CONTRACT",
+          fileName: "contract_maria_ionescu_2024.pdf",
+          filePath: "uploads/contracts/contract_maria_ionescu_2024.pdf",
+        },
         { type: "ID", fileName: "ci_maria_ionescu_fata.jpg", filePath: "uploads/ids/ci_maria_ionescu_fata.jpg" },
       ],
       deployment: {
@@ -154,12 +176,20 @@ function buildSeedEmployees(): SeedEmployee[] {
       bankName: "BRD — Groupe Société Générale",
       address: "Bld. Unirii nr. 8, Et. 4",
       city: "Timișoara",
-      country: "RO",
+      countryCode: "RO",
       cnp: generateCnp(1, 1988, 11, 3, 35, 789),
       companyIndex: 2,
       documents: [
-        { type: "CONTRACT", fileName: "contract_andrei_georgescu_2024.pdf", filePath: "uploads/contracts/contract_andrei_georgescu_2024.pdf" },
-        { type: "ID", fileName: "ci_andrei_georgescu_fata.jpg", filePath: "uploads/ids/ci_andrei_georgescu_fata.jpg" },
+        {
+          type: "CONTRACT",
+          fileName: "contract_andrei_georgescu_2024.pdf",
+          filePath: "uploads/contracts/contract_andrei_georgescu_2024.pdf",
+        },
+        {
+          type: "ID",
+          fileName: "ci_andrei_georgescu_fata.jpg",
+          filePath: "uploads/ids/ci_andrei_georgescu_fata.jpg",
+        },
       ],
       deployment: {
         country: "IT",
@@ -173,13 +203,8 @@ function buildSeedEmployees(): SeedEmployee[] {
   ];
 }
 
-// ─── Main Seed ───────────────────────────────────────────────────────────────
-
 async function main() {
   console.log("🌱 Seeding database...\n");
-
-  // ─── 1. Admin User ──────────────────────────────────────────────────
-  console.log("[1/4] Utilizator admin...");
 
   const hashedPassword = await hashPassword(ADMIN_PASSWORD);
 
@@ -200,88 +225,94 @@ async function main() {
     },
   });
 
-  console.log(`   ✓ ${ADMIN_EMAIL}`);
+  console.log(`[1/5] Admin: ${ADMIN_EMAIL}`);
 
-  // ─── 2. Companies ───────────────────────────────────────────────────
-  console.log("\n[2/4] Firme...");
-
-  const companies: { id: number; name: string }[] = [];
-
-  for (const company of SEED_COMPANIES) {
-    const upserted = await prisma.company.upsert({
-      where: { cui: company.cui },
-      update: company,
-      create: company,
+  const countryByCode = new Map<string, { id: number; code: string }>();
+  for (const c of SEED_COUNTRIES) {
+    const row = await prisma.country.upsert({
+      where: { code: c.code },
+      update: { name: c.name, phoneCode: c.phoneCode },
+      create: { name: c.name, code: c.code, phoneCode: c.phoneCode ?? null },
     });
-    companies.push(upserted);
-    console.log(`   ✓ ${upserted.name}`);
+    countryByCode.set(c.code, row);
+    console.log(`[2/5] Țară: ${row.name} (${row.code})`);
   }
 
-  // ─── 3. Employees ───────────────────────────────────────────────────
-  console.log("\n[3/4] Angajați (CNP criptat + IBAN criptat)...");
+  const companies: { id: number; name: string }[] = [];
+  for (const company of SEED_COMPANIES) {
+    const cid = countryByCode.get(company.countryCode)?.id ?? null;
+    const upserted = await prisma.company.upsert({
+      where: { name: company.name },
+      update: {
+        taxCode: company.taxCode,
+        address: company.address,
+        countryId: cid,
+        status: "Activ",
+      },
+      create: {
+        name: company.name,
+        taxCode: company.taxCode,
+        address: company.address,
+        countryId: cid,
+        status: "Activ",
+      },
+    });
+    companies.push(upserted);
+    console.log(`[3/5] Firmă: ${upserted.name}`);
+  }
 
   const seedEmployees = buildSeedEmployees();
+  const defaultRoId = countryByCode.get("RO")?.id;
 
   for (const emp of seedEmployees) {
-    if (!emp) continue;
-
-    // Generare IBAN
     const iban = generateIbanRo();
-
-    // Criptare + hash date sensibile
     const cnpEncrypted = encrypt(emp.cnp);
-    const cnpHash      = hashSha256(emp.cnp);
+    const cnpHash = hashSha256(emp.cnp);
     const ibanEncrypted = encrypt(iban);
-    const ibanHash     = hashSha256(iban);
+    const ibanHash = hashSha256(iban);
 
-    // Upsert angajat (CNP este unique → idempotent)
     const company = companies[emp.companyIndex];
-    if (!company) {
-      console.error(`   ✗ ${emp.firstName} ${emp.lastName} — Company not found at index ${emp.companyIndex}`);
-      continue;
-    }
+    if (!company) continue;
+
+    const countryId = countryByCode.get(emp.countryCode)?.id ?? defaultRoId ?? null;
 
     const employee = await prisma.employee.upsert({
       where: { cnp: emp.cnp },
       update: {
         firstName: emp.firstName,
-        lastName:  emp.lastName,
-        email:     emp.email,
-        phone:     emp.phone,
-        iban:      ibanEncrypted,
+        lastName: emp.lastName,
+        email: emp.email,
+        phone: emp.phone,
+        iban: ibanEncrypted,
         ibanHash,
-        bankName:  emp.bankName,
-        address:   emp.address,
-        city:      emp.city,
-        country:   emp.country,
+        bankName: emp.bankName,
+        address: emp.address,
+        city: emp.city,
+        countryId,
         companyId: company.id,
       },
       create: {
-        cnp:           emp.cnp,
+        cnp: emp.cnp,
         cnpEncrypted,
         cnpHash,
-        firstName:     emp.firstName,
-        lastName:      emp.lastName,
-        email:         emp.email,
-        phone:         emp.phone,
-        iban:          ibanEncrypted,
+        firstName: emp.firstName,
+        lastName: emp.lastName,
+        email: emp.email,
+        phone: emp.phone,
+        iban: ibanEncrypted,
         ibanHash,
-        bankName:      emp.bankName,
-        address:       emp.address,
-        city:          emp.city,
-        country:       emp.country,
-        companyId:     company.id,
+        bankName: emp.bankName,
+        address: emp.address,
+        city: emp.city,
+        countryId,
+        companyId: company.id,
       },
     });
 
-    console.log(`   ✓ ${emp.firstName} ${emp.lastName}`);
-    console.log(`     CNP:  ${emp.cnp} (valid)`);
-    console.log(`     IBAN: ${iban}`);
+    console.log(`[4/5] Angajat: ${emp.firstName} ${emp.lastName}`);
 
-    // ─── 4. Documente (idempotent via findFirst) ──────────────────────
-    if (emp.documents && Array.isArray(emp.documents)) {
+    if (emp.documents?.length) {
       for (const doc of emp.documents) {
-        if (!doc) continue;
         const existing = await prisma.document.findFirst({
           where: { employeeId: employee.id, type: doc.type },
         });
@@ -299,10 +330,8 @@ async function main() {
           });
         }
       }
-      console.log(`     📄 ${emp.documents.map((d) => d.type).join(", ")}`);
     }
 
-    // ─── 5. Deployment (idempotent via findFirst) ─────────────────────
     if (emp.deployment) {
       const existingDep = await prisma.deployment.findFirst({
         where: { employeeId: employee.id, country: emp.deployment.country },
@@ -311,40 +340,25 @@ async function main() {
         await prisma.deployment.create({
           data: {
             employeeId: employee.id,
-            country:    emp.deployment.country,
-            city:       emp.deployment.city,
-            startDate:  emp.deployment.startDate,
-            endDate:    emp.deployment.endDate,
-            status:     emp.deployment.status,
-            notes:      emp.deployment.notes,
+            country: emp.deployment.country,
+            city: emp.deployment.city,
+            startDate: emp.deployment.startDate,
+            endDate: emp.deployment.endDate,
+            status: emp.deployment.status,
+            notes: emp.deployment.notes,
           },
         });
       }
-      console.log(`     🌍 ${emp.deployment.country} — ${emp.deployment.city}`);
     }
   }
 
-  // ─── Summary ────────────────────────────────────────────────────────
-  console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.log("✅ Seeding complet!\n");
-  console.log(`   Utilizatori: ${await prisma.user.count()}`);
-  console.log(`   Firme:       ${await prisma.company.count()}`);
-  console.log(`   Angajați:    ${await prisma.employee.count()}`);
-  console.log(`   Documente:   ${await prisma.document.count()}`);
-  console.log(`   Detașări:    ${await prisma.deployment.count()}`);
-  console.log(`\n🔐 Login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
-  console.log("\n⚠️  Schimbă parola admin după primul login!");
-  console.log("\n💡 Verificare:");
-  console.log("   npx prisma studio     → GUI vizual");
-  console.log("   sqlite3 data/app.db   → CLI direct");
+  console.log("\n✅ Seeding complet!");
+  console.log(`   Login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
 }
 
 main()
-  .catch((error) => {
-    console.error("\n❌ Seed failed:", error);
+  .catch((e) => {
+    console.error(e);
     process.exit(1);
   })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
-
+  .finally(() => prisma.$disconnect());
