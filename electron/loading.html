@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ro">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HR Management</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        background: linear-gradient(160deg, #0f172a 0%, #1e293b 45%, #0f172a 100%);
+        color: #e2e8f0;
+      }
+      .card {
+        text-align: center;
+        padding: 2.5rem 2rem;
+        max-width: 28rem;
+      }
+      h1 {
+        font-size: 1.35rem;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin: 0 0 0.5rem;
+        color: #f8fafc;
+      }
+      p {
+        margin: 0;
+        font-size: 0.9rem;
+        color: #94a3b8;
+        line-height: 1.5;
+      }
+      .spinner {
+        width: 44px;
+        height: 44px;
+        margin: 0 auto 1.5rem;
+        border: 3px solid rgba(148, 163, 184, 0.25);
+        border-top-color: #38bdf8;
+        border-radius: 50%;
+        animation: spin 0.85s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .status {
+        margin-top: 1.25rem;
+        font-size: 0.8rem;
+        color: #64748b;
+        font-variant-numeric: tabular-nums;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <div class="spinner" aria-hidden="true"></div>
+      <h1>HR Management</h1>
+      <p>Pornește serverul aplicației. Poate dura câteva secunde la prima rulare.</p>
+      <p class="status" id="status">Se așteaptă…</p>
+    </div>
+    <script>
+      const statusEl = document.getElementById("status");
+      const start = Date.now();
+      setInterval(function () {
+        const s = Math.floor((Date.now() - start) / 1000);
+        statusEl.textContent = "Se așteaptă… " + s + " s";
+      }, 500);
+    </script>
+  </body>
+</html>
