@@ -1,9 +1,9 @@
-const path = require("path");
+import nodePath from "path";
+import type { NextConfig } from "next";
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+const hrNextConfig: NextConfig = {
   /** Evită confuzia când există un alt package-lock în folderul părinte */
-  outputFileTracingRoot: path.join(__dirname),
+  outputFileTracingRoot: nodePath.join(__dirname),
   output: "standalone",
   poweredByHeader: false,
   reactStrictMode: true,
@@ -15,4 +15,4 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+export default hrNextConfig;

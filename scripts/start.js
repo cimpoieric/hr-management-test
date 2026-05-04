@@ -169,9 +169,22 @@ const mode = isDev ? "dezvoltare" : "producție";
 log(`  Mod: ${COLORS.bold}${mode}${COLORS.reset}`);
 log(`  Host: ${host}:${port}`);
 
-// Comandă Next.js
-const cmd = isDev ? "next" : "next";
-const args = isDev ? ["dev", "-p", port, "-H", host] : ["start", "-p", port, "-H", host];
+/** Pornește CLI-ul Next fără shell — evită „next is not recognized” când PATH nu include node_modules/.bin (ex. Electron). */
+function resolveNextCliPath() {
+  try {
+    return require.resolve("next/dist/bin/next", { paths: [CWD] });
+  } catch {
+    const fallback = path.join(CWD, "node_modules", "next", "dist", "bin", "next");
+    if (!fs.existsSync(fallback)) {
+      logERR(`Next.js nu a fost găsit (lipsește node_modules?). Căutat: ${fallback}`);
+      process.exit(1);
+    }
+    return fallback;
+  }
+}
+
+const nextCli = resolveNextCliPath();
+const nextArgs = isDev ? ["dev", "-p", port, "-H", host] : ["start", "-p", port, "-H", host];
 
 // Backup automat (opțional) — via cron / Task Scheduler
 const backupAuto = process.env.BACKUP_AUTO === "true";
@@ -185,12 +198,12 @@ log(`  Aplicația rulează la:`, "bold");
 log(`  http://${host === "0.0.0.0" ? "localhost" : host}:${port}`);
 log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
-// Pornește Next.js
-const child = spawn(cmd, args, {
+// Pornește Next.js (același Node ca pentru acest script — fără cmd.exe / PATH către „next”)
+const child = spawn(process.execPath, [nextCli, ...nextArgs], {
   cwd: CWD,
   stdio: "inherit",
   env: process.env,
-  shell: process.platform === "win32",
+  shell: false,
 });
 
 child.on("exit", (code) => {
