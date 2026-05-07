@@ -35,7 +35,7 @@ export async function AuthenticatedDashboardShell({
   const isAdmin = canManageUsers(user.role);
 
   return (
-    <div className="flex h-screen min-h-0 bg-gray-50">
+    <div className="flex min-h-screen min-h-dvh bg-gray-50">
       <Sidebar userRole={user.role} isAdmin={isAdmin} />
       <div className="flex flex-col flex-1 min-w-0 min-h-0">
         <Header user={user} />

@@ -40,7 +40,7 @@ export async function GET(
 
   try {
     const employeeId = await getEmployeeId(params);
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = request.nextUrl;
     const period = (searchParams.get("period") ?? "all").toLowerCase();
     const now = new Date();
     const fromDate =

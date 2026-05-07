@@ -26,6 +26,8 @@ model User {
   lastLoginAt        DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+  approvedTimesheets Timesheet[] @relation("TimesheetApprovedBy")
+  emailLogs          EmailLog[]  @relation("EmailLogUser")
 }
 
 enum SalaryType {
@@ -78,6 +80,9 @@ model Employee {
   deployments  Deployment[]
   salaryCalculations SalaryCalculation[]
   auditLogs    AuditLog[]
+  timesheets   Timesheet[]
+  payslips     Payslip[]
+  emailLogs    EmailLog[]  @relation("EmailLogEmployee")
 
   @@index([cnpHash])
   @@index([companyId])
@@ -109,6 +114,7 @@ model Company {
   country     Country?   @relation(fields: [countryId], references: [id])
   status      String     @default("Activ") // Activ | Inactiv
   employees   Employee[]
+  payslips    Payslip[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
 }
@@ -223,4 +229,108 @@ model SystemConfig {
   updatedAt DateTime @updatedAt
 
   @@index([key])
+}
+
+model Timesheet {
+  id             Int      @id @default(autoincrement())
+  employeeId     Int
+  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  weekNumber     Int
+  year           Int
+  startDate      DateTime
+  endDate        DateTime
+  hoursWorked    Decimal
+  standardHours  Decimal  @default(40)
+  dailyBreakdown String?  // JSON
+  status         String   @default("DRAFT")
+  notes          String?
+  submittedAt    DateTime?
+  approvedAt     DateTime?
+  approvedById   Int?
+  approvedBy     User?    @relation("TimesheetApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  payslip        Payslip?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([employeeId, year, weekNumber])
+  @@index([employeeId])
+  @@index([year, weekNumber])
+  @@index([status])
+}
+
+model Payslip {
+  id              Int           @id @default(autoincrement())
+  timesheetId     Int           @unique
+  timesheet       Timesheet     @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  employeeId      Int
+  employee        Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  companyId       Int
+  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  weekNumber      Int
+  year            Int
+  periodStart     DateTime
+  periodEnd       DateTime
+  items           PayslipItem[]
+  grossTotal      Decimal
+  deductionsTotal Decimal
+  netTotal        Decimal
+  totalPaid       Decimal
+  currency        String        @default("EUR")
+  pdfPath         String?
+  pdfGeneratedAt  DateTime?
+  emailSent       Boolean       @default(false)
+  emailSentAt     DateTime?
+  emailLogId      Int?
+  emailLog        EmailLog?     @relation("PayslipEmailLog", fields: [emailLogId], references: [id], onDelete: SetNull)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([employeeId])
+  @@index([companyId])
+  @@index([year, weekNumber])
+}
+
+model PayslipItem {
+  id          Int     @id @default(autoincrement())
+  payslipId   Int
+  payslip     Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
+  type        String  // NET_SALARY | TRAVEL_ALLOWANCE | HOLIDAY_MONEY | OVERTIME | BONUS | DEDUCTION | OTHER
+  label       String
+  description String?
+  amount      Decimal
+  quantity    Decimal?
+  rate        Decimal?
+  sortOrder   Int     @default(0)
+
+  @@index([payslipId])
+  @@index([type])
+  @@index([sortOrder])
+}
+
+model EmailLog {
+  id             Int       @id @default(autoincrement())
+  toAddress      String
+  toName         String?
+  employeeId     Int?
+  employee       Employee? @relation("EmailLogEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+  subject        String
+  body           String
+  templateKey    String?
+  attachmentPath String?
+  attachmentName String?
+  status         String    @default("QUEUED") // QUEUED | SENDING | SENT | FAILED | RETRYING
+  sentAt         DateTime?
+  errorMessage   String?
+  retryCount     Int       @default(0)
+  userId         Int?
+  user           User?     @relation("EmailLogUser", fields: [userId], references: [id], onDelete: SetNull)
+  ipAddress      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  payslips       Payslip[] @relation("PayslipEmailLog")
+
+  @@index([employeeId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
 }

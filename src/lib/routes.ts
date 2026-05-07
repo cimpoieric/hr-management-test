@@ -13,6 +13,8 @@ export const ROUTES = {
   reports: "/rapoarte",
   export: "/export",
   pay: "/plata",
+  timesheets: "/pontaj",
+  payslips: "/fluturasi",
   settings: "/setari",
   companies: "/setari/firme",
   countries: "/setari/tari",

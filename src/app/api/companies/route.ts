@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = request.nextUrl;
     const includeInactive = searchParams.get("all") === "1";
 
     const companies = await prisma.company.findMany({
