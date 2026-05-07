@@ -1,6 +1,12 @@
 /**
- * GET  /api/deployments     — Listă cu filtre (employee, țară, status, active)
- * POST /api/deployments     — Creare cu validare overlap
+ * GET  /api/deployments
+ * Filtre: employeeId, country (un cod), countries (coduri separate prin virgulă),
+ * status, active=true (criteriu KPI).
+ * Paginare: trimite `page` și/sau `limit` (implicit page=1, limit=50, max 200).
+ * Fără `page`/`limit` în query — returnează toate rândurile care respectă filtrele (ex. timeline).
+ * Răspuns: deployments, total, page, limit, totalPages.
+ *
+ * POST /api/deployments — Creare cu validare overlap
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -103,21 +109,44 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const { searchParams } = new URL(request.url);
+    const { searchParams } = request.nextUrl;
 
-    const employeeId = searchParams.get("employeeId");
+    const employeeIdRaw = searchParams.get("employeeId");
     const country = searchParams.get("country");
+    const countriesCsv = searchParams.get("countries");
     const status = searchParams.get("status");
     const active = searchParams.get("active"); // "true" = același criteriu ca dashboard / stats (activeDeploymentKpiWhere)
+
+    const usePagination =
+      searchParams.has("page") || searchParams.has("limit");
+    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
+    const limit = Math.min(
+      200,
+      Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10))
+    );
+    const skip = (page - 1) * limit;
 
     const at = new Date();
     const filters: Prisma.DeploymentWhereInput[] = [];
 
-    if (employeeId) {
-      filters.push({ employeeId: parseInt(employeeId, 10) });
+    if (employeeIdRaw) {
+      const eid = parseInt(employeeIdRaw, 10);
+      if (!Number.isNaN(eid)) {
+        filters.push({ employeeId: eid });
+      }
     }
 
-    if (country && isValidCountryCode(country)) {
+    if (countriesCsv) {
+      const codes = countriesCsv
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter((c) => isValidCountryCode(c));
+      if (codes.length === 1) {
+        filters.push({ country: codes[0] });
+      } else if (codes.length > 1) {
+        filters.push({ country: { in: codes } });
+      }
+    } else if (country && isValidCountryCode(country)) {
       filters.push({ country: country.toUpperCase() });
     }
 
@@ -132,9 +161,9 @@ export async function GET(request: NextRequest) {
     const where: Prisma.DeploymentWhereInput =
       filters.length === 0 ? {} : filters.length === 1 ? filters[0]! : { AND: filters };
 
-    const deployments = await prisma.deployment.findMany({
+    const queryArgs = {
       where,
-      orderBy: { startDate: "desc" },
+      orderBy: { startDate: "desc" as const },
       include: {
         employee: {
           select: {
@@ -146,9 +175,30 @@ export async function GET(request: NextRequest) {
           },
         },
       },
-    });
+    };
 
-    return NextResponse.json({ deployments }, { status: 200 });
+    const [deployments, total] = await Promise.all([
+      prisma.deployment.findMany({
+        ...queryArgs,
+        ...(usePagination ? { skip, take: limit } : {}),
+      }),
+      prisma.deployment.count({ where }),
+    ]);
+
+    const totalPages = usePagination
+      ? Math.ceil(total / limit) || (total > 0 ? 1 : 0)
+      : 1;
+
+    return NextResponse.json(
+      {
+        deployments,
+        total,
+        page: usePagination ? page : 1,
+        limit: usePagination ? limit : total,
+        totalPages,
+      },
+      { status: 200 }
+    );
   } catch (error) {
     console.error("[DEPLOYMENTS_GET]", error);
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });
