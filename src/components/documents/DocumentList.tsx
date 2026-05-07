@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   FileText,
@@ -12,6 +19,8 @@ import {
   Eye,
   Search,
   Upload,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import {
@@ -24,10 +33,7 @@ import {
   getDocumentTypeLabel,
 } from "@/lib/documentConstants";
 import { ro } from "@/messages";
-import {
-  getDocumentExpiryBucket,
-  countExpiryInDocuments,
-} from "@/lib/documentExpiryUi";
+import { getDocumentExpiryBucket } from "@/lib/documentExpiryUi";
 import {
   HR_DOCUMENTS_CHANGED_EVENT,
   HR_DOCUMENTS_STORAGE_KEY,
@@ -144,11 +150,17 @@ export function DocumentList({
 }: DocumentListProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [allDocuments, setAllDocuments] = useState<DocumentItem[]>([]);
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<ClientStatusFilter>("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [limit] = useState(50);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [listStats, setListStats] = useState({ expired: 0, expiringSoon: 0 });
   const [alertDays, setAlertDays] = useState(30);
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DocumentItem | null>(null);
@@ -193,25 +205,58 @@ export function DocumentList({
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 400);
+    return () => window.clearTimeout(t);
+  }, [searchQuery]);
+
+  useLayoutEffect(() => {
+    setPage(1);
+  }, [typeFilter, statusFilter, debouncedSearch, employeeId]);
+
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("limit", String(limit));
       if (employeeId) params.set("employeeId", String(employeeId));
+      if (typeFilter) params.set("type", typeFilter);
+      if (statusFilter === "EXPIRED") params.set("status", "EXPIRED");
+      else if (statusFilter === "EXPIRING") params.set("status", "EXPIRING");
+      else if (statusFilter === "VALID") params.set("status", "VALID");
+      if (debouncedSearch) params.set("search", debouncedSearch);
+
       const res = await fetch(`/api/documents?${params.toString()}`, {
         credentials: "include",
         cache: "no-store",
       });
       if (!res.ok) throw new Error("Eroare");
-      const data = await res.json();
-      const rawList = (data.documents ?? []) as Record<string, unknown>[];
-      setAllDocuments(rawList.map(mapApiDocument));
+      const data = (await res.json()) as {
+        documents?: Record<string, unknown>[];
+        total?: number;
+        totalPages?: number;
+        page?: number;
+        stats?: { expired?: number; expiringSoon?: number };
+      };
+      const rawList = data.documents ?? [];
+      setDocuments(rawList.map(mapApiDocument));
+      setTotal(Number(data.total) || 0);
+      setTotalPages(Math.max(0, Number(data.totalPages) || 0));
+      const st = data.stats;
+      setListStats({
+        expired: Number(st?.expired) || 0,
+        expiringSoon: Number(st?.expiringSoon) || 0,
+      });
     } catch {
-      setAllDocuments([]);
+      setDocuments([]);
+      setTotal(0);
+      setTotalPages(0);
+      setListStats({ expired: 0, expiringSoon: 0 });
     } finally {
       setLoading(false);
     }
-  }, [employeeId]);
+  }, [employeeId, typeFilter, statusFilter, debouncedSearch, page, limit]);
 
   useEffect(() => {
     void fetchDocuments();
@@ -244,72 +289,23 @@ export function DocumentList({
   const statsCallbackRef = useRef(onFilteredStatsChange);
   statsCallbackRef.current = onFilteredStatsChange;
 
-  const filteredDocuments = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return allDocuments.filter((doc) => {
-      if (typeFilter && doc.type !== typeFilter) return false;
-
-      const bucket = getDocumentExpiryBucket(
-        doc.status,
-        doc.expiryDate,
-        alertDays
-      );
-      if (statusFilter === "VALID" && bucket !== "valid") return false;
-      if (statusFilter === "EXPIRED" && bucket !== "expired") return false;
-      if (statusFilter === "EXPIRING" && bucket !== "expiring_soon") return false;
-
-      if (q) {
-        const emp = doc.employee;
-        const full = emp
-          ? `${emp.firstName} ${emp.lastName} ${emp.lastName} ${emp.firstName}`.toLowerCase()
-          : "";
-        const file = doc.fileName.toLowerCase();
-        const num = (doc.number ?? "").toLowerCase();
-        const typeLabel = getDocumentTypeLabel(doc.type).toLowerCase();
-        const empIdStr = String(doc.employeeId || emp?.id || "").toLowerCase();
-        if (
-          !full.includes(q) &&
-          !file.includes(q) &&
-          !num.includes(q) &&
-          !typeLabel.includes(q) &&
-          !empIdStr.includes(q)
-        ) {
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [allDocuments, typeFilter, statusFilter, searchQuery, alertDays]);
-
   const hasActiveFilters =
     Boolean(typeFilter) ||
     Boolean(statusFilter) ||
-    searchQuery.trim().length > 0;
-
-  const expiryCounts = useMemo(
-    () => countExpiryInDocuments(filteredDocuments, alertDays),
-    [filteredDocuments, alertDays]
-  );
+    debouncedSearch.length > 0;
 
   useEffect(() => {
     if (loading) return;
     const cb = statsCallbackRef.current;
     if (!cb) return;
     cb({
-      total: filteredDocuments.length,
-      expired: expiryCounts.expired,
-      expiringSoon: expiryCounts.expiringSoon,
+      total,
+      expired: listStats.expired,
+      expiringSoon: listStats.expiringSoon,
       alertDays,
       hasActiveFilters,
     });
-  }, [
-    loading,
-    filteredDocuments,
-    alertDays,
-    hasActiveFilters,
-    expiryCounts.expired,
-    expiryCounts.expiringSoon,
-  ]);
+  }, [loading, total, listStats.expired, listStats.expiringSoon, alertDays, hasActiveFilters]);
 
   async function handleDownload(doc: DocumentItem) {
     try {
@@ -404,15 +400,14 @@ export function DocumentList({
     );
   }
 
-  if (loading) {
+  if (loading && documents.length === 0 && total === 0) {
     return (
       <div className="text-center py-12 text-gray-400">Se încarcă...</div>
     );
   }
 
-  const showFilteredEmpty =
-    filteredDocuments.length === 0 && allDocuments.length > 0;
-  const showGlobalEmpty = allDocuments.length === 0;
+  const showFilteredEmpty = !loading && total === 0 && hasActiveFilters;
+  const showGlobalEmpty = !loading && total === 0 && !hasActiveFilters;
 
   return (
     <div className="space-y-4">
@@ -494,6 +489,7 @@ export function DocumentList({
               setTypeFilter("");
               setStatusFilter("");
               setSearchQuery("");
+              setDebouncedSearch("");
             }}
             className="text-sm text-gray-600 underline decoration-gray-400 underline-offset-2 hover:text-gray-900"
           >
@@ -534,6 +530,7 @@ export function DocumentList({
               setTypeFilter("");
               setStatusFilter("");
               setSearchQuery("");
+              setDebouncedSearch("");
             }}
             className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-800"
           >
@@ -573,7 +570,7 @@ export function DocumentList({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredDocuments.map((doc) => {
+                  {documents.map((doc) => {
                     const Icon = getFileIcon(doc.mimeType);
                     const tone = rowToneClass(doc);
 
@@ -653,7 +650,7 @@ export function DocumentList({
           </div>
 
           <div className="space-y-3 md:hidden">
-            {filteredDocuments.map((doc) => {
+            {documents.map((doc) => {
               const Icon = getFileIcon(doc.mimeType);
               return (
                 <article
@@ -716,21 +713,55 @@ export function DocumentList({
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-600">
             <span>
-              <span className="font-medium text-gray-800">{filteredDocuments.length}</span>{" "}
-              documente în lista afișată
+              <span className="font-medium text-gray-800">{total}</span> documente care
+              corespund filtrelor
+              {totalPages > 1 ? (
+                <>
+                  {" "}
+                  (pagina {page}/{totalPages}, afișate {documents.length})
+                </>
+              ) : null}
             </span>
-            {expiryCounts.expired > 0 && (
+            {listStats.expired > 0 && (
               <span className="text-red-600">
                 <AlertTriangle size={12} className="mr-1 inline" aria-hidden />
-                {expiryCounts.expired} expirate
+                {listStats.expired} expirate
               </span>
             )}
-            {expiryCounts.expiringSoon > 0 && (
+            {listStats.expiringSoon > 0 && (
               <span className="text-amber-700">
-                {expiryCounts.expiringSoon} expiră curând
+                {listStats.expiringSoon} expiră curând
               </span>
             )}
           </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-600">
+              <span>
+                Pagina {page} din {totalPages}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1 || loading}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="Pagina anterioară"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || loading}
+                  className="rounded-lg p-2 text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-30"
+                  aria-label="Pagina următoare"
+                >
+                  <ChevronRight size={18} />
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

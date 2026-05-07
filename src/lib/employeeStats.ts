@@ -3,7 +3,7 @@ import { equivalentMonthlyGrossToRon } from "@/lib/salaryCostRon";
 
 /**
  * KPI angajați — aceeași logică ca panoul de control și `/api/employees/stats`.
- * Sursă unică: `prisma.employee` + agregare salarii activi cu `salaryAmount`.
+ * Cost lunar: agregare Prisma `groupBy` (sumă pe tip + monedă), fără încărcare linie cu linie.
  */
 export type EmployeeKpiStats = {
   totalEmployees: number;
@@ -14,35 +14,43 @@ export type EmployeeKpiStats = {
   monthlySalaryPredominantCurrency: string;
 };
 
+const salaryWhere = {
+  status: "ACTIVE" as const,
+  salaryAmount: { not: null },
+};
+
 export async function getEmployeeStats(): Promise<EmployeeKpiStats> {
-  const [totalEmployees, activeEmployees, rows] = await Promise.all([
-    prisma.employee.count(),
-    prisma.employee.count({ where: { status: "ACTIVE" } }),
-    prisma.employee.findMany({
-      where: {
-        status: "ACTIVE",
-        salaryAmount: { not: null },
-      },
-      select: { salaryAmount: true, salaryCurrency: true, salaryType: true },
-    }),
-  ]);
+  const [totalEmployees, activeEmployees, monthlySalaryEmployeeCount, groups] =
+    await Promise.all([
+      prisma.employee.count(),
+      prisma.employee.count({ where: { status: "ACTIVE" } }),
+      prisma.employee.count({ where: salaryWhere }),
+      prisma.employee.groupBy({
+        by: ["salaryType", "salaryCurrency"],
+        where: salaryWhere,
+        _sum: { salaryAmount: true },
+        _count: { _all: true },
+      }),
+    ]);
 
   let sumRon = 0;
-  const currencyCounts = new Map<string, number>();
-  for (const e of rows) {
-    sumRon += equivalentMonthlyGrossToRon(
-      e.salaryAmount,
-      e.salaryType != null ? String(e.salaryType) : null,
-      e.salaryCurrency
-    );
-    const c = (e.salaryCurrency ?? "RON").trim().toUpperCase() || "RON";
-    currencyCounts.set(c, (currencyCounts.get(c) ?? 0) + 1);
-  }
   let predominant = "RON";
-  let best = 0;
-  for (const [c, n] of currencyCounts) {
-    if (n > best) {
-      best = n;
+  let bestCount = 0;
+
+  for (const g of groups) {
+    const sumAmount = g._sum.salaryAmount;
+    if (sumAmount != null) {
+      sumRon += equivalentMonthlyGrossToRon(
+        sumAmount,
+        g.salaryType != null ? String(g.salaryType) : null,
+        g.salaryCurrency
+      );
+    }
+
+    const c = (g.salaryCurrency ?? "RON").trim().toUpperCase() || "RON";
+    const n = g._count._all;
+    if (n > bestCount) {
+      bestCount = n;
       predominant = c;
     }
   }
@@ -52,7 +60,7 @@ export async function getEmployeeStats(): Promise<EmployeeKpiStats> {
     activeEmployees,
     inactiveEmployees: Math.max(0, totalEmployees - activeEmployees),
     monthlySalaryCostRon: Math.round(sumRon * 100) / 100,
-    monthlySalaryEmployeeCount: rows.length,
+    monthlySalaryEmployeeCount,
     monthlySalaryPredominantCurrency: predominant,
   };
 }

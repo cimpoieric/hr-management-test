@@ -2,7 +2,9 @@
   "name": "hr-management",
   "version": "1.0.0",
   "description": "HR Management - Sistem local pentru gestiunea angajatilor, documentelor si detasarilor",
+  "author": "HR Management",
   "private": true,
+  "main": "electron/main.js",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -16,7 +18,12 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "electron": "electron .",
+    "electron:build": "electron-builder",
+    "electron:pack": "electron-builder --dir",
+    "electron:dist": "electron-builder && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-desktop-shortcut.ps1",
+    "electron:desktop-shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-desktop-shortcut.ps1"
   },
   "dependencies": {
     "@types/bcrypt": "^5.0.2",
@@ -31,6 +38,7 @@
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.460.0",
     "next": "^15.0.0",
+    "nodemailer": "^8.0.7",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
     "react": "^19.0.0",
@@ -46,15 +54,77 @@
   "devDependencies": {
     "@prisma/client": "6.19.3",
     "@types/node": "^20.19.39",
+    "@types/nodemailer": "^8.0.0",
     "@types/pdf-parse": "^1.1.5",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.0",
+    "electron": "^41.5.0",
+    "electron-builder": "^26.8.1",
     "postcss": "^8.4.0",
     "prisma": "6.19.3",
     "tailwindcss": "^3.4.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
+  },
+  "build": {
+    "appId": "com.hrmanagement.app",
+    "productName": "HR Management",
+    "icon": "build/icon.ico",
+    "disableSanityCheckAsar": true,
+    "asar": true,
+    "electronFuses": {
+      "enableEmbeddedAsarIntegrityValidation": false
+    },
+    "beforeBuild": "scripts/electron-before-build.js",
+    "files": [
+      "package.json",
+      "electron/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": ".",
+        "to": "hr-next",
+        "filter": [
+          "package.json",
+          "package-lock.json",
+          "next.config.ts",
+          "tsconfig.json",
+          "next-env.d.ts",
+          "tailwind.config.ts",
+          "postcss.config.mjs",
+          "scripts/**/*",
+          "public/**/*",
+          "prisma/**/*",
+          "src/**/*",
+          ".next/**/*",
+          "node_modules/**/*",
+          "data/**/*",
+          ".env.example"
+        ]
+      }
+    ],
+    "afterPack": "scripts/after-pack-env.js",
+    "directories": {
+      "output": "release-electron",
+      "buildResources": "build"
+    },
+    "win": {
+      "signAndEditExecutable": false,
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName} Setup ${version}.${ext}",
+      "shortcutName": "HR Management"
+    }
   },
   "keywords": [
     "hr",
