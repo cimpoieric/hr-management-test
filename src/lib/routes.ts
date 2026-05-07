@@ -3,7 +3,7 @@
  * Rutele vechi (/dashboard, /importuri-in-asteptare) rămân valide prin redirect.
  */
 export const ROUTES = {
-  dashboard: "/panou-de-control",
+  dashboard: "/",
   employees: "/angajati",
   documents: "/documente",
   deployments: "/detasari",
@@ -16,14 +16,14 @@ export const ROUTES = {
   timesheets: "/pontaj",
   payslips: "/fluturasi",
   settings: "/setari",
-  companies: "/setari/firme",
-  countries: "/setari/tari",
+  companies: "/firme",
+  countries: "/tari",
   users: "/utilizatori",
   backup: "/backup",
 } as const;
 
 /** Rute înlocuite; păstrate doar pentru redirect. */
 export const LEGACY_ROUTES = {
-  dashboard: "/dashboard",
+  dashboard: "/panou-de-control",
   importsList: "/importuri-in-asteptare",
 } as const;

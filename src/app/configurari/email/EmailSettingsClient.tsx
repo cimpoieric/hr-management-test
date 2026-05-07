@@ -60,7 +60,7 @@ export default function EmailSettingsClient() {
     (async () => {
       setLoading(true);
       try {
-        const res = await fetch("/api/email/config", { cache: "no-store", credentials: "include" });
+        const res = await fetch("/api/email/settings", { cache: "no-store", credentials: "same-origin" });
         const data = (await res.json().catch(() => ({}))) as Partial<SmtpConfigResponse> & { error?: string };
         if (!res.ok) throw new Error(data.error ?? "Nu am putut încărca setările");
         if (cancelled) return;
@@ -90,9 +90,9 @@ export default function EmailSettingsClient() {
   async function save() {
     setSaving(true);
     try {
-      const res = await fetch("/api/email/config", {
+      const res = await fetch("/api/email/settings", {
         method: "PUT",
-        credentials: "include",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           host: form.host,
@@ -120,7 +120,7 @@ export default function EmailSettingsClient() {
   async function test() {
     setTesting(true);
     try {
-      const res = await fetch("/api/email/test", { method: "POST", credentials: "include" });
+      const res = await fetch("/api/email/test", { method: "POST", credentials: "same-origin" });
       const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
       if (!res.ok) throw new Error(data.error ?? "Test eșuat");
       toast.success(data.message ?? "Conexiune SMTP OK");

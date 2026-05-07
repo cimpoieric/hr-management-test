@@ -14,8 +14,10 @@ import { verifyToken } from "@/lib/auth";
 // Rute publice — fără autentificare (prefixe; „/” doar egalitate exactă)
 const PUBLIC_PREFIXES = [
   "/login",
+  "/setup",
   "/api/auth/login",
   "/api/auth/register",
+  "/api/setup",
 ];
 
 function isPublicPath(pathname: string): boolean {
@@ -35,6 +37,30 @@ export async function middleware(request: NextRequest) {
   // 1. Exclude assete statice și API (except auth)
   if (EXCLUDED_PATTERN.test(pathname)) {
     return NextResponse.next();
+  }
+
+  // 0. Setup gate (fără Prisma în Edge middleware).
+  // Verifică needsSetup printr-un request către /api/setup (Node runtime).
+  // Dacă nu există niciun user -> forțează /setup pentru toate rutele (inclusiv "/").
+  if (!pathname.startsWith("/_next")) {
+    try {
+      const res = await fetch(new URL("/api/setup", request.url), { cache: "no-store" });
+      const json = (await res.json().catch(() => ({}))) as { needsSetup?: boolean };
+      const needsSetup = Boolean(json.needsSetup);
+      if (needsSetup) {
+        if (!pathname.startsWith("/setup")) {
+          return NextResponse.redirect(new URL("/setup", request.url));
+        }
+        return NextResponse.next();
+      }
+
+      // Setup deja făcut: nu permite acces la /setup
+      if (pathname.startsWith("/setup")) {
+        return NextResponse.redirect(new URL("/login", request.url));
+      }
+    } catch {
+      // Dacă /api/setup pică, nu blocăm aplicația în middleware.
+    }
   }
 
   // 2. Exclude rute explicit publice

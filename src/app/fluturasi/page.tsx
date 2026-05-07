@@ -1,8 +1,13 @@
 import { cookies } from "next/headers";
 import { AuthenticatedDashboardShell } from "@/components/layout/AuthenticatedDashboardShell";
-import { PayslipTable, type PayslipListItem, type Pagination, type EmployeeOpt } from "@/components/payslips/PayslipTable";
 import { prisma } from "@/lib/prisma";
 import { getInternalRequestOrigin } from "@/lib/request-origin";
+import {
+  PayslipsTableClient,
+  type PayslipListItem,
+  type Pagination,
+  type EmployeeOpt,
+} from "./PayslipsTableClient";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +36,32 @@ async function fetchPayslips(params: URLSearchParams): Promise<{ items: PayslipL
   }
 
   const data = (await res.json()) as { items: PayslipListItem[]; pagination: Pagination };
-  return data;
+  // Normalizează totalPaid: dacă e 0 dar există items, recalculează din items.
+  const normalizedItems = (data.items ?? []).map((p) => {
+    const netSalary = (p.items ?? [])
+      .filter((i) => i.type === "NET_SALARY")
+      .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+    const travel = (p.items ?? [])
+      .filter((i) => i.type === "TRAVEL_ALLOWANCE")
+      .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+    const itemSum = (p.items ?? []).reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+
+    const total = Number(p.totalPaid) || 0;
+    const totalPaid = total === 0 && itemSum !== 0 ? itemSum : total;
+
+    const net = Number(p.netTotal) || 0;
+    const netTotal = net === 0 && netSalary !== 0 ? netSalary : net;
+
+    // Travel se afișează din items în tabel; îl calculăm aici ca verificare/normalizare de date.
+    void travel;
+
+    return {
+      ...p,
+      netTotal: String(netTotal),
+      totalPaid: String(totalPaid),
+    };
+  });
+  return { ...data, items: normalizedItems };
 }
 
 export default async function FluturasiPage({
@@ -72,7 +102,7 @@ export default async function FluturasiPage({
 
   return (
     <AuthenticatedDashboardShell>
-      <PayslipTable
+      <PayslipsTableClient
         items={payslips.items}
         pagination={payslips.pagination}
         employees={employees}

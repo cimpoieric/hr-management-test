@@ -69,7 +69,7 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
             status: "ACTIVE",
           });
           const res = await fetch(`/api/employees?${params}`, {
-            credentials: "include",
+            credentials: "same-origin",
           });
           if (!res.ok) {
             const err = (await res.json().catch(() => ({}))) as { error?: string };
@@ -210,7 +210,7 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
       const res = await fetch("/api/documents/upload", {
         method: "POST",
         body: formData,
-        credentials: "include",
+        credentials: "same-origin",
       });
 
       const data = (await res.json().catch(() => ({}))) as {

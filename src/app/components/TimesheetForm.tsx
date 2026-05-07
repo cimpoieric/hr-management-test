@@ -124,7 +124,7 @@ export function TimesheetForm({
         params.set("sortOrder", "asc");
         const res = await fetch(`/api/employees?${params.toString()}`, {
           cache: "no-store",
-          credentials: "include",
+          credentials: "same-origin",
         });
         const data = (await res.json().catch(() => ({}))) as { data?: unknown; error?: string };
         if (!res.ok) throw new Error(data.error ?? "Nu am putut încărca angajații");
@@ -206,7 +206,7 @@ export function TimesheetForm({
     try {
       const res = await fetch("/api/timesheets", {
         method: "POST",
-        credentials: "include",
+        credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed.data),
       });
@@ -243,7 +243,7 @@ export function TimesheetForm({
 
       {open && (
         <div
-          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
+          className="fixed inset-0 z-[70] flex items-stretch justify-end bg-black/50"
           role="dialog"
           aria-modal="true"
           onClick={() => {
@@ -253,10 +253,10 @@ export function TimesheetForm({
           }}
         >
           <div
-            className="w-full max-w-3xl rounded-xl border bg-white p-6 shadow-xl"
+            className="ml-auto flex h-[100dvh] w-full max-w-md flex-col border bg-white shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex shrink-0 items-start justify-between gap-3 px-6 pt-6">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Pontaj Nou</h2>
                 <p className="mt-1 text-sm text-gray-500">Completează pontajul săptămânal.</p>
@@ -274,7 +274,8 @@ export function TimesheetForm({
               </button>
             </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="mt-5 flex-1 overflow-y-auto px-6 pb-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               {/* Employee combobox */}
               <div className="md:col-span-2">
                 <label className="text-xs font-medium text-gray-600">Angajat</label>
@@ -414,24 +415,25 @@ export function TimesheetForm({
                 />
               </div>
 
-              <div className="md:col-span-2">
-                <label className="text-xs font-medium text-gray-600">Observații</label>
-                <textarea
-                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                  rows={3}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                />
+                <div className="md:col-span-2">
+                  <label className="text-xs font-medium text-gray-600">Observații</label>
+                  <textarea
+                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                    rows={3}
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
+                </div>
               </div>
+
+              {error && (
+                <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                  {error}
+                </div>
+              )}
             </div>
 
-            {error && (
-              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
-                {error}
-              </div>
-            )}
-
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="flex shrink-0 justify-end gap-2 border-t bg-white px-6 py-4">
               <button
                 className="rounded-lg border bg-white px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50"
                 disabled={loading}
@@ -444,10 +446,10 @@ export function TimesheetForm({
               </button>
               <button
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-                disabled={loading}
+                disabled={loading || !employeeId}
                 onClick={onSubmit}
               >
-                {loading ? "Se salvează..." : "Creează pontaj"}
+                {loading ? "Se salvează..." : "Salvează Pontaj"}
               </button>
             </div>
           </div>

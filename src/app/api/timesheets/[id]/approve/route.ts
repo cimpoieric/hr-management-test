@@ -98,35 +98,13 @@ export async function POST(
         },
       });
 
-      // Creează Payslip doar dacă nu există deja (relație 1:1)
-      let createdPayslip = null as null | { id: number };
-      if (!existing.payslip) {
-        const payslip = await tx.payslip.create({
-          data: {
-            timesheetId: updatedTimesheet.id,
-            employeeId: updatedTimesheet.employeeId,
-            companyId: existing.employee.companyId,
-            weekNumber: updatedTimesheet.weekNumber,
-            year: updatedTimesheet.year,
-            periodStart: updatedTimesheet.startDate,
-            periodEnd: updatedTimesheet.endDate,
-            grossTotal: 0,
-            deductionsTotal: 0,
-            netTotal: 0,
-            totalPaid: 0,
-          },
-          select: { id: true },
-        });
-        createdPayslip = payslip;
-      }
-
-      return { updatedTimesheet, createdPayslip };
+      // IMPORTANT:
+      // NU creăm Payslip aici, pentru că generarea totalurilor și itemelor se face în /api/payslips/generate.
+      // Dacă am crea aici un payslip "gol" (totaluri 0), UI ar afișa 0.00 până la regenerare.
+      return { updatedTimesheet, createdPayslip: null as null };
     });
 
     await logAudit("UPDATE", "Timesheet", result.updatedTimesheet.id, existing, result.updatedTimesheet, request);
-    if (result.createdPayslip) {
-      await logAudit("CREATE", "Payslip", result.createdPayslip.id, null, result.createdPayslip, request);
-    }
 
     return NextResponse.json(result.updatedTimesheet);
   } catch (error) {

@@ -150,7 +150,8 @@ export function EmployeeForm({
           return;
         }
         setForm({
-          cnp: (data.cnp ?? "").replace(/[^0-9]/g, ""),
+          // Acceptăm CNP-uri temporare/străine (ex: TEMP_...) — nu strip-uim aici.
+          cnp: String(data.cnp ?? ""),
           firstName: data.firstName ?? "",
           lastName: data.lastName ?? "",
           seriesCI: data.seriesCI ?? "",
@@ -213,9 +214,21 @@ export function EmployeeForm({
   function validateField(name: string, value: string): string | undefined {
     switch (name) {
       case "cnp":
-        if (value.length !== 13) return "CNP trebuie să aibă 13 cifre";
-        if (!/^\d{13}$/.test(value)) return "CNP conține doar cifre";
-        if (!validateCNP(value)) return "CNP invalid";
+        {
+          const v = (value ?? "").trim();
+          if (!v) return "CNP este obligatoriu";
+          if (v.startsWith("TEMP_")) {
+            if (v.length < 5) return "CNP temporar prea scurt";
+            return undefined;
+          }
+          if (/^\d+$/.test(v)) {
+            if (v.length !== 13) return "CNP românesc trebuie să aibă 13 cifre";
+            if (!validateCNP(v)) return "CNP românesc invalid";
+            return undefined;
+          }
+          if (v.length < 5) return "Identificator invalid (minim 5 caractere) sau CNP cu 13 cifre";
+          return undefined; // CNP străin / identificator
+        }
         break;
       case "firstName":
         if (!value.trim()) return "Prenume obligatoriu";
@@ -486,14 +499,12 @@ export function EmployeeForm({
               label="CNP *"
               name="cnp"
               value={form.cnp}
-              onChange={(v) =>
-                updateField("cnp", v.replace(/\D/g, "").slice(0, 13))
-              }
+              onChange={(v) => updateField("cnp", v)}
               onBlur={() => handleBlur("cnp")}
               error={errors.cnp}
-              maxLength={13}
-              placeholder="1881234567890"
-              disabled={isEdit}
+              maxLength={64}
+              placeholder='CNP (13 cifre) sau "TEMP_..."'
+              disabled={false}
             />
             <Field
               label="Nume *"

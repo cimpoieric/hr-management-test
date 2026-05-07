@@ -93,16 +93,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Pontajul trebuie să fie APPROVED" }, { status: 400 });
     }
 
+    // Dacă există deja payslip (ex: creat anterior ca "schelet" cu totaluri 0),
+    // îl regenerăm: recalculăm totaluri și rescriem itemele.
     const existingPayslip = await prisma.payslip.findUnique({
       where: { timesheetId },
       select: { id: true },
     });
-    if (existingPayslip) {
-      return NextResponse.json({ error: "Există deja fluturaș pentru acest pontaj" }, { status: 400 });
+
+    if (timesheet.employee.salaryAmount === null || timesheet.employee.salaryAmount === undefined) {
+      return NextResponse.json(
+        { error: "Angajatul nu are tarif orar configurat în profil" },
+        { status: 400 }
+      );
     }
 
-    if (!timesheet.employee.salaryType || timesheet.employee.salaryAmount === null) {
-      return NextResponse.json({ error: "Angajatul nu are salaryType/salaryAmount setate" }, { status: 400 });
+    if (timesheet.employee.salaryType !== "ORA") {
+      return NextResponse.json({ error: "Angajatul trebuie să aibă salaryType = ORA" }, { status: 400 });
     }
 
     // SystemConfig: holiday money rate + travel allowance per employee
@@ -114,30 +120,13 @@ export async function POST(request: NextRequest) {
     ]);
 
     const hoursWorked = new Prisma.Decimal(timesheet.hoursWorked);
-    const standardHours = new Prisma.Decimal(timesheet.standardHours);
     const salaryAmount = new Prisma.Decimal(timesheet.employee.salaryAmount);
 
     const holidayRate = parseDecimalSafe(holidayCfg?.value, new Prisma.Decimal(0.4));
     const travelAllowance = parseDecimalSafe(travelCfg?.value, new Prisma.Decimal(0));
 
-    let netSalary: Prisma.Decimal;
-    let netSalaryRate: Prisma.Decimal | null = null;
-
-    if (timesheet.employee.salaryType === "ORA") {
-      netSalary = hoursWorked.mul(salaryAmount);
-      netSalaryRate = salaryAmount;
-    } else if (timesheet.employee.salaryType === "SAPTAMANAL") {
-      if (standardHours.lte(0)) {
-        return NextResponse.json({ error: "standardHours invalid pe pontaj" }, { status: 400 });
-      }
-      netSalary = hoursWorked.div(standardHours).mul(salaryAmount);
-      netSalaryRate = salaryAmount.div(standardHours);
-    } else {
-      return NextResponse.json(
-        { error: "SalaryType neimplementat pentru generarea fluturașului" },
-        { status: 400 }
-      );
-    }
+    const netSalary = hoursWorked.mul(salaryAmount);
+    const netSalaryRate: Prisma.Decimal = salaryAmount;
 
     const holidayMoney = hoursWorked.mul(holidayRate);
     const totalPaid = netSalary.add(holidayMoney).add(travelAllowance);
@@ -145,27 +134,53 @@ export async function POST(request: NextRequest) {
     const currency = (timesheet.employee.salaryCurrency || "EUR").toUpperCase();
 
     const created = await prisma.$transaction(async (tx) => {
-      const payslip = await tx.payslip.create({
-        data: {
-          timesheetId: timesheet.id,
-          employeeId: timesheet.employeeId,
-          companyId: timesheet.employee.companyId,
-          weekNumber: timesheet.weekNumber,
-          year: timesheet.year,
-          periodStart: timesheet.startDate,
-          periodEnd: timesheet.endDate,
-          currency,
-          grossTotal: totalPaid,
-          deductionsTotal: 0,
-          netTotal: totalPaid,
-          totalPaid,
-        },
-      });
+      const payslipId =
+        existingPayslip?.id ??
+        (
+          await tx.payslip.create({
+            data: {
+              timesheetId: timesheet.id,
+              employeeId: timesheet.employeeId,
+              companyId: timesheet.employee.companyId,
+              weekNumber: timesheet.weekNumber,
+              year: timesheet.year,
+              periodStart: timesheet.startDate,
+              periodEnd: timesheet.endDate,
+              currency,
+              grossTotal: totalPaid,
+              deductionsTotal: 0,
+              netTotal: totalPaid,
+              totalPaid,
+            },
+            select: { id: true },
+          })
+        ).id;
+
+      if (existingPayslip?.id) {
+        await tx.payslip.update({
+          where: { id: payslipId },
+          data: {
+            employeeId: timesheet.employeeId,
+            companyId: timesheet.employee.companyId,
+            weekNumber: timesheet.weekNumber,
+            year: timesheet.year,
+            periodStart: timesheet.startDate,
+            periodEnd: timesheet.endDate,
+            currency,
+            grossTotal: totalPaid,
+            deductionsTotal: 0,
+            netTotal: totalPaid,
+            totalPaid,
+          },
+          select: { id: true },
+        });
+        await tx.payslipItem.deleteMany({ where: { payslipId } });
+      }
 
       const items = await tx.payslipItem.createMany({
         data: [
           {
-            payslipId: payslip.id,
+            payslipId,
             type: "NET_SALARY",
             label: "Salariu net",
             description:
@@ -178,7 +193,7 @@ export async function POST(request: NextRequest) {
             sortOrder: 10,
           },
           {
-            payslipId: payslip.id,
+            payslipId,
             type: "HOLIDAY_MONEY",
             label: "Bani concediu",
             description: `Rate: ${holidayRate.toString()} / oră`,
@@ -188,7 +203,7 @@ export async function POST(request: NextRequest) {
             sortOrder: 20,
           },
           {
-            payslipId: payslip.id,
+            payslipId,
             type: "TRAVEL_ALLOWANCE",
             label: "Diurnă / transport",
             description: "Configurat din SystemConfig (per angajat) sau 0",
@@ -200,7 +215,7 @@ export async function POST(request: NextRequest) {
         ],
       });
 
-      return { payslipId: payslip.id, itemsCount: items.count };
+      return { payslipId, itemsCount: items.count, regenerated: !!existingPayslip?.id };
     });
 
     const full = await prisma.payslip.findUnique({
@@ -212,9 +227,27 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    await logAudit("CREATE", "Payslip", created.payslipId, full, request);
+    if (!created.regenerated) {
+      await logAudit("CREATE", "Payslip", created.payslipId, full, request);
+    } else {
+      await logAudit("CREATE", "Payslip", created.payslipId, { regenerated: true, payslipId: created.payslipId }, request);
+    }
 
-    return NextResponse.json(full, { status: 201 });
+    // Aliniere: /api/payslips (POST) e endpoint-ul canonic de generare.
+    // Păstrăm /api/payslips/generate pentru compatibilitate cu UI existent.
+    const canonicalRes = await fetch(new URL("/api/payslips", request.url), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: request.headers.get("cookie") ?? "" },
+      body: JSON.stringify({ timesheetId }),
+    });
+    const canonicalJson = await canonicalRes.json().catch(() => ({}));
+    if (!canonicalRes.ok) {
+      return NextResponse.json(
+        { error: (canonicalJson as any)?.error ?? "Eroare la generarea fluturașului" },
+        { status: canonicalRes.status }
+      );
+    }
+    return NextResponse.json(canonicalJson, { status: 201 });
   } catch (error) {
     console.error("[PAYSLIPS_GENERATE_POST]", error);
     return NextResponse.json({ error: "Eroare la generarea fluturașului" }, { status: 500 });

@@ -14,7 +14,9 @@ export function parseSalaryTypeInput(value: unknown): SalaryTypeCode | null {
 export function parseSalaryAmountDecimal(value: unknown): Prisma.Decimal | null {
   if (value === null || value === undefined || value === "") return null;
   try {
-    const d = new Prisma.Decimal(value as Prisma.Decimal.Value);
+    const normalized: Prisma.Decimal.Value =
+      typeof value === "string" ? value.trim().replace(",", ".") : (value as Prisma.Decimal.Value);
+    const d = new Prisma.Decimal(normalized);
     if (d.isNegative()) return null;
     return d;
   } catch {

@@ -78,7 +78,7 @@ export function DocumentPreviewModal({
 
     void (async () => {
       try {
-        const res = await fetch(doc.url, { credentials: "include", cache: "no-store" });
+        const res = await fetch(doc.url, { credentials: "same-origin", cache: "no-store" });
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           if (!cancelled) {
@@ -116,7 +116,7 @@ export function DocumentPreviewModal({
     if (!doc) return;
     const url = doc.downloadUrl ?? `/api/documents/${doc.id}/download`;
     try {
-      const res = await fetch(url, { credentials: "include", cache: "no-store" });
+      const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         alert(data.error ?? "Eroare la descărcare");

@@ -60,7 +60,7 @@ export function DeleteDocumentDialog({
     try {
       const res = await fetch(`/api/documents/${documentId}`, {
         method: "DELETE",
-        credentials: "include",
+        credentials: "same-origin",
       });
       const data = (await res.json().catch(() => ({}))) as { error?: string };
 

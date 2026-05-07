@@ -194,7 +194,7 @@ export function DocumentList({
   }, [searchParams]);
 
   useEffect(() => {
-    void fetch("/api/documents/stats", { credentials: "include", cache: "no-store" })
+    void fetch("/api/documents/stats", { credentials: "same-origin", cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d != null && typeof d.documentAlertDays === "number") {
@@ -228,7 +228,7 @@ export function DocumentList({
       if (debouncedSearch) params.set("search", debouncedSearch);
 
       const res = await fetch(`/api/documents?${params.toString()}`, {
-        credentials: "include",
+        credentials: "same-origin",
         cache: "no-store",
       });
       if (!res.ok) throw new Error("Eroare");
@@ -278,7 +278,7 @@ export function DocumentList({
   }, [fetchDocuments]);
 
   useEffect(() => {
-    void fetch("/api/auth/me", { credentials: "include" })
+    void fetch("/api/auth/me", { credentials: "same-origin" })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d?.user?.role) setUserRole(String(d.user.role));
@@ -310,7 +310,7 @@ export function DocumentList({
   async function handleDownload(doc: DocumentItem) {
     try {
       const res = await fetch(doc.downloadUrl, {
-        credentials: "include",
+        credentials: "same-origin",
         cache: "no-store",
       });
       if (!res.ok) {

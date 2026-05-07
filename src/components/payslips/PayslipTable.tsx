@@ -44,11 +44,13 @@ function week2(week: number) {
 function money(amount: unknown, currency: string): string {
   const v = typeof amount === "object" && amount !== null && "toString" in amount ? Number(String(amount)) : Number(amount);
   const n = Number.isFinite(v) ? v : 0;
-  return `${n.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
+  return `${n.toFixed(2)} ${currency}`;
 }
 
-function itemAmount(items: PayslipListItem["items"] | undefined, type: string): unknown {
-  return items?.find((i) => i.type === type)?.amount ?? 0;
+function itemSum(items: PayslipListItem["items"] | undefined, type: string): number {
+  return (items ?? [])
+    .filter((i) => i.type === type)
+    .reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
 }
 
 function formatPeriod(start: string, end: string): string {
@@ -103,7 +105,7 @@ function GenerateDialog({
   async function postJson(url: string, body?: unknown) {
     const res = await fetch(url, {
       method: "POST",
-      credentials: "include",
+      credentials: "same-origin",
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -137,7 +139,7 @@ function GenerateDialog({
       qs.set("year", String(y));
       qs.set("weekNumber", String(w));
 
-      const res = await fetch(`/api/timesheets?${qs.toString()}`, { cache: "no-store", credentials: "include" });
+      const res = await fetch(`/api/timesheets?${qs.toString()}`, { cache: "no-store", credentials: "same-origin" });
       const data = (await res.json().catch(() => ({}))) as { items?: Array<{ id: number; employeeId: number }>; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Nu am putut încărca pontajele");
 
@@ -290,7 +292,7 @@ export function PayslipTable({
   async function postJson(url: string, body?: unknown) {
     const res = await fetch(url, {
       method: "POST",
-      credentials: "include",
+      credentials: "same-origin",
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -324,7 +326,7 @@ export function PayslipTable({
       if (filters.year) qs.set("year", filters.year);
       if (filters.weekNumber) qs.set("weekNumber", filters.weekNumber);
 
-      const res = await fetch(`/api/payslips?${qs.toString()}`, { cache: "no-store", credentials: "include" });
+      const res = await fetch(`/api/payslips?${qs.toString()}`, { cache: "no-store", credentials: "same-origin" });
       const data = (await res.json().catch(() => ({}))) as { items?: PayslipListItem[]; error?: string };
       if (!res.ok) throw new Error(data.error ?? "Eroare la listare");
 
@@ -509,9 +511,12 @@ export function PayslipTable({
               {items.map((p) => {
                 const busy = busyIds.has(p.id) || sendingAll;
                 const empName = `${p.employee.lastName} ${p.employee.firstName}`.trim();
-                const netSalary = itemAmount(p.items, "NET_SALARY");
-                const travel = itemAmount(p.items, "TRAVEL_ALLOWANCE");
-                const eur = "EUR";
+                const netSalary = itemSum(p.items, "NET_SALARY");
+                const travel = itemSum(p.items, "TRAVEL_ALLOWANCE");
+                const totalRaw = Number(p.totalPaid) || 0;
+                const computedTotal = (p.items ?? []).reduce((sum, it) => sum + (Number(it.amount) || 0), 0);
+                const total = totalRaw === 0 && computedTotal !== 0 ? computedTotal : totalRaw;
+                const cur = String(p.currency || "EUR").toUpperCase();
 
                 return (
                   <tr key={p.id} className="hover:bg-gray-50">
@@ -535,9 +540,9 @@ export function PayslipTable({
                       <div className="text-xs text-gray-500">{formatPeriod(p.periodStart, p.periodEnd)}</div>
                     </td>
                     <td className="px-4 py-3 text-gray-700">{p.timesheet.hoursWorked}</td>
-                    <td className="px-4 py-3 text-gray-700">{money(netSalary, eur)}</td>
-                    <td className="px-4 py-3 text-gray-700">{money(travel, p.currency)}</td>
-                    <td className="px-4 py-3 text-gray-700">{money(p.totalPaid, p.currency)}</td>
+                    <td className="px-4 py-3 text-gray-700">{money(netSalary, cur)}</td>
+                    <td className="px-4 py-3 text-gray-700">{money(travel, cur)}</td>
+                    <td className="px-4 py-3 text-gray-700">{money(total, cur)}</td>
                     <td className="px-4 py-3">
                       {p.pdfPath ? (
                         <a
@@ -597,7 +602,7 @@ export function PayslipTable({
                         </a>
                         <Link
                           className="rounded-lg border bg-white px-2.5 py-1.5 text-xs hover:bg-gray-50 inline-flex items-center gap-1"
-                          href={`/api/payslips/${p.id}`}
+                          href={`/fluturasi/${p.id}`}
                         >
                           <FileText size={14} /> Detalii
                         </Link>

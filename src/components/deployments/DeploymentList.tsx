@@ -91,7 +91,7 @@ export function DeploymentList({
       }
 
       const res = await fetch(`/api/deployments?${params.toString()}`, {
-        credentials: "include",
+        credentials: "same-origin",
         cache: "no-store",
       });
       if (!res.ok) throw new Error("Eroare");
@@ -121,7 +121,7 @@ export function DeploymentList({
     try {
       const res = await fetch(`/api/deployments/${id}`, {
         method: "DELETE",
-        credentials: "include",
+        credentials: "same-origin",
       });
       if (res.ok) {
         void fetchDeployments();

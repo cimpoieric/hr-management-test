@@ -94,7 +94,7 @@ export function TimesheetTable({
   async function postJson(url: string, body?: unknown) {
     const res = await fetch(url, {
       method: "POST",
-      credentials: "include",
+      credentials: "same-origin",
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -148,6 +148,7 @@ export function TimesheetTable({
     try {
       await postJson(`/api/payslips/generate`, { timesheetId });
       toast.success("Fluturaș generat");
+      router.push("/fluturasi");
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Eroare");

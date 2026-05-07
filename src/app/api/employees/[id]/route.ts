@@ -33,6 +33,35 @@ import {
   salaryAmountToJson,
 } from "@/lib/salaryFields";
 
+function prismaErrorToRomanianMessage(error: unknown): { status: number; message: string } | null {
+  if (error instanceof z.ZodError) {
+    return { status: 400, message: error.issues[0]?.message ?? "Date invalide" };
+  }
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code === "P2002") {
+      const target = Array.isArray((error.meta as any)?.target) ? (error.meta as any).target.join(", ") : String((error.meta as any)?.target ?? "");
+      if (target.includes("email")) return { status: 409, message: "Email deja folosit de un alt angajat." };
+      if (target.includes("cnp")) return { status: 409, message: "CNP deja folosit de un alt angajat." };
+      return { status: 409, message: "Există deja un angajat cu aceste date unice (duplicat)." };
+    }
+    if (error.code === "P2025") {
+      return { status: 404, message: "Angajat negăsit." };
+    }
+    return { status: 400, message: `Eroare bază de date (${error.code}).` };
+  }
+  if (error instanceof Prisma.PrismaClientValidationError) {
+    return { status: 400, message: "Date invalide pentru salvare (validare DB)." };
+  }
+  if (error instanceof Error) {
+    // ex: ENCRYPTION_KEY invalid / lipsă
+    if (error.message.toLowerCase().includes("encryption_key")) {
+      return { status: 500, message: "Configurare server invalidă: ENCRYPTION_KEY lipsește sau este invalid." };
+    }
+    return { status: 500, message: error.message };
+  }
+  return null;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getClientIp(request: NextRequest): string {
@@ -291,7 +320,11 @@ export async function PUT(
     if (data.lastName !== undefined) updateData.lastName = data.lastName;
     if (data.seriesCI !== undefined) updateData.seriesCI = data.seriesCI;
     if (data.numberCI !== undefined) updateData.numberCI = data.numberCI;
-    if (data.email !== undefined) updateData.email = data.email;
+    if (data.email !== undefined) {
+      const v = data.email == null ? null : String(data.email).trim();
+      // Evită "" într-un câmp @unique opțional (ar crea duplicate).
+      updateData.email = !v ? null : v;
+    }
     if (data.phone !== undefined) updateData.phone = data.phone;
     if (data.position !== undefined) updateData.position = data.position;
     if (data.address !== undefined) updateData.address = data.address;
@@ -369,6 +402,8 @@ export async function PUT(
     });
   } catch (error) {
     console.error("[EMPLOYEE_PUT]", error);
+    const mapped = prismaErrorToRomanianMessage(error);
+    if (mapped) return NextResponse.json({ error: mapped.message }, { status: mapped.status });
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });
   }
 }

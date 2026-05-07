@@ -1,8 +1,13 @@
 import { cookies } from "next/headers";
 import { AuthenticatedDashboardShell } from "@/components/layout/AuthenticatedDashboardShell";
-import { TimesheetTable, type TimesheetRow, type Pagination, type EmployeeOpt } from "@/components/timesheets/TimesheetTable";
 import { prisma } from "@/lib/prisma";
 import { getInternalRequestOrigin } from "@/lib/request-origin";
+import {
+  TimesheetsTableClient,
+  type TimesheetRow,
+  type Pagination,
+  type EmployeeOpt,
+} from "./TimesheetsTableClient";
 
 export const dynamic = "force-dynamic";
 
@@ -80,15 +85,12 @@ export default async function PontajPage({
 
   return (
     <AuthenticatedDashboardShell>
-      <div className="min-h-0 w-full">
-        <TimesheetTable
-          items={timesheetsResult.data.items}
-          pagination={timesheetsResult.data.pagination}
-          employees={employees}
-          filters={{ employeeId, year, weekNumber, status }}
-          serverError={timesheetsResult.error ?? undefined}
-        />
-      </div>
+      <TimesheetsTableClient
+        items={timesheetsResult.data.items}
+        pagination={timesheetsResult.data.pagination}
+        employees={employees}
+        filters={{ employeeId, year, weekNumber, status }}
+      />
     </AuthenticatedDashboardShell>
   );
 }
