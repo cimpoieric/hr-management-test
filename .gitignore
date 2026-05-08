@@ -1,5 +1,14 @@
 node_modules/
 .next/
+dist/
+*.db
+data/
+
+dist-electron/
+release-electron/
+*.exe
+*.asar
+
 .env
 .env.*
 !.env.example
