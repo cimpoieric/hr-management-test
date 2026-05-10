@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import nodemailer from "nodemailer";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { canManageUsers } from "@/lib/permissions";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import { getSMTPConfig, testSMTPConfig } from "@/lib/services/email";
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
     if (parsed.success) {
       const userCount = await prisma.user.count();
       if (userCount > 0) {
-        const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
+        const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
         if (authError || !user) return authError!;
         if (!canManageUsers(user.role)) {
           return NextResponse.json({ error: "Acces interzis — doar ADMIN" }, { status: 403 });
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Fallback: test config salvat (ADMIN only)
-    const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
+    const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
     if (authError || !user) return authError!;
     if (!canManageUsers(user.role)) {
       return NextResponse.json({ error: "Acces interzis — doar ADMIN" }, { status: 403 });

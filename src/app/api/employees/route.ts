@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma, prismaTyped } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { canEditEmployee, canViewIban } from "@/lib/permissions";
 import {
   validateCNP,
@@ -574,10 +574,7 @@ function parseSalaryStartDate(value: string | null | undefined): Date | null {
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, [
-    "ADMIN",
-    "OPERATOR",
-  ]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });

@@ -6,15 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { canEditEmployee } from "@/lib/permissions";
 import { triggerManualImport } from "@/lib/cron";
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, [
-    "ADMIN",
-    "OPERATOR",
-  ]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });

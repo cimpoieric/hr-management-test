@@ -70,6 +70,7 @@ const createSchema = z
     endDate: z.coerce.date(),
     hoursWorked: z.coerce.number().min(0.5).max(80),
     standardHours: z.coerce.number().min(0).max(80).optional().default(40),
+    travelAllowance: z.coerce.number().min(0).max(1_000_000).optional().default(0),
     dailyBreakdown: z.string().optional(),
     notes: z.string().optional(),
   })
@@ -142,7 +143,15 @@ export async function GET(request: NextRequest) {
         take: pageSize,
         include: {
           employee: {
-            select: { id: true, firstName: true, lastName: true, position: true },
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              position: true,
+              salaryType: true,
+              salaryAmount: true,
+              salaryCurrency: true,
+            },
           },
         },
       }),
@@ -182,6 +191,7 @@ export async function POST(request: NextRequest) {
       endDate,
       hoursWorked,
       standardHours,
+      travelAllowance,
       dailyBreakdown,
       notes,
     } = parsed.data;
@@ -209,6 +219,7 @@ export async function POST(request: NextRequest) {
         endDate,
         hoursWorked,
         standardHours,
+        travelAllowance,
         dailyBreakdown,
         notes,
         status: "DRAFT",

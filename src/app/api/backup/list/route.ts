@@ -9,14 +9,8 @@ import { requireAuth } from "@/lib/auth";
 import { listBackups, getBackupStats } from "@/lib/backup";
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
-
-  if (user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
-  }
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   try {
     const [backups, stats] = await Promise.all([

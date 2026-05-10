@@ -7,8 +7,12 @@ import { toast } from "sonner";
 import { MoreVertical, Trash, Check, X, Send, FileText, Pencil, Loader2 } from "lucide-react";
 
 import { TimesheetForm } from "@/app/components/TimesheetForm";
+import { broadcastTimesheetHoursForPayrollSync } from "@/lib/timesheetPayrollSync";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
+import { useAuth } from "@/hooks/useAuth";
+import { ReadOnlyField } from "@/components/ui/ReadOnlyField";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,8 +41,17 @@ export type TimesheetRow = {
   endDate: string;
   hoursWorked: string;
   standardHours: string;
+  travelAllowance: string | number;
   status: string;
-  employee: { id: number; firstName: string; lastName: string; position: string | null };
+  employee: {
+    id: number;
+    firstName: string;
+    lastName: string;
+    position: string | null;
+    salaryType?: string | null;
+    salaryAmount?: string | null;
+    salaryCurrency?: string | null;
+  };
   payslip?: { id: number } | null;
 };
 
@@ -70,6 +83,23 @@ function fmtPeriod(start: string, end: string): string {
   return `${fmt(s)}-${fmt(e)}`;
 }
 
+function fmtDiurnaEur(amount: string | number | undefined): string {
+  const n = Number(amount ?? 0);
+  const v = Number.isFinite(n) ? n : 0;
+  return `${v.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} EUR`;
+}
+
+function fmtSalariuEstimate(t: TimesheetRow): string {
+  const emp = t.employee;
+  const st = emp?.salaryType;
+  const amt = emp?.salaryAmount != null ? Number(emp.salaryAmount) : NaN;
+  const hrs = Number(t.hoursWorked);
+  const cur = (emp?.salaryCurrency ?? "EUR").toUpperCase();
+  if (st !== "ORA" || !Number.isFinite(amt) || !Number.isFinite(hrs)) return "—";
+  const net = hrs * amt;
+  return `${net.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${cur}`;
+}
+
 export function TimesheetsTableClient({
   items,
   pagination,
@@ -83,6 +113,8 @@ export function TimesheetsTableClient({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { role } = useAuth();
+  const isReadOnly = role === "doar_vizualizare";
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const allSelected = useMemo(
@@ -92,6 +124,9 @@ export function TimesheetsTableClient({
 
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Inline edit "Ore" (hoursWorked) per row
+  const [hoursDraft, setHoursDraft] = useState<Record<number, string>>({});
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [timesheetToDelete, setTimesheetToDelete] = useState<number | null>(null);
@@ -109,6 +144,7 @@ export function TimesheetsTableClient({
   const [editStandardHours, setEditStandardHours] = useState<string>("40");
   const [editDailyBreakdown, setEditDailyBreakdown] = useState<string>("");
   const [editNotes, setEditNotes] = useState<string>("");
+  const [editTravelAllowance, setEditTravelAllowance] = useState<string>("0.00");
 
   function updateUrl(next: Record<string, string | undefined>) {
     const sp = new URLSearchParams(searchParams.toString());
@@ -139,6 +175,80 @@ export function TimesheetsTableClient({
       else next.delete(id);
       return next;
     });
+  }
+
+  function normalizeDecimalInput(raw: string): string {
+    return raw.replace(",", ".").trim();
+  }
+
+  function isValidHoursValue(raw: string): boolean {
+    const s = normalizeDecimalInput(raw);
+    if (s === "") return false;
+    const n = Number(s);
+    return Number.isFinite(n) && n >= 0;
+  }
+
+  useEffect(() => {
+    // Keep drafts in sync when list changes (pagination/filter/refresh)
+    setHoursDraft((prev) => {
+      const next: Record<number, string> = { ...prev };
+      for (const t of items) {
+        if (next[t.id] === undefined) next[t.id] = String(t.hoursWorked ?? "");
+      }
+      // drop drafts that are no longer present (avoid stale growth)
+      const present = new Set(items.map((i) => i.id));
+      for (const k of Object.keys(next)) {
+        const id = Number(k);
+        if (!present.has(id)) delete next[id];
+      }
+      return next;
+    });
+  }, [items]);
+
+  async function saveInlineHours(timesheetId: number) {
+    const t = items.find((x) => x.id === timesheetId);
+    if (!t) return;
+
+    const raw = hoursDraft[timesheetId] ?? String(t.hoursWorked ?? "");
+    if (!isValidHoursValue(raw)) {
+      toast.error("Ore invalide");
+      setHoursDraft((prev) => ({ ...prev, [timesheetId]: String(t.hoursWorked ?? "") }));
+      return;
+    }
+
+    const hoursWorked = Number(normalizeDecimalInput(raw));
+    // No-op if unchanged (avoid extra calls)
+    if (Number(t.hoursWorked) === hoursWorked) return;
+
+    setBusy(timesheetId, true);
+    try {
+      const res = await fetch(`/api/timesheets/${timesheetId}`, {
+        method: "PUT",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          employeeId: t.employeeId,
+          weekNumber: t.weekNumber,
+          year: t.year,
+          startDate: t.startDate,
+          endDate: t.endDate,
+          hoursWorked,
+          standardHours: Number(t.standardHours ?? "40"),
+          travelAllowance: Number(t.travelAllowance ?? 0),
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Nu am putut salva orele");
+
+      toast.success("Ore actualizate");
+      broadcastTimesheetHoursForPayrollSync(t.year, t.weekNumber);
+      router.refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Eroare");
+      setHoursDraft((prev) => ({ ...prev, [timesheetId]: String(t.hoursWorked ?? "") }));
+    } finally {
+      setBusy(timesheetId, false);
+    }
   }
 
   async function deleteReq(url: string) {
@@ -245,6 +355,8 @@ export function TimesheetsTableClient({
     try {
       await deleteReq(`/api/timesheets/${timesheetToDelete}`);
       toast.success("Pontaj șters");
+      const deleted = items.find((x) => x.id === timesheetToDelete);
+      if (deleted) broadcastTimesheetHoursForPayrollSync(deleted.year, deleted.weekNumber);
       setDeleteDialogOpen(false);
       setTimesheetToDelete(null);
       setSelected((prev) => {
@@ -295,6 +407,8 @@ export function TimesheetsTableClient({
         setEditStandardHours(String(data.standardHours ?? "40"));
         setEditDailyBreakdown(String(data.dailyBreakdown ?? ""));
         setEditNotes(String(data.notes ?? ""));
+        const ta = Number(data.travelAllowance ?? 0);
+        setEditTravelAllowance(Number.isFinite(ta) ? ta.toFixed(2) : "0.00");
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Eroare");
         setEditOpen(false);
@@ -328,6 +442,7 @@ export function TimesheetsTableClient({
           endDate: editEndDate,
           hoursWorked: Number(editHoursWorked),
           standardHours: Number(editStandardHours || "40"),
+          travelAllowance: Number(normalizeDecimalInput(editTravelAllowance || "0")) || 0,
           dailyBreakdown: editDailyBreakdown.trim() ? editDailyBreakdown : undefined,
           notes: editNotes.trim() ? editNotes : undefined,
         }),
@@ -335,6 +450,7 @@ export function TimesheetsTableClient({
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? "Nu am putut salva");
       toast.success("Pontaj actualizat");
+      broadcastTimesheetHoursForPayrollSync(editYear, editWeekNumber);
       setEditOpen(false);
       setEditingId(null);
       router.refresh();
@@ -353,7 +469,9 @@ export function TimesheetsTableClient({
           <p className="mt-1 text-sm text-gray-500">Pontaje săptămânale — status, aprobări, fluturași</p>
         </div>
         <div className="flex items-center gap-2">
-          <TimesheetForm onSuccess={() => router.refresh()} />
+          <PermissionGuard allowedRoles={["operator", "administrator"]}>
+            <TimesheetForm onSuccess={() => router.refresh()} />
+          </PermissionGuard>
           <Button variant="outline" onClick={() => router.refresh()}>
             Refresh
           </Button>
@@ -430,18 +548,20 @@ export function TimesheetsTableClient({
               >
                 Reset selecție
               </Button>
-              <Button
-                variant="default"
-                size="sm"
-                disabled={bulkBusy}
-                onClick={bulkGeneratePayslips}
-              >
-                Generează Fluturași ({selected.size})
-              </Button>
+              <PermissionGuard allowedRoles={["operator", "administrator"]}>
+                <Button
+                  variant="default"
+                  size="sm"
+                  disabled={bulkBusy}
+                  onClick={bulkGeneratePayslips}
+                >
+                  Generează Fluturași ({selected.size})
+                </Button>
+              </PermissionGuard>
             </div>
           </div>
         )}
-        <Table className="min-w-[800px]">
+        <Table className="min-w-[980px]">
           <TableHeader>
             <TableRow className="bg-gray-50">
               <TableHead className="w-10 p-2">
@@ -458,6 +578,8 @@ export function TimesheetsTableClient({
               <TableHead className="w-[100px] p-2 text-center whitespace-nowrap">Săpt.</TableHead>
               <TableHead className="w-[120px] p-2 text-center whitespace-nowrap">Perioada</TableHead>
               <TableHead className="w-[80px] p-2 text-center whitespace-nowrap">Ore</TableHead>
+              <TableHead className="w-[100px] p-2 text-center whitespace-nowrap">Diurnă</TableHead>
+              <TableHead className="w-[110px] p-2 text-center whitespace-nowrap">Salariu</TableHead>
               <TableHead className="w-[110px] p-2 text-center whitespace-nowrap">Status</TableHead>
               <TableHead className="w-[70px] p-2 text-center whitespace-nowrap">Acțiuni</TableHead>
             </TableRow>
@@ -472,6 +594,7 @@ export function TimesheetsTableClient({
               const canReject = s === "SUBMITTED";
               const canGenerate = s === "APPROVED";
               const busy = busyIds.has(t.id) || bulkBusy;
+              const canRoleWrite = !isReadOnly;
 
               return (
                 <TableRow key={t.id}>
@@ -498,72 +621,121 @@ export function TimesheetsTableClient({
                     {String(t.weekNumber).padStart(2, "0")}/{t.year}
                   </TableCell>
                   <TableCell className="w-[120px] p-2 text-center whitespace-nowrap">{fmtPeriod(t.startDate, t.endDate)}</TableCell>
-                  <TableCell className="w-[80px] p-2 text-center whitespace-nowrap">{Number(t.hoursWorked || 0).toFixed(2)}</TableCell>
+                  <TableCell className="w-[80px] p-2 text-center whitespace-nowrap">
+                    <ReadOnlyField
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min={0}
+                      className="w-[72px] rounded-md text-center tabular-nums"
+                      value={hoursDraft[t.id] ?? String(t.hoursWorked ?? "")}
+                      readOnly={!canRoleWrite || !canEdit || busy}
+                      readOnlyTooltip="Nu aveti permisiune de editare"
+                      onChange={(e) => setHoursDraft((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                      onBlur={() => {
+                        if (!canRoleWrite) return;
+                        void saveInlineHours(t.id);
+                      }}
+                      onKeyDown={(e) => {
+                        if (!canRoleWrite) return;
+                        if (e.key === "Enter") {
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                        if (e.key === "Escape") {
+                          setHoursDraft((prev) => ({ ...prev, [t.id]: String(t.hoursWorked ?? "") }));
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                      }}
+                      aria-label="Ore lucrate"
+                    />
+                  </TableCell>
+                  <TableCell className="w-[100px] p-2 text-center whitespace-nowrap text-xs tabular-nums">
+                    {fmtDiurnaEur(t.travelAllowance)}
+                  </TableCell>
+                  <TableCell className="w-[110px] p-2 text-center whitespace-nowrap text-xs tabular-nums">
+                    {fmtSalariuEstimate(t)}
+                  </TableCell>
                   <TableCell className="w-[110px] p-2 text-center whitespace-nowrap">
                     <Badge variant="outline" className={`${statusBadgeClass(t.status)} text-[10px] px-1.5 py-0`}>
                       {statusRo(t.status)}
                     </Badge>
                   </TableCell>
                   <TableCell className="w-[70px] p-2 text-center">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy}>
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                    <PermissionGuard allowedRoles={["operator", "administrator"]} fallback={<span className="text-muted-foreground text-xs">-</span>}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={busy}>
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
                         {/* Draft: Edit, Submit, Șterge */}
                         {s === "DRAFT" ? (
                           <>
-                            <DropdownMenuItem disabled={!canEdit || busy} onClick={() => openEdit(t.id)}>
-                              <Pencil className="mr-2 h-4 w-4" /> Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem disabled={!canSubmit || busy} onClick={() => doSubmit(t.id)}>
-                              <Send className="mr-2 h-4 w-4" /> Submit
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem disabled={busy} onClick={() => handleDeleteClick(t.id)} className="text-red-600">
-                              <Trash className="mr-2 h-4 w-4" /> Șterge
-                            </DropdownMenuItem>
+                            <PermissionGuard allowedRoles={["operator", "administrator"]}>
+                              <DropdownMenuItem disabled={!canEdit || busy} onClick={() => openEdit(t.id)}>
+                                <Pencil className="mr-2 h-4 w-4" /> Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem disabled={!canSubmit || busy} onClick={() => doSubmit(t.id)}>
+                                <Send className="mr-2 h-4 w-4" /> Submit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                            </PermissionGuard>
+                            <PermissionGuard allowedRoles={["administrator"]}>
+                              <DropdownMenuItem disabled={busy} onClick={() => handleDeleteClick(t.id)} className="text-red-600">
+                                <Trash className="mr-2 h-4 w-4" /> Șterge
+                              </DropdownMenuItem>
+                            </PermissionGuard>
                           </>
                         ) : null}
 
                         {/* Pending: Aprobă, Respinge */}
                         {s === "SUBMITTED" ? (
                           <>
-                            <DropdownMenuItem disabled={!canApprove || busy} onClick={() => doApprove(t.id)}>
-                              <Check className="mr-2 h-4 w-4" /> Aprobă
-                            </DropdownMenuItem>
-                            <DropdownMenuItem disabled={!canReject || busy} onClick={() => doReject(t.id)}>
-                              <X className="mr-2 h-4 w-4" /> Respinge
-                            </DropdownMenuItem>
+                            <PermissionGuard allowedRoles={["administrator"]}>
+                              <DropdownMenuItem disabled={!canApprove || busy} onClick={() => doApprove(t.id)}>
+                                <Check className="mr-2 h-4 w-4" /> Aprobă
+                              </DropdownMenuItem>
+                            </PermissionGuard>
+                            <PermissionGuard allowedRoles={["operator", "administrator"]}>
+                              <DropdownMenuItem disabled={!canReject || busy} onClick={() => doReject(t.id)}>
+                                <X className="mr-2 h-4 w-4" /> Respinge
+                              </DropdownMenuItem>
+                            </PermissionGuard>
                           </>
                         ) : null}
 
                         {/* Aprobat: Generează Fluturaș */}
                         {s === "APPROVED" ? (
-                          <DropdownMenuItem disabled={!canGenerate || busy} onClick={() => doGeneratePayslip(t.id)}>
-                            <FileText className="mr-2 h-4 w-4" /> Generează Fluturaș
-                          </DropdownMenuItem>
+                          <PermissionGuard allowedRoles={["operator", "administrator"]}>
+                            <DropdownMenuItem disabled={!canGenerate || busy} onClick={() => doGeneratePayslip(t.id)}>
+                              <FileText className="mr-2 h-4 w-4" /> Generează Fluturaș
+                            </DropdownMenuItem>
+                          </PermissionGuard>
                         ) : null}
 
                         {/* Respins: Edit + Submit + Șterge */}
                         {s === "REJECTED" ? (
                           <>
-                            <DropdownMenuItem disabled={!canEdit || busy} onClick={() => openEdit(t.id)}>
-                              <Pencil className="mr-2 h-4 w-4" /> Edit
-                            </DropdownMenuItem>
-                            <DropdownMenuItem disabled={!canSubmit || busy} onClick={() => doSubmit(t.id)}>
-                              <Send className="mr-2 h-4 w-4" /> Submit
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem disabled={busy} onClick={() => handleDeleteClick(t.id)} className="text-red-600">
-                              <Trash className="mr-2 h-4 w-4" /> Șterge
-                            </DropdownMenuItem>
+                            <PermissionGuard allowedRoles={["operator", "administrator"]}>
+                              <DropdownMenuItem disabled={!canEdit || busy} onClick={() => openEdit(t.id)}>
+                                <Pencil className="mr-2 h-4 w-4" /> Edit
+                              </DropdownMenuItem>
+                              <DropdownMenuItem disabled={!canSubmit || busy} onClick={() => doSubmit(t.id)}>
+                                <Send className="mr-2 h-4 w-4" /> Submit
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                            </PermissionGuard>
+                            <PermissionGuard allowedRoles={["administrator"]}>
+                              <DropdownMenuItem disabled={busy} onClick={() => handleDeleteClick(t.id)} className="text-red-600">
+                                <Trash className="mr-2 h-4 w-4" /> Șterge
+                              </DropdownMenuItem>
+                            </PermissionGuard>
                           </>
                         ) : null}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </PermissionGuard>
                   </TableCell>
                 </TableRow>
               );
@@ -571,7 +743,7 @@ export function TimesheetsTableClient({
 
             {items.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7} className="p-6 text-center text-sm text-gray-500">
+                <TableCell colSpan={9} className="p-6 text-center text-sm text-gray-500">
                   Nu există pontaje pentru filtrele selectate.
                 </TableCell>
               </TableRow>
@@ -716,6 +888,19 @@ export function TimesheetsTableClient({
                       placeholder="40"
                     />
                   </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">Diurnă (EUR)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                      value={editTravelAllowance}
+                      onChange={(e) => setEditTravelAllowance(e.target.value)}
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div className="hidden md:block" aria-hidden="true" />
                   <div className="md:col-span-2">
                     <label className="text-xs font-medium text-gray-600">Zilnic (JSON opțional)</label>
                     <textarea

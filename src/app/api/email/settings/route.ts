@@ -1,20 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import nodemailer from "nodemailer";
 import { prismaTyped as prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { canManageUsers } from "@/lib/permissions";
-import { encrypt } from "@/lib/encryption";
-
-const CONFIG_KEYS = {
-  host: "smtp.host",
-  port: "smtp.port",
-  user: "smtp.user",
-  pass: "smtp.pass",
-  fromEmail: "smtp.fromEmail",
-  fromName: "smtp.fromName",
-  secure: "smtp.secure",
-  payslipTemplate: "email.template.payslip",
-} as const;
+import { decrypt, encrypt } from "@/lib/encryption";
 
 const putSchema = z.object({
   host: z.string().trim().min(1),
@@ -23,34 +13,43 @@ const putSchema = z.object({
   password: z.string().optional(),
   fromEmail: z.string().trim().min(1),
   fromName: z.string().trim().min(1),
-  secure: z.coerce.boolean(),
-  payslipTemplate: z.string().optional(),
+  subjectTemplate: z.string().trim().min(1).max(200).optional(),
+  bodyTemplate: z.string().optional(),
+  isActive: z.coerce.boolean().optional().default(true),
 });
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
+  console.log("[SMTP_SETTINGS][GET] start");
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  console.log("[SMTP_SETTINGS][GET] auth", { hasUser: Boolean(user), hasAuthError: Boolean(authError) });
   if (authError || !user) return authError!;
   if (!canManageUsers(user.role)) {
+    console.log("[SMTP_SETTINGS][GET] forbidden", { role: user.role });
     return NextResponse.json({ error: "Acces interzis — doar ADMIN" }, { status: 403 });
   }
 
   try {
-    const configs = await prisma.systemConfig.findMany({
-      where: { key: { in: Object.values(CONFIG_KEYS) } },
-      select: { key: true, value: true },
+    console.log("[SMTP_SETTINGS][GET] querying emailSettings");
+    const row = await prisma.emailSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: "desc" },
     });
 
-    const get = (key: string) => configs.find((c) => c.key === key)?.value;
-
+    console.log("[SMTP_SETTINGS][GET] row", {
+      found: Boolean(row),
+      hasPass: Boolean((row?.smtpPass ?? "").trim()),
+      updatedAt: row?.updatedAt ?? null,
+    });
     return NextResponse.json({
-      host: get(CONFIG_KEYS.host) ?? "",
-      port: Number(get(CONFIG_KEYS.port) ?? "587"),
-      user: get(CONFIG_KEYS.user) ?? "",
-      hasPassword: Boolean((get(CONFIG_KEYS.pass) ?? "").trim()),
-      fromEmail: get(CONFIG_KEYS.fromEmail) ?? "",
-      fromName: get(CONFIG_KEYS.fromName) ?? "",
-      secure: (get(CONFIG_KEYS.secure) ?? "false") === "true",
-      payslipTemplate: get(CONFIG_KEYS.payslipTemplate) ?? "",
+      host: row?.smtpHost ?? "",
+      port: Number(row?.smtpPort ?? 587),
+      user: row?.smtpUser ?? "",
+      hasPassword: Boolean((row?.smtpPass ?? "").trim()),
+      fromEmail: row?.fromEmail ?? "",
+      fromName: row?.fromName ?? "HR Management",
+      subjectTemplate: row?.subjectTemplate ?? "Fluturas salariu - {luna} {an}",
+      bodyTemplate: row?.bodyTemplate ?? "",
+      isActive: row?.isActive ?? true,
     });
   } catch (error) {
     console.error("[SMTP_SETTINGS_GET]", error);
@@ -59,41 +58,122 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
+  return handleSave(request, "PUT");
+}
+
+export async function POST(request: NextRequest) {
+  return handleSave(request, "POST");
+}
+
+async function handleSave(request: NextRequest, method: "PUT" | "POST") {
+  console.log(`[SMTP_SETTINGS][${method}] start`);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  console.log(`[SMTP_SETTINGS][${method}] auth`, { hasUser: Boolean(user), hasAuthError: Boolean(authError) });
   if (authError || !user) return authError!;
   if (!canManageUsers(user.role)) {
+    console.log(`[SMTP_SETTINGS][${method}] forbidden`, { role: user.role });
     return NextResponse.json({ error: "Acces interzis — doar ADMIN" }, { status: 403 });
   }
 
   try {
+    console.log(`[SMTP_SETTINGS][${method}] reading body`);
     const body = await request.json().catch(() => null);
+    console.log(
+      `[SMTP_SETTINGS][${method}] body keys`,
+      body && typeof body === "object" ? Object.keys(body as any) : null
+    );
     const parsed = putSchema.safeParse(body);
     if (!parsed.success) {
+      console.log(`[SMTP_SETTINGS][${method}] body invalid`, parsed.error.issues?.[0]?.message);
       return NextResponse.json({ error: "Body invalid" }, { status: 400 });
     }
 
     const v = parsed.data;
-    const entries: Array<{ key: string; value: string }> = [
-      { key: CONFIG_KEYS.host, value: v.host },
-      { key: CONFIG_KEYS.port, value: String(v.port) },
-      { key: CONFIG_KEYS.user, value: v.user },
-      { key: CONFIG_KEYS.fromEmail, value: v.fromEmail },
-      { key: CONFIG_KEYS.fromName, value: v.fromName },
-      { key: CONFIG_KEYS.secure, value: String(v.secure) },
-      { key: CONFIG_KEYS.payslipTemplate, value: v.payslipTemplate ?? "" },
-    ];
+    console.log(`[SMTP_SETTINGS][${method}] parsed`, {
+      host: v.host,
+      port: v.port,
+      user: v.user ? "***" : "",
+      fromEmail: v.fromEmail,
+      fromName: v.fromName,
+      hasPasswordInBody: typeof v.password === "string" && v.password.trim().length > 0,
+      isActive: v.isActive ?? true,
+    });
+    const existing = await prisma.emailSettings.findFirst({
+      where: { isActive: true },
+      orderBy: { updatedAt: "desc" },
+    });
+    console.log(`[SMTP_SETTINGS][${method}] existing`, {
+      found: Boolean(existing),
+      hasStoredPass: Boolean((existing?.smtpPass ?? "").trim()),
+      updatedAt: existing?.updatedAt ?? null,
+    });
 
-    if (typeof v.password === "string" && v.password.trim().length > 0) {
-      entries.push({ key: CONFIG_KEYS.pass, value: encrypt(v.password.trim()) });
+    const incomingPass = typeof v.password === "string" ? v.password.trim() : "";
+    const hasIncomingPass = incomingPass.length > 0;
+
+    const passwordToStore = hasIncomingPass ? encrypt(incomingPass) : existing?.smtpPass ?? "";
+    console.log(`[SMTP_SETTINGS][${method}] passwordToStore`, {
+      hasIncomingPass,
+      willStorePass: Boolean(passwordToStore.trim()),
+    });
+
+    // We must verify SMTP before saving. If password isn't provided, use stored password (decrypt).
+    let verifyPass: string | null = null;
+    if (hasIncomingPass) {
+      verifyPass = incomingPass;
+    } else if (passwordToStore.trim()) {
+      try {
+        console.log(`[SMTP_SETTINGS][${method}] decrypting stored password`);
+        verifyPass = decrypt(passwordToStore);
+        console.log(`[SMTP_SETTINGS][${method}] decrypt ok`);
+      } catch (e) {
+        console.error("[SMTP_SETTINGS_DECRYPT]", e);
+        verifyPass = null;
+      }
     }
 
-    for (const entry of entries) {
-      await prisma.systemConfig.upsert({
-        where: { key: entry.key },
-        update: { value: entry.value },
-        create: { key: entry.key, value: entry.value },
-      });
+    // Validate SMTP connection BEFORE saving (requirement)
+    if (!verifyPass) {
+      console.log(`[SMTP_SETTINGS][${method}] no password available for verify`);
+      return NextResponse.json(
+        {
+          error:
+            "Parola SMTP lipsa sau nu poate fi decriptata. Introduceti parola pentru a testa conexiunea si a salva.",
+        },
+        { status: 400 }
+      );
     }
+    console.log(`[SMTP_SETTINGS][${method}] verifying SMTP`, {
+      host: v.host,
+      port: v.port,
+      secure: v.port === 465,
+    });
+    const transporter = nodemailer.createTransport({
+      host: v.host,
+      port: v.port,
+      secure: v.port === 465,
+      auth: { user: v.user, pass: verifyPass },
+      tls: { rejectUnauthorized: false },
+    });
+    await transporter.verify();
+    console.log(`[SMTP_SETTINGS][${method}] SMTP verify OK`);
+
+    console.log(`[SMTP_SETTINGS][${method}] saving EmailSettings row`);
+    await prisma.emailSettings.create({
+      data: {
+        smtpHost: v.host,
+        smtpPort: v.port,
+        smtpUser: v.user,
+        smtpPass: passwordToStore,
+        fromEmail: v.fromEmail,
+        fromName: v.fromName,
+        subjectTemplate: v.subjectTemplate ?? "Fluturas salariu - {luna} {an}",
+        bodyTemplate: v.bodyTemplate ?? "",
+        isActive: v.isActive ?? true,
+      },
+      select: { id: true },
+    });
+    console.log(`[SMTP_SETTINGS][${method}] saved OK`);
 
     return NextResponse.json({ success: true });
   } catch (error) {

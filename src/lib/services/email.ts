@@ -5,6 +5,27 @@ import { prismaTyped as prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/encryption";
 import { generatePayslipPdf } from "@/lib/services/payslipPdf";
 
+export type EmailSettingsRow = {
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  fromEmail: string;
+  fromName: string;
+  subjectTemplate: string;
+  bodyTemplate: string;
+  isActive: boolean;
+  updatedAt: Date;
+};
+
+export async function getEmailSettings(): Promise<EmailSettingsRow | null> {
+  const row = await prisma.emailSettings.findFirst({
+    where: { isActive: true },
+    orderBy: { updatedAt: "desc" },
+  });
+  return (row as unknown as EmailSettingsRow) ?? null;
+}
+
 export type SMTPConfig = {
   host: string;
   port: number;
@@ -39,6 +60,38 @@ function decryptSafe(value: string): string {
 }
 
 export async function getSMTPConfig(): Promise<SMTPConfig> {
+  // Prefer EmailSettings table (new), fallback to legacy SystemConfig.
+  const row = await prisma.emailSettings.findFirst({
+    where: { isActive: true },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      smtpHost: true,
+      smtpPort: true,
+      smtpUser: true,
+      smtpPass: true,
+      fromEmail: true,
+      fromName: true,
+    },
+  });
+
+  if (row) {
+    const host = (row.smtpHost ?? "").trim();
+    const port = Number(row.smtpPort);
+    const user = (row.smtpUser ?? "").trim();
+    const pass = row.smtpPass ? decryptSafe(String(row.smtpPass).trim()) : "";
+    const fromEmail = (row.fromEmail ?? user ?? "").trim();
+    const fromName = (row.fromName ?? "HR Management").trim();
+    const secure = port === 465;
+
+    if (!host) throw new Error("SMTP host missing (EmailSettings.smtpHost)");
+    if (!Number.isFinite(port) || port <= 0) throw new Error("SMTP port invalid (EmailSettings.smtpPort)");
+    if (!user) throw new Error("SMTP user missing (EmailSettings.smtpUser)");
+    if (!pass) throw new Error("SMTP pass missing (EmailSettings.smtpPass)");
+    if (!fromEmail) throw new Error("SMTP fromEmail missing (EmailSettings.fromEmail)");
+
+    return { host, port, secure, user, pass, fromEmail, fromName };
+  }
+
   const keys = Object.values(SMTP_KEYS);
   const records = await prisma.systemConfig.findMany({
     where: { key: { in: keys } },
@@ -154,7 +207,7 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
   });
 
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: `"${cfg.fromName}" <${cfg.fromEmail}>`,
       to: toAddress,
       subject,
@@ -167,6 +220,16 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
         },
       ],
     });
+
+    const rejected = info.rejected ?? [];
+    if (rejected.length > 0) {
+      throw new Error(`SMTP a respins destinatarul: ${rejected.join(", ")}`);
+    }
+    if (!String(info.messageId ?? "").trim()) {
+      throw new Error(
+        `SMTP nu a confirmat trimiterea (${String(info.response ?? "").slice(0, 300) || "fără răspuns"})`
+      );
+    }
 
     await prisma.$transaction([
       prisma.emailLog.update({

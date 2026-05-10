@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { broadcastTimesheetHoursForPayrollSync } from "@/lib/timesheetPayrollSync";
 
 export type EditTimesheet = {
   id: number;
@@ -14,6 +15,7 @@ export type EditTimesheet = {
   endDate: string;
   hoursWorked: string;
   standardHours: string;
+  travelAllowance?: number;
   dailyBreakdown?: string | null;
   notes?: string | null;
   status: string;
@@ -41,6 +43,9 @@ export function TimesheetEditClient({ timesheet, employees }: { timesheet: EditT
   const [endDate, setEndDate] = useState<string>(isoDateOnly(timesheet.endDate));
   const [hoursWorked, setHoursWorked] = useState<string>(String(timesheet.hoursWorked ?? ""));
   const [standardHours, setStandardHours] = useState<string>(String(timesheet.standardHours ?? "40"));
+  const [travelAllowance, setTravelAllowance] = useState<string>(() =>
+    Number(timesheet.travelAllowance ?? 0).toFixed(2)
+  );
   const [dailyBreakdown, setDailyBreakdown] = useState<string>(String(timesheet.dailyBreakdown ?? ""));
   const [notes, setNotes] = useState<string>(String(timesheet.notes ?? ""));
 
@@ -64,6 +69,7 @@ export function TimesheetEditClient({ timesheet, employees }: { timesheet: EditT
           endDate,
           hoursWorked: Number(hoursWorked),
           standardHours: Number(standardHours || "40"),
+          travelAllowance: Number(String(travelAllowance).replace(",", ".")) || 0,
           dailyBreakdown: dailyBreakdown.trim() ? dailyBreakdown : undefined,
           notes: notes.trim() ? notes : undefined,
         }),
@@ -72,6 +78,7 @@ export function TimesheetEditClient({ timesheet, employees }: { timesheet: EditT
       if (!res.ok) throw new Error(data.error ?? "Nu am putut salva");
 
       toast.success("Pontaj actualizat");
+      broadcastTimesheetHoursForPayrollSync(year, weekNumber);
       router.push("/pontaj");
       router.refresh();
     } catch (e) {
@@ -180,6 +187,19 @@ export function TimesheetEditClient({ timesheet, employees }: { timesheet: EditT
               onChange={(e) => setStandardHours(e.target.value)}
             />
           </div>
+          <div>
+            <label className="text-xs font-medium text-gray-600">Diurnă (EUR)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+              value={travelAllowance}
+              onChange={(e) => setTravelAllowance(e.target.value)}
+              placeholder="0.00"
+            />
+          </div>
+          <div className="hidden md:block" aria-hidden="true" />
           <div className="md:col-span-2">
             <label className="text-xs font-medium text-gray-600">Zilnic (JSON opțional)</label>
             <textarea

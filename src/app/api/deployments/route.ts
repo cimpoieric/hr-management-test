@@ -14,7 +14,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { activeDeploymentKpiWhere } from "@/lib/activeDeployments";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { canEditEmployee } from "@/lib/permissions";
 import {
   isValidCountryCode,
@@ -223,10 +223,7 @@ const createSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, [
-    "ADMIN",
-    "OPERATOR",
-  ]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });

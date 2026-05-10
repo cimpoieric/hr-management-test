@@ -22,14 +22,8 @@ import { logAuditFF, getClientIp } from "@/lib/audit";
 const TEMP_DIR = join(process.cwd(), "data", "temp");
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
-
-  if (user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
-  }
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   let tempFile: string | null = null;
 

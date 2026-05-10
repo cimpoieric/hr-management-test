@@ -39,7 +39,8 @@
       "PENDING": "În așteptare",
       "APPROVED": "Aprobat",
       "REJECTED": "Respins",
-      "DRAFT": "Draft"
+      "DRAFT": "Draft",
+      "COMPLETED_UPDATE": "Actualizat"
     }
   },
   "audit": {

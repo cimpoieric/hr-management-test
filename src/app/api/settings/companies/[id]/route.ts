@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 
 const updateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -19,10 +19,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  if (authError || !user) return authError!;
 
   try {
     const { id } = await params;
@@ -77,10 +75,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  if (authError || !user) return authError!;
 
   try {
     const { id } = await params;

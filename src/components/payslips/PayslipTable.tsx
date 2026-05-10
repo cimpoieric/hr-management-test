@@ -304,8 +304,12 @@ export function PayslipTable({
   async function sendOne(payslipId: number) {
     setBusy(payslipId, true);
     try {
-      const r = (await postJson(`/api/payslips/${payslipId}/send`)) as { emailLogId?: number };
-      toast.success(`Email trimis${r.emailLogId ? ` (log #${r.emailLogId})` : ""}`);
+      const r = (await postJson("/api/email/send", {
+        type: "fluturas",
+        data: { payslipId },
+      })) as { result?: { emailLogId?: number } };
+      const emailLogId = (r as any)?.result?.emailLogId;
+      toast.success(`Email trimis${emailLogId ? ` (log #${emailLogId})` : ""}`);
       router.refresh();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Eroare");
@@ -336,12 +340,16 @@ export function PayslipTable({
         return;
       }
 
-      const bulk = (await postJson("/api/payslips/bulk-send", { payslipIds: ids })) as {
-        sent?: Array<{ payslipId: number }>;
-        failed?: Array<{ payslipId: number; error: string }>;
-      };
-      const ok = bulk.sent?.length ?? 0;
-      const fail = bulk.failed?.length ?? 0;
+      let ok = 0;
+      let fail = 0;
+      for (const payslipId of ids) {
+        try {
+          await postJson("/api/email/send", { type: "fluturas", data: { payslipId } });
+          ok++;
+        } catch {
+          fail++;
+        }
+      }
       if (ok > 0) toast.success(`Trimise: ${ok}`);
       if (fail > 0) toast.error(`Eșuate: ${fail}`);
       router.refresh();
@@ -358,12 +366,16 @@ export function PayslipTable({
     if (!window.confirm(`Trimiți email pentru ${ids.length} fluturași selectați?`)) return;
     setSendingAll(true);
     try {
-      const bulk = (await postJson("/api/payslips/bulk-send", { payslipIds: ids })) as {
-        sent?: Array<{ payslipId: number }>;
-        failed?: Array<{ payslipId: number; error: string }>;
-      };
-      const ok = bulk.sent?.length ?? 0;
-      const fail = bulk.failed?.length ?? 0;
+      let ok = 0;
+      let fail = 0;
+      for (const payslipId of ids) {
+        try {
+          await postJson("/api/email/send", { type: "fluturas", data: { payslipId } });
+          ok++;
+        } catch {
+          fail++;
+        }
+      }
       if (ok > 0) toast.success(`Trimise: ${ok}`);
       if (fail > 0) toast.error(`Eșuate: ${fail}`);
       setSelected(new Set());

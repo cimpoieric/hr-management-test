@@ -15,6 +15,18 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
     return data;
   }
 
+  async function postJson(url: string, body?: unknown) {
+    const res = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string; [k: string]: unknown };
+    if (!res.ok) throw new Error(data.error ?? "Operațiunea a eșuat");
+    return data;
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <a
@@ -31,8 +43,11 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
         onClick={async () => {
           setBusy(true);
           try {
-            await post(`/api/payslips/${payslipId}/send`);
-            toast.success("Email trimis");
+            await postJson("/api/email/send", {
+              type: "fluturas",
+              data: { payslipId },
+            });
+            toast.success("Email trimis cu succes!");
             router.refresh();
           } catch (e) {
             toast.error(e instanceof Error ? e.message : "Eroare");

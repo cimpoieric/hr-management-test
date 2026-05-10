@@ -23,6 +23,7 @@ import {
 import type { UserRole } from "@/lib/auth";
 import { ro } from "@/messages";
 import { LEGACY_ROUTES, ROUTES } from "@/lib/routes";
+import { useAuth } from "@/hooks/useAuth";
 
 function isNavActive(pathname: string, href: string): boolean {
   if (href === ROUTES.dashboard) {
@@ -46,7 +47,8 @@ interface RouteItem {
   href: string;
   label: string;
   icon: React.ElementType;
-  adminOnly: boolean;
+  adminOnly?: boolean;
+  hideFor?: UserRole[];
 }
 
 function PlataNavIcon({ size = 18 }: { size?: number }) {
@@ -62,16 +64,16 @@ function PlataNavIcon({ size = 18 }: { size?: number }) {
 }
 
 const routes: RouteItem[] = [
-  { href: ROUTES.dashboard, label: ro.nav.dashboard, icon: LayoutDashboard, adminOnly: false },
-  { href: ROUTES.employees, label: ro.nav.employees, icon: Users, adminOnly: false },
-  { href: ROUTES.documents, label: ro.nav.documents, icon: FileText, adminOnly: false },
-  { href: ROUTES.deployments, label: ro.nav.deployments, icon: MapPin, adminOnly: false },
-  { href: ROUTES.imports, label: ro.nav.imports, icon: Download, adminOnly: false },
-  { href: ROUTES.reports, label: ro.nav.reports, icon: BarChart3, adminOnly: false },
-  { href: ROUTES.export, label: ro.nav.export, icon: FileSpreadsheet, adminOnly: false },
-  { href: ROUTES.pay, label: ro.nav.pay, icon: PlataNavIcon, adminOnly: false },
-  { href: ROUTES.timesheets, label: "Pontaj", icon: Clock, adminOnly: false },
-  { href: ROUTES.payslips, label: "Fluturași", icon: FileText, adminOnly: false },
+  { href: ROUTES.dashboard, label: ro.nav.dashboard, icon: LayoutDashboard },
+  { href: ROUTES.employees, label: ro.nav.employees, icon: Users },
+  { href: ROUTES.documents, label: ro.nav.documents, icon: FileText },
+  { href: ROUTES.deployments, label: ro.nav.deployments, icon: MapPin },
+  { href: ROUTES.imports, label: ro.nav.imports, icon: Download, hideFor: ["doar_vizualizare"] },
+  { href: ROUTES.reports, label: ro.nav.reports, icon: BarChart3 },
+  { href: ROUTES.export, label: ro.nav.export, icon: FileSpreadsheet, hideFor: ["doar_vizualizare"] },
+  { href: ROUTES.pay, label: ro.nav.pay, icon: PlataNavIcon },
+  { href: ROUTES.timesheets, label: "Pontaj", icon: Clock },
+  { href: ROUTES.payslips, label: "Fluturași", icon: FileText },
   { href: ROUTES.settings, label: ro.nav.settings, icon: Settings, adminOnly: true },
   { href: ROUTES.companies, label: ro.nav.companies, icon: Factory, adminOnly: true },
   { href: ROUTES.countries, label: ro.nav.countries, icon: Globe2, adminOnly: true },
@@ -80,17 +82,19 @@ const routes: RouteItem[] = [
 ];
 
 function SidebarNav({
-  userRole: _userRole,
-  isAdmin,
   onNavigate,
 }: {
-  userRole: UserRole;
-  isAdmin: boolean;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const { role } = useAuth();
+  const isAdmin = role === "administrator";
 
-  const visibleRoutes = routes.filter((r) => !r.adminOnly || isAdmin);
+  const visibleRoutes = routes.filter((r) => {
+    if (r.adminOnly && !isAdmin) return false;
+    if (r.hideFor && role && r.hideFor.includes(role)) return false;
+    return true;
+  });
 
   return (
     <nav className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 py-3 lg:py-4 space-y-1">
@@ -123,12 +127,7 @@ function SidebarNav({
 }
 
 export function Sidebar({
-  userRole,
-  isAdmin,
-}: {
-  userRole: UserRole;
-  isAdmin: boolean;
-}) {
+}: {}) {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -152,7 +151,7 @@ export function Sidebar({
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col min-h-0 h-dvh lg:h-full transform transition-transform duration-200 lg:transform-none ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col min-h-0 h-dvh lg:h-dvh transform transition-transform duration-200 lg:transform-none ${
           isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
@@ -177,8 +176,6 @@ export function Sidebar({
 
         {/* Navigation */}
         <SidebarNav
-          userRole={userRole}
-          isAdmin={isAdmin}
           onNavigate={() => setIsOpen(false)}
         />
 

@@ -11,15 +11,8 @@ import { createBackup, cleanupOldBackups } from "@/lib/backup";
 import { logAuditFF, getClientIp } from "@/lib/audit";
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
-
-  // ADMIN only
-  if (user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Acces interzis. Doar ADMIN." }, { status: 403 });
-  }
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   try {
     // Cleanup backup-uri vechi (>30 zile)

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prismaTyped as prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -15,11 +15,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { user, response: authError } = await requireAuth(request, [
-    "ADMIN",
-    "OPERATOR",
-    "ACCOUNTING",
-  ]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
 
   try {
@@ -76,6 +72,7 @@ const updateSchema = z
     endDate: z.coerce.date(),
     hoursWorked: z.coerce.number().min(0).max(80),
     standardHours: z.coerce.number().min(0).max(80).optional().default(40),
+    travelAllowance: z.coerce.number().min(0).max(1_000_000).optional().default(0),
     dailyBreakdown: z.string().optional(),
     notes: z.string().optional(),
   })
@@ -117,10 +114,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { user, response: authError } = await requireAuth(request, [
-    "ADMIN",
-    "OPERATOR",
-  ]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
 
   try {
@@ -163,6 +157,7 @@ export async function PUT(
         endDate: v.endDate,
         hoursWorked: v.hoursWorked,
         standardHours: v.standardHours,
+        travelAllowance: v.travelAllowance,
         dailyBreakdown: v.dailyBreakdown ?? null,
         notes: v.notes ?? null,
       },

@@ -1,7 +1,7 @@
 /**
  * Sistem Backup/Restore pentru aplicația HR Management.
  *
- * - Creează arhive ZIP (cu parolă) ale întregii aplicații: DB, documente, setări
+ * - Creează arhive ZIP ale întregii aplicații: DB, documente, setări (adm-zip — Windows/Linux/macOS)
  * - Listează, descarcă, șterge backup-uri
  * - Restore din arhivă uploadată (cu backup automat pre-restore)
  * - Cleanup automat backup-uri vechi (>30 zile, configurabil)
@@ -12,11 +12,10 @@
  *   Sau folosește setInterval în aplicație (dacă rulează 24/7)
  */
 
-import { execSync } from "child_process";
-import { mkdir, readdir, stat, copyFile, rm } from "fs/promises";
-import { existsSync } from "fs";
-import { join, basename, resolve } from "path";
-import { randomBytes } from "crypto";
+import AdmZip from "adm-zip";
+import { readdir, stat, rm } from "fs/promises";
+import { existsSync, mkdirSync } from "fs";
+import { join, resolve } from "path";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -52,19 +51,56 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
-/** Generează parola de backup din env sau una random */
-function getBackupPassword(): string {
-  const envPass = process.env.BACKUP_PASSWORD;
-  if (envPass && envPass.length >= 12) return envPass;
-  // Fallback: generează parolă random de 16 caractere
-  return randomBytes(8).toString("hex");
+/** Asigură `data/backups` (la fel ca în setup.js / start.js). */
+function ensureBackupsDir(): void {
+  if (!existsSync(BACKUPS_DIR)) {
+    mkdirSync(BACKUPS_DIR, { recursive: true });
+  }
+}
+
+/**
+ * Creează ZIP la outputPath: app.db la rădăcină, apoi `documents/`, `settings/`.
+ * Fișierele de la rădăcina `data/` urmează pattern-ul addLocalFile; folderele cu addLocalFolder.
+ */
+function writeApplicationZip(outputPath: string): void {
+  const zip = new AdmZip();
+  const filesToBackup = ["app.db"];
+
+  for (const file of filesToBackup) {
+    const filePath = join(DATA_DIR, file);
+    if (existsSync(filePath)) {
+      zip.addLocalFile(filePath, "", file);
+    }
+  }
+  if (existsSync(DOCS_DIR)) {
+    zip.addLocalFolder(DOCS_DIR, "documents");
+  }
+  if (existsSync(SETTINGS_DIR)) {
+    zip.addLocalFolder(SETTINGS_DIR, "settings");
+  }
+
+  zip.writeZip(outputPath);
+}
+
+function zipListsAppDb(paths: string[]): boolean {
+  return paths.some((p) => /(^|\/)app\.db$/i.test(p));
+}
+
+function zipHasDocumentsFolder(paths: string[]): boolean {
+  return paths.some((p) => p === "documents" || p.startsWith("documents/"));
+}
+
+function readZipEntryPaths(zipPath: string): string[] {
+  const zip = new AdmZip(zipPath);
+  return zip.getEntries().map((e) => e.entryName.replace(/\\/g, "/"));
 }
 
 // ─── Core Functions ──────────────────────────────────────────────────────────
 
 /**
- * Creează un backup ZIP cu parolă.
+ * Creează un backup ZIP.
  * Include: database, documents, settings.
+ * Parola returnată este goală — arhiva este ZIP standard (compatibil Windows). Backup-uri vechi cu parolă (zip CLI) rămân restabile cu aceeași funcție restore.
  */
 export async function createBackup(): Promise<{
   filename: string;
@@ -72,45 +108,20 @@ export async function createBackup(): Promise<{
   size: number;
   password: string;
 }> {
-  // Asigură directorul de backup
-  if (!existsSync(BACKUPS_DIR)) {
-    await mkdir(BACKUPS_DIR, { recursive: true });
-  }
+  ensureBackupsDir();
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `backup_${timestamp}.zip`;
   const outputPath = join(BACKUPS_DIR, filename);
-  const password = getBackupPassword();
 
-  // Verifică că fișierele există
-  const itemsToBackup: string[] = [];
+  const hasSomething =
+    existsSync(DB_PATH) || existsSync(DOCS_DIR) || existsSync(SETTINGS_DIR);
 
-  if (existsSync(DB_PATH)) {
-    itemsToBackup.push(DB_PATH);
-  }
-  if (existsSync(DOCS_DIR)) {
-    itemsToBackup.push(DOCS_DIR);
-  }
-  if (existsSync(SETTINGS_DIR)) {
-    itemsToBackup.push(SETTINGS_DIR);
-  }
-
-  if (itemsToBackup.length === 0) {
+  if (!hasSomething) {
     throw new Error("Niciun fișier de backup găsit");
   }
 
-  // Construiește comanda zip cu parolă
-  // Folosim -j pentru a păstra structura relativă de directoare
-  const itemsArg = itemsToBackup.map((p) => `"${p}"`).join(" ");
-  const cmd = `cd "${DATA_DIR}" && zip -r -P "${password}" "${outputPath}" ${itemsToBackup.map((p) => `"${basename(p)}"`).join(" ")}`;
-
-  try {
-    execSync(cmd, { timeout: 120000, stdio: "pipe" });
-  } catch (error) {
-    // Dacă zip cu parolă eșuează, încearcă fără parolă
-    const cmdNoPass = `cd "${DATA_DIR}" && zip -r "${outputPath}" ${itemsToBackup.map((p) => `"${basename(p)}"`).join(" ")}`;
-    execSync(cmdNoPass, { timeout: 120000, stdio: "pipe" });
-  }
+  await writeApplicationZip(outputPath);
 
   const stats = await stat(outputPath);
 
@@ -118,7 +129,7 @@ export async function createBackup(): Promise<{
     filename,
     path: outputPath,
     size: stats.size,
-    password,
+    password: "",
   };
 }
 
@@ -161,7 +172,9 @@ export function getBackupPath(filename: string): string {
 
   // Path traversal check: ensure the resolved path is within BACKUPS_DIR
   const resolvedBackupsDir = resolve(BACKUPS_DIR);
-  if (!fullPath.startsWith(resolvedBackupsDir + "/") && fullPath !== resolvedBackupsDir) {
+  const normalizedFull = fullPath.replace(/\\/g, "/");
+  const normalizedDir = (resolvedBackupsDir + "/").replace(/\\/g, "/");
+  if (!normalizedFull.startsWith(normalizedDir) && normalizedFull.replace(/\/$/, "") !== resolvedBackupsDir.replace(/\\/g, "/")) {
     throw new Error("Path traversal detectat");
   }
 
@@ -184,21 +197,20 @@ export async function deleteBackup(filename: string): Promise<void> {
  * Creează un backup de siguranță înainte de restore.
  */
 export async function createSafetyBackup(): Promise<string> {
+  ensureBackupsDir();
+
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   const filename = `pre-restore_${timestamp}.zip`;
   const outputPath = join(BACKUPS_DIR, filename);
 
-  const itemsToBackup: string[] = [];
-  if (existsSync(DB_PATH)) itemsToBackup.push(DB_PATH);
-  if (existsSync(DOCS_DIR)) itemsToBackup.push(DOCS_DIR);
-  if (existsSync(SETTINGS_DIR)) itemsToBackup.push(SETTINGS_DIR);
+  const hasSomething =
+    existsSync(DB_PATH) || existsSync(DOCS_DIR) || existsSync(SETTINGS_DIR);
 
-  if (itemsToBackup.length === 0) {
+  if (!hasSomething) {
     throw new Error("Niciun fișier de backupat");
   }
 
-  const cmd = `cd "${DATA_DIR}" && zip -r "${outputPath}" ${itemsToBackup.map((p) => `"${basename(p)}"`).join(" ")}`;
-  execSync(cmd, { timeout: 120000, stdio: "pipe" });
+  writeApplicationZip(outputPath);
 
   return filename;
 }
@@ -211,25 +223,19 @@ export async function restoreFromBackup(zipPath: string): Promise<{
   safetyBackup: string;
   restored: string[];
 }> {
-  // 1. Creează safety backup
   const safetyBackup = await createSafetyBackup();
 
-  // 2. Validează arhiva (conține app.db?)
-  const listOutput = execSync(
-    `unzip -l "${zipPath}"`,
-    { timeout: 30000, encoding: "utf-8" }
-  );
+  const paths = readZipEntryPaths(zipPath);
 
-  const hasDb = listOutput.includes("app.db");
-  const hasDocs = listOutput.includes("documents/");
+  const hasDb = zipListsAppDb(paths);
+  const hasDocs = zipHasDocumentsFolder(paths);
 
   if (!hasDb) {
     throw new Error("Arhiva nu contine baza de date (app.db)");
   }
 
-  // 3. Extrage în data/
-  const extractCmd = `cd "${DATA_DIR}" && unzip -o "${zipPath}"`;
-  execSync(extractCmd, { timeout: 120000, stdio: "pipe" });
+  const zip = new AdmZip(zipPath);
+  zip.extractAllTo(DATA_DIR, true);
 
   const restored: string[] = ["Baza de date"];
   if (hasDocs) restored.push("Documente");

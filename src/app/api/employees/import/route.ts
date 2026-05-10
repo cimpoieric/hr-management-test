@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prismaTyped } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { canApproveImport } from "@/lib/permissions";
 import { dedupeEmployee } from "@/lib/dedupe";
 import { encrypt, hashSha256 } from "@/lib/encryption";
@@ -56,10 +56,7 @@ export type ImportRowResult =
 
 export async function POST(request: NextRequest) {
   // ─── Auth + Permissions ──────────────────────────────────────────────
-  const { user, response: authError } = await requireAuth(request, [
-    "ADMIN",
-    "OPERATOR",
-  ]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
 
   if (authError || !user) {
     return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });

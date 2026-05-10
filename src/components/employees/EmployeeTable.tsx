@@ -21,6 +21,8 @@ import {
 import { AdvancedFilter, defaultFilters, type FilterState } from "@/components/filters/AdvancedFilter";
 import { BulkSelectionBar } from "@/components/tables/BulkSelection";
 import type { EmployeeKpiStats } from "@/lib/employeeStats";
+import { useAuth } from "@/hooks/useAuth";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 
 interface Employee {
   id: number;
@@ -107,6 +109,7 @@ export function EmployeeTable({
 }: EmployeeTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { can } = useAuth();
   const presetStatusFromUrl = searchParams.get("status");
   const presetSalaryTypeFromUrl = searchParams.get("salaryType");
 
@@ -255,6 +258,7 @@ export function EmployeeTable({
 
   // ── Delete ──
   async function handleDelete(id: number) {
+    // UI hidden via PermissionGuard; backend enforces too.
     if (!confirm("Ești sigur că vrei să ștergi acest angajat?")) return;
     try {
       const res = await fetch(`/api/employees/${id}`, { method: "DELETE" });
@@ -602,23 +606,27 @@ export function EmployeeTable({
                         >
                           <Eye size={15} />
                         </Link>
-                        <Link
-                          href={`/angajati/${emp.id}`}
-                          className="p-1 rounded-md text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors shrink-0"
-                          title="Editare — deschide pagina angajatului pentru modificări"
-                          aria-label="Editare angajat"
-                        >
-                          <Pencil size={15} />
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(emp.id)}
-                          className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
-                          title="Ștergere — elimină angajatul din evidență (ireversibil)"
-                          aria-label="Șterge angajat"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                        {can("employees:write") && (
+                          <Link
+                            href={`/angajati/${emp.id}`}
+                            className="p-1 rounded-md text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors shrink-0"
+                            title="Editare — deschide pagina angajatului pentru modificări"
+                            aria-label="Editare angajat"
+                          >
+                            <Pencil size={15} />
+                          </Link>
+                        )}
+                        <PermissionGuard allowedRoles={["administrator"]} fallback={null}>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(emp.id)}
+                            className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+                            title="Ștergere — elimină angajatul din evidență (ireversibil)"
+                            aria-label="Șterge angajat"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </PermissionGuard>
                       </div>
                     </td>
                   </tr>

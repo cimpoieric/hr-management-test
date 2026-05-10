@@ -7,6 +7,7 @@ import {
   type DocumentListFilteredStats,
 } from "@/components/documents/DocumentList";
 import { DocumentUpload } from "@/components/documents/DocumentUpload";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 
 export default function DocumentePage() {
   const [showUpload, setShowUpload] = useState(false);
@@ -37,14 +38,16 @@ export default function DocumentePage() {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => setShowUpload(!showUpload)}
-          className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800"
-        >
-          <Upload size={16} aria-hidden />
-          {showUpload ? "Închide upload" : "Upload document"}
-        </button>
+        <PermissionGuard allowedRoles={["operator", "administrator"]}>
+          <button
+            type="button"
+            onClick={() => setShowUpload(!showUpload)}
+            className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800"
+          >
+            <Upload size={16} aria-hidden />
+            {showUpload ? "Închide upload" : "Upload document"}
+          </button>
+        </PermissionGuard>
       </div>
 
       {showUpload && (

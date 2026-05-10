@@ -8,7 +8,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Valid roles: ADMIN | OPERATOR | ACCOUNTING
+// Valid roles: operator | administrator | doar_vizualizare
 // Valid employee status: ACTIVE | TERMINATED
 // Valid salary type: LUNAR | SAPTAMANAL | ORA (Prisma enum; SQLite stochează TEXT)
 // Valid document status: VALID | EXPIRING_SOON | EXPIRED | PENDING
@@ -20,7 +20,7 @@ model User {
   name               String   @default("")
   email              String   @unique
   password           String   // bcrypt hash — NEVER expose in API
-  role               String   @default("OPERATOR")
+  role               UserRole @default(operator)
   isActive           Boolean  @default(true)
   mustChangePassword Boolean  @default(false)
   lastLoginAt        DateTime?
@@ -28,6 +28,12 @@ model User {
   updatedAt          DateTime @updatedAt
   approvedTimesheets Timesheet[] @relation("TimesheetApprovedBy")
   emailLogs          EmailLog[]  @relation("EmailLogUser")
+}
+
+enum UserRole {
+  operator
+  administrator
+  doar_vizualizare
 }
 
 enum SalaryType {
@@ -67,6 +73,8 @@ model Employee {
   country      Country?      @relation(fields: [countryId], references: [id])
   status       String        @default("ACTIVE")
   observations String?
+  /** Normă / timp de muncă (ex. din CIM). */
+  workNorm     String?
   salaryType   SalaryType?
   salaryAmount Decimal?
   salaryCurrency String      @default("RON")
@@ -83,6 +91,7 @@ model Employee {
   timesheets   Timesheet[]
   payslips     Payslip[]
   emailLogs    EmailLog[]  @relation("EmailLogEmployee")
+  employeeHistory EmployeeHistory[]
 
   @@index([cnpHash])
   @@index([companyId])
@@ -181,7 +190,20 @@ model AuditLog {
   @@index([createdAt])
 }
 
-// Valid import status: PENDING | APPROVED | REJECTED | DRAFT
+model EmployeeHistory {
+  id         Int      @id @default(autoincrement())
+  employeeId Int
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  field      String   // function, company, work_norm, country, salary_start, salary, salary_currency, phone, email
+  oldValue   String?
+  newValue   String?
+  source     String   // ex: import_CIM
+  createdAt  DateTime @default(now())
+
+  @@index([employeeId])
+}
+
+// Valid import status: PENDING | APPROVED | REJECTED | DRAFT | COMPLETED_UPDATE
 model PendingImport {
   id              Int      @id @default(autoincrement())
   sourceType      String   @default("MANUAL_UPLOAD")
@@ -231,6 +253,22 @@ model SystemConfig {
   @@index([key])
 }
 
+model EmailSettings {
+  id              String   @id @default(cuid())
+  smtpHost        String
+  smtpPort        Int
+  smtpUser        String
+  smtpPass        String   // encrypted
+  fromEmail       String
+  fromName        String
+  subjectTemplate String   @default("Fluturas salariu - {luna} {an}")
+  bodyTemplate    String   @default("")
+  isActive        Boolean  @default(true)
+  updatedAt       DateTime @updatedAt
+
+  @@index([isActive])
+}
+
 model Timesheet {
   id             Int      @id @default(autoincrement())
   employeeId     Int
@@ -239,8 +277,10 @@ model Timesheet {
   year           Int
   startDate      DateTime
   endDate        DateTime
-  hoursWorked    Decimal
-  standardHours  Decimal  @default(40)
+  hoursWorked       Decimal
+  standardHours     Decimal  @default(40)
+  /** Diurnă / travel allowance pentru săptămână (EUR sau unitate monetară afișată ca EUR în UI). */
+  travelAllowance   Float    @default(0)
   dailyBreakdown String?  // JSON
   status         String   @default("DRAFT")
   notes          String?

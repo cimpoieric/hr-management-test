@@ -43,7 +43,7 @@ export function DeleteDocumentDialog({
   onSuccess,
 }: DeleteDocumentDialogProps) {
   const [deleting, setDeleting] = useState(false);
-  const isAdmin = userRole === "ADMIN";
+  const isAdmin = userRole === "administrator";
   const { blocked, reasons } = deleteBlockedForNonAdmin(
     status,
     employeeHasActiveDeployment

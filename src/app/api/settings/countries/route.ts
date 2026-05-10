@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 
 const createSchema = z.object({
   name: z.string().min(1).max(120),
@@ -15,10 +15,8 @@ const createSchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
+  const { user, response: authError } = await requireAuth(request);
+  if (authError || !user) return authError!;
 
   try {
     const countries = await prisma.country.findMany({
@@ -35,10 +33,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  if (authError || !user) return authError!;
 
   try {
     const raw = await request.json();

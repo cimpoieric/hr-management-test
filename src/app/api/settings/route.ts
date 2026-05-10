@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { join } from "path";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { DEFAULT_APP_SETTINGS, getAppSettings, saveAppSettings, type AppSettings } from "@/lib/appSettings";
 
 function normalizeIncoming(body: Partial<AppSettings>): AppSettings {
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
 
   const body = (await request.json()) as Partial<AppSettings>;

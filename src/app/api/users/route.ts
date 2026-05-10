@@ -11,26 +11,13 @@ import { hashPassword } from "@/lib/auth";
 import { logAuditFF, getClientIp } from "@/lib/audit";
 import { generateTempPassword } from "@/lib/backup";
 
-// ─── RBAC helper ─────────────────────────────────────────────────────────────
-
-function requireAdmin(user: { role: string } | null, authError: NextResponse | null) {
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
-  if (user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Acces interzis. Doar ADMIN." }, { status: 403 });
-  }
-  return null;
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // GET — Lista utilizatori
 // ══════════════════════════════════════════════════════════════════════════════
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  const error = requireAdmin(user, authError);
-  if (error) return error;
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   try {
     const { searchParams } = request.nextUrl;
@@ -67,13 +54,12 @@ export async function GET(request: NextRequest) {
 const createSchema = z.object({
   email: z.string().email("Email invalid"),
   name: z.string().min(1, "Numele e obligatoriu").max(100),
-  role: z.enum(["ADMIN", "OPERATOR", "READONLY"]),
+  role: z.enum(["administrator", "operator", "doar_vizualizare"]),
 });
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  const error = requireAdmin(user, authError);
-  if (error) return error;
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   try {
     const body = await request.json();

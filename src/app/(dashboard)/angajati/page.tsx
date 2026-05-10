@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { EmployeeTable } from "@/components/employees/EmployeeTable";
 import { prisma } from "@/lib/prisma";
 import { getEmployeeStats } from "@/lib/employeeStats";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -31,13 +32,15 @@ export default async function AngajatiPage() {
             Management angajați — căutare, filtrare, export
           </p>
         </div>
-        <Link
-          href="/angajati/nou"
-          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors"
-        >
-          <Plus size={16} />
-          <span className="hidden sm:inline">Adaugă angajat</span>
-        </Link>
+        <PermissionGuard allowedRoles={["operator", "administrator"]}>
+          <Link
+            href="/angajati/nou"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors"
+          >
+            <Plus size={16} />
+            <span className="hidden sm:inline">Adaugă angajat</span>
+          </Link>
+        </PermissionGuard>
       </div>
 
       {/* Tabel cu filtre avansate și selecție bulk */}

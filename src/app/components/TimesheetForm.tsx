@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { z } from "zod";
 import { Plus, X, ChevronsUpDown, Search } from "lucide-react";
+import { broadcastTimesheetHoursForPayrollSync } from "@/lib/timesheetPayrollSync";
 
 type EmployeeOpt = {
   id: number;
@@ -64,6 +65,7 @@ const formSchema = z
     endDate: z.string().min(1),
     hoursWorked: z.number().min(0.5).max(80),
     standardHours: z.number().min(0).max(80).default(40),
+    travelAllowance: z.number().min(0).max(1_000_000).default(0),
     dailyBreakdown: z.string().optional(),
     notes: z.string().optional(),
   })
@@ -101,6 +103,7 @@ export function TimesheetForm({
   });
   const [hoursWorked, setHoursWorked] = useState<string>("40");
   const [standardHours, setStandardHours] = useState<string>("40");
+  const [travelAllowance, setTravelAllowance] = useState<string>("0.00");
   const [dailyBreakdown, setDailyBreakdown] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
@@ -175,6 +178,7 @@ export function TimesheetForm({
     setEndDate(isoDate(r.end));
     setHoursWorked("40");
     setStandardHours("40");
+    setTravelAllowance("0.00");
     setDailyBreakdown("");
     setNotes("");
     setError(null);
@@ -190,6 +194,7 @@ export function TimesheetForm({
       endDate,
       hoursWorked: Number(hoursWorked),
       standardHours: Number(standardHours || "40"),
+      travelAllowance: Number(String(travelAllowance).replace(",", ".") || "0") || 0,
       dailyBreakdown: dailyBreakdown.trim() ? dailyBreakdown.trim() : undefined,
       notes: notes.trim() ? notes.trim() : undefined,
     };
@@ -219,6 +224,7 @@ export function TimesheetForm({
       }
 
       toast.success("Pontaj creat");
+      broadcastTimesheetHoursForPayrollSync(parsed.data.year, parsed.data.weekNumber);
       setOpen(false);
       resetForm();
       onSuccess?.();
@@ -403,6 +409,20 @@ export function TimesheetForm({
                   placeholder="40"
                 />
               </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-600">Diurnă (EUR)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                  value={travelAllowance}
+                  onChange={(e) => setTravelAllowance(e.target.value)}
+                  placeholder="0.00"
+                />
+              </div>
+              <div aria-hidden="true" className="hidden md:block" />
 
               <div className="md:col-span-2">
                 <label className="text-xs font-medium text-gray-600">Zilnic (opțional)</label>

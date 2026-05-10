@@ -5,8 +5,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import { canManageUsers } from "@/lib/permissions";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 
 // Keys pentru SystemConfig
 const CONFIG_KEYS = {
@@ -64,11 +63,8 @@ export async function GET(request: NextRequest) {
  * Testează conexiunea înainte de salvare.
  */
 export async function PUT(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
-  if (!canManageUsers(user.role)) {
-    return NextResponse.json({ error: "Acces interzis — doar ADMIN" }, { status: 403 });
-  }
 
   try {
     const body = await request.json();

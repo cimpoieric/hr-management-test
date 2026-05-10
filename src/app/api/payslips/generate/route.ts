@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prismaTyped as prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -40,7 +40,6 @@ const bodySchema = z.object({
 
 const SYS_KEYS = {
   holidayMoneyRate: "holiday_money.rate",
-  travelAllowanceEmployeePrefix: "travel_allowance.employee.",
 } as const;
 
 function parseDecimalSafe(raw: string | null | undefined, fallback: Prisma.Decimal): Prisma.Decimal {
@@ -51,11 +50,7 @@ function parseDecimalSafe(raw: string | null | undefined, fallback: Prisma.Decim
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, [
-    "ADMIN",
-    "OPERATOR",
-    "ACCOUNTING",
-  ]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
 
   try {
@@ -111,19 +106,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Angajatul trebuie să aibă salaryType = ORA" }, { status: 400 });
     }
 
-    // SystemConfig: holiday money rate + travel allowance per employee
-    const [holidayCfg, travelCfg] = await Promise.all([
-      prisma.systemConfig.findUnique({ where: { key: SYS_KEYS.holidayMoneyRate } }),
-      prisma.systemConfig.findUnique({
-        where: { key: `${SYS_KEYS.travelAllowanceEmployeePrefix}${timesheet.employeeId}` },
-      }),
-    ]);
+    const holidayCfg = await prisma.systemConfig.findUnique({ where: { key: SYS_KEYS.holidayMoneyRate } });
 
     const hoursWorked = new Prisma.Decimal(timesheet.hoursWorked);
     const salaryAmount = new Prisma.Decimal(timesheet.employee.salaryAmount);
 
     const holidayRate = parseDecimalSafe(holidayCfg?.value, new Prisma.Decimal(0.4));
-    const travelAllowance = parseDecimalSafe(travelCfg?.value, new Prisma.Decimal(0));
+    const travelAllowance = new Prisma.Decimal(Number(timesheet.travelAllowance ?? 0));
 
     const netSalary = hoursWorked.mul(salaryAmount);
     const netSalaryRate: Prisma.Decimal = salaryAmount;
@@ -206,7 +195,7 @@ export async function POST(request: NextRequest) {
             payslipId,
             type: "TRAVEL_ALLOWANCE",
             label: "Diurnă / transport",
-            description: "Configurat din SystemConfig (per angajat) sau 0",
+            description: "Introdus la pontaj (Diurnă / Travel Allowance)",
             amount: travelAllowance,
             quantity: null,
             rate: null,

@@ -39,6 +39,8 @@ import {
   HR_DOCUMENTS_STORAGE_KEY,
   notifyDocumentsChanged,
 } from "@/lib/documentsSync";
+import { useAuth } from "@/hooks/useAuth";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 
 export type DocumentListFilteredStats = {
   total: number;
@@ -150,6 +152,7 @@ export function DocumentList({
 }: DocumentListProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { role, can } = useAuth();
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [typeFilter, setTypeFilter] = useState("");
@@ -164,7 +167,6 @@ export function DocumentList({
   const [alertDays, setAlertDays] = useState(30);
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DocumentItem | null>(null);
-  const [userRole, setUserRole] = useState<string>("");
 
   const previewModalDocument = useMemo((): DocumentPreviewModalDocument | null => {
     if (!previewDoc) return null;
@@ -277,15 +279,6 @@ export function DocumentList({
     };
   }, [fetchDocuments]);
 
-  useEffect(() => {
-    void fetch("/api/auth/me", { credentials: "same-origin" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (d?.user?.role) setUserRole(String(d.user.role));
-      })
-      .catch(() => {});
-  }, []);
-
   const statsCallbackRef = useRef(onFilteredStatsChange);
   statsCallbackRef.current = onFilteredStatsChange;
 
@@ -387,15 +380,17 @@ export function DocumentList({
         >
           <Download size={dense ? 18 : 16} />
         </button>
-        <button
-          type="button"
-          onClick={() => setDeleteTarget(doc)}
-          className={`cursor-pointer rounded-lg ${pad} text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600`}
-          title="Ștergere"
-          aria-label="Șterge document"
-        >
-          <Trash2 size={dense ? 18 : 16} />
-        </button>
+        <PermissionGuard allowedRoles={["administrator"]}>
+          <button
+            type="button"
+            onClick={() => setDeleteTarget(doc)}
+            className={`cursor-pointer rounded-lg ${pad} text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600`}
+            title="Ștergere"
+            aria-label="Șterge document"
+          >
+            <Trash2 size={dense ? 18 : 16} />
+          </button>
+        </PermissionGuard>
       </div>
     );
   }
@@ -423,7 +418,7 @@ export function DocumentList({
         employeeHasActiveDeployment={
           deleteTarget?.employeeHasActiveDeployment ?? false
         }
-        userRole={userRole}
+        userRole={role ?? ""}
         onClose={() => setDeleteTarget(null)}
         onSuccess={() => {
           void fetchDocuments();
@@ -509,14 +504,16 @@ export function DocumentList({
             urmări aici — cu reminder la expirare.
           </p>
           {onRequestUpload ? (
-            <button
-              type="button"
-              onClick={onRequestUpload}
-              className="mt-6 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
-            >
-              <Upload size={16} aria-hidden />
-              Încărcați primul document
-            </button>
+            <PermissionGuard allowedRoles={["operator", "administrator"]}>
+              <button
+                type="button"
+                onClick={onRequestUpload}
+                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                <Upload size={16} aria-hidden />
+                Încărcați primul document
+              </button>
+            </PermissionGuard>
           ) : null}
         </div>
       ) : showFilteredEmpty ? (

@@ -17,6 +17,7 @@ import {
   DEPLOYMENT_STATUSES,
   isValidDeploymentStatus,
 } from "@/lib/countries";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 
 interface Deployment {
   id: number;
@@ -300,14 +301,16 @@ export function DeploymentList({
                   </div>
 
                   {/* Actions */}
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(dep.id)}
-                    className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
-                    title="Anulează"
-                  >
-                    <Trash2 size={16} />
-                  </button>
+                  <PermissionGuard allowedRoles={["administrator"]}>
+                    <button
+                      type="button"
+                      onClick={() => void handleDelete(dep.id)}
+                      className="p-2 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
+                      title="Anulează"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </PermissionGuard>
                 </div>
               );
             })}

@@ -6,16 +6,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
-import { canManageUsers } from "@/lib/permissions";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { updateDocumentStatuses } from "@/lib/documentStatus.server";
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
-  if (!canManageUsers(user.role)) {
-    return NextResponse.json({ error: "Acces interzis — doar ADMIN" }, { status: 403 });
-  }
 
   try {
     const result = await updateDocumentStatuses();

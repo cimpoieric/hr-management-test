@@ -32,15 +32,8 @@ function parseDate(dateStr: string): Date | null {
 }
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
-
-  // Doar ADMIN poate exporta
-  if (user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Acces interzis. Doar ADMIN." }, { status: 403 });
-  }
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   try {
     const { searchParams } = request.nextUrl;

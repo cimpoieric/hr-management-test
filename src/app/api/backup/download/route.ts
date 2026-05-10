@@ -10,14 +10,8 @@ import { requireAuth } from "@/lib/auth";
 import { getBackupPath, deleteBackup } from "@/lib/backup";
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
-
-  if (user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
-  }
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   try {
     const filename = request.nextUrl.searchParams.get("filename");
@@ -47,14 +41,8 @@ export async function GET(request: NextRequest) {
  * DELETE /api/backup/download?filename=... — Șterge un backup (ADMIN only)
  */
 export async function DELETE(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
-
-  if (user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
-  }
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   try {
     const filename = request.nextUrl.searchParams.get("filename");

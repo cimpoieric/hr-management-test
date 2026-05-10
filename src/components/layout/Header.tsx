@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import {
   Bell,
@@ -10,12 +10,8 @@ import {
   UserCircle,
   ShieldCheck,
 } from "lucide-react";
-import type { AuthContext } from "@/lib/auth";
 import { ro } from "@/messages";
-
-interface HeaderProps {
-  user: AuthContext;
-}
+import { useAuth } from "@/hooks/useAuth";
 
 type NotificationItem = {
   id: number;
@@ -25,9 +21,17 @@ type NotificationItem = {
   read: boolean;
 };
 
-export function Header({ user }: HeaderProps) {
+function roleBadgeMeta(role: string | null) {
+  if (role === "administrator") return { label: "administrator", cls: "bg-red-100 text-red-700" };
+  if (role === "operator") return { label: "operator", cls: "bg-blue-100 text-blue-700" };
+  if (role === "doar_vizualizare") return { label: "doar vizualizare", cls: "bg-gray-100 text-gray-700" };
+  return { label: role ?? "—", cls: "bg-gray-100 text-gray-700" };
+}
+
+export function Header(_props?: { user?: unknown }) {
   const router = useRouter();
   const pathname = usePathname();
+  const { user, role } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -56,6 +60,7 @@ export function Header({ user }: HeaderProps) {
   }, []);
 
   const notificationCount = notifications.filter((n) => !n.read).length;
+  const roleMeta = useMemo(() => roleBadgeMeta(role), [role]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -174,7 +179,10 @@ export function Header({ user }: HeaderProps) {
           >
             <UserCircle size={20} className="text-gray-400" />
             <span className="hidden sm:inline max-w-[120px] truncate">
-              {user.email.split("@")[0]}
+              {user?.email ? user.email.split("@")[0] : "—"}
+            </span>
+            <span className={`hidden sm:inline text-[11px] font-semibold px-2 py-0.5 rounded-full ${roleMeta.cls}`}>
+              {roleMeta.label}
             </span>
             <ChevronDown
               size={14}
@@ -197,12 +205,12 @@ export function Header({ user }: HeaderProps) {
                 {/* User info */}
                 <div className="px-4 py-3 border-b">
                   <p className="text-sm font-medium text-gray-900 truncate">
-                    {user.email}
+                    {user?.email ?? "—"}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1">
                     <ShieldCheck size={12} className="text-amber-500" />
-                    <span className="text-xs text-gray-500 uppercase tracking-wider">
-                      {user.role}
+                    <span className={`text-xs font-semibold tracking-wide px-2 py-0.5 rounded-full ${roleMeta.cls}`}>
+                      {roleMeta.label}
                     </span>
                   </div>
                 </div>

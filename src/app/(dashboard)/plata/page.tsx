@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Loader2, FileSpreadsheet, FileText, AlertCircle } from "lucide-react";
 import { AdvancedFilter, defaultFilters, type FilterState } from "@/components/filters/AdvancedFilter";
 import {
@@ -14,6 +14,14 @@ import {
   getWeeklyPayInputConfig,
   liveWeeklyPayTotal,
 } from "@/lib/weeklyPayUi";
+import { getPayrollWeekDefaults } from "@/lib/isoWeek";
+import {
+  TIMESHEET_PAYROLL_SYNC_CHANNEL,
+  type TimesheetPayrollSyncMessage,
+} from "@/lib/timesheetPayrollSync";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
+import { useCanEdit } from "@/hooks/usePermission";
+import { ReadOnlyField } from "@/components/ui/ReadOnlyField";
 
 interface Employee {
   id: number;
@@ -37,6 +45,7 @@ interface CountryOpt {
 }
 
 export default function PlataPage() {
+  const canEdit = useCanEdit();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [countries, setCountries] = useState<CountryOpt[]>([]);
@@ -46,6 +55,8 @@ export default function PlataPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [unitsByEmp, setUnitsByEmp] = useState<Record<string, string>>({});
   const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
+  const [payYear, setPayYear] = useState(() => getPayrollWeekDefaults().year);
+  const [payWeek, setPayWeek] = useState(() => getPayrollWeekDefaults().week);
 
   useEffect(() => {
     fetch("/api/companies")
@@ -104,6 +115,68 @@ export default function PlataPage() {
       return next;
     });
   }, [employees]);
+
+  const syncHoursFromTimesheet = useCallback(async () => {
+    try {
+      const res = await fetch(
+        `/api/timesheets/hours-for-payroll?year=${payYear}&weekNumber=${payWeek}`,
+        { cache: "no-store", credentials: "same-origin" }
+      );
+      if (!res.ok) return;
+      const data = (await res.json()) as { hoursByEmployeeId?: Record<string, string> };
+      const hoursMap = data.hoursByEmployeeId ?? {};
+      setUnitsByEmp((prev) => {
+        const next = { ...prev };
+        for (const emp of employees) {
+          if (!weeklyPaySalaryDataComplete(emp)) continue;
+          const t = parseSalaryTypeInput(emp.salaryType ?? "");
+          const fromPontaj = hoursMap[String(emp.id)];
+          if (fromPontaj !== undefined && fromPontaj !== "" && t === "ORA") {
+            next[String(emp.id)] = fromPontaj;
+          } else if (next[String(emp.id)] === undefined) {
+            next[String(emp.id)] = defaultWeeklyPayUnitValue(emp.salaryType);
+          }
+        }
+        return next;
+      });
+    } catch {
+      /* ignoră — plată manuală rămâne */
+    }
+  }, [employees, payYear, payWeek]);
+
+  /** Sincronizare ore din pontaj (Timesheet.hoursWorked) — tip ORA. */
+  useEffect(() => {
+    void syncHoursFromTimesheet();
+  }, [syncHoursFromTimesheet]);
+
+  const syncRef = useRef(syncHoursFromTimesheet);
+  syncRef.current = syncHoursFromTimesheet;
+
+  /** Pontaj în alt tab → reîncarcă orele imediat (BroadcastChannel). */
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const ch = new BroadcastChannel(TIMESHEET_PAYROLL_SYNC_CHANNEL);
+    ch.onmessage = (ev: MessageEvent<TimesheetPayrollSyncMessage>) => {
+      if (ev.data?.type === "hoursUpdated") void syncRef.current();
+    };
+    return () => ch.close();
+  }, []);
+
+  /** Revenire pe tab / fereastră după edit pontaj (același browser). */
+  useEffect(() => {
+    const run = () => void syncRef.current();
+    const onVis = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pageshow", run);
+    return () => {
+      window.removeEventListener("focus", run);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pageshow", run);
+    };
+  }, []);
 
   const selectableEmployees = employees.filter((e) => weeklyPaySalaryDataComplete(e));
 
@@ -268,7 +341,38 @@ export default function PlataPage() {
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Plată</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Aceleași date salariale ca în lista Angajați. Completează perioada și exportă Excel pentru contabilitate.
+          Aceleași date salariale ca în lista Angajați. Pentru plată ORA, orele din pontaj (aceeași săptămână) se
+          sincronizează automat mai jos.
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-violet-100 bg-violet-50/90 px-4 py-3 flex flex-wrap items-end gap-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-600">An pontaj</label>
+          <input
+            type="number"
+            min={2020}
+            max={2040}
+            className="mt-1 w-28 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm"
+            value={payYear}
+            onChange={(e) => setPayYear(Number(e.target.value) || payYear)}
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600">Săptămână (1–53)</label>
+          <input
+            type="number"
+            min={1}
+            max={53}
+            className="mt-1 w-24 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm"
+            value={payWeek}
+            onChange={(e) => setPayWeek(Number(e.target.value) || payWeek)}
+          />
+        </div>
+        <p className="text-xs text-gray-700 flex-1 min-w-[14rem] leading-snug">
+          Coloana „Perioada lucrată” pentru tipul <strong>ORA</strong> preia orele din pontaj pentru această
+          săptămână (model <code className="text-[11px]">Timesheet</code> → Plată). La salvare în Pontaj, orele se
+          actualizează automat aici (inclusiv în alt tab); la revenire pe această pagină se reîncarcă din nou din server.
         </p>
       </div>
 
@@ -384,7 +488,7 @@ export default function PlataPage() {
                             <label className="block text-[11px] font-medium text-gray-600">
                               {cfg.label}
                             </label>
-                            <input
+                            <ReadOnlyField
                               type="number"
                               min={cfg.min}
                               step={cfg.step}
@@ -396,7 +500,9 @@ export default function PlataPage() {
                                   [String(emp.id)]: e.target.value,
                                 }))
                               }
-                              className="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                              readOnly={!canEdit}
+                              readOnlyTooltip="Nu aveti permisiune de editare"
+                              className={!canEdit ? "focus:ring-0" : "focus:ring-violet-500"}
                             />
                           </div>
                         ) : (
@@ -427,33 +533,37 @@ export default function PlataPage() {
         </div>
 
         <div className="px-4 py-4 border-t bg-gray-50 flex flex-wrap items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={() => void handleExportExcel()}
-            disabled={exporting !== null || selectedIds.size === 0}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {exporting === "excel" ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <FileSpreadsheet size={16} />
-            )}
-            Export Excel plată
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleExportPdf()}
-            disabled={exporting !== null || !pdfExportAllowed}
-            title={pdfButtonTitle}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-violet-300 bg-white text-violet-800 text-sm font-medium hover:bg-violet-50 disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {exporting === "pdf" ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <FileText size={16} />
-            )}
-            Export PDF plată
-          </button>
+          <PermissionGuard allowedRoles={["operator", "administrator"]}>
+            <button
+              type="button"
+              onClick={() => void handleExportExcel()}
+              disabled={exporting !== null || selectedIds.size === 0}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {exporting === "excel" ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <FileSpreadsheet size={16} />
+              )}
+              Export Excel plată
+            </button>
+          </PermissionGuard>
+          <PermissionGuard allowedRoles={["operator", "administrator"]}>
+            <button
+              type="button"
+              onClick={() => void handleExportPdf()}
+              disabled={exporting !== null || !pdfExportAllowed}
+              title={pdfButtonTitle}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg border border-violet-300 bg-white text-violet-800 text-sm font-medium hover:bg-violet-50 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {exporting === "pdf" ? (
+                <Loader2 size={16} className="animate-spin" />
+              ) : (
+                <FileText size={16} />
+              )}
+              Export PDF plată
+            </button>
+          </PermissionGuard>
         </div>
       </div>
     </div>

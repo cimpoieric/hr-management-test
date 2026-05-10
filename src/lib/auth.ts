@@ -13,13 +13,25 @@ import bcrypt from "bcryptjs";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export type UserRole = "ADMIN" | "OPERATOR" | "ACCOUNTING";
+export type UserRole = "operator" | "administrator" | "doar_vizualizare";
 
 export type AuthContext = {
   userId: number;
   email: string;
   role: UserRole;
 };
+
+function normalizeRole(role: unknown): UserRole {
+  const r = String(role ?? "").trim().toLowerCase();
+  // Backwards compatibility with older tokens/values.
+  if (r === "admin" || r === "administrator") return "administrator";
+  if (r === "operator") return "operator";
+  if (r === "doar_vizualizare" || r === "vizualizare" || r === "read_only" || r === "readonly") {
+    return "doar_vizualizare";
+  }
+  // Safest default
+  return "doar_vizualizare";
+}
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -85,7 +97,7 @@ export async function verifyToken(
   return {
     userId: payload.userId as number,
     email: payload.email as string,
-    role: payload.role as UserRole,
+    role: normalizeRole(payload.role),
   };
 }
 
@@ -174,3 +186,10 @@ export async function requireAuth(
 
   return { user, response: null };
 }
+
+/**
+ * Helper: utilizat pe rute write pentru RBAC simplu.
+ * operator + administrator au voie să modifice, doar_vizualizare nu.
+ */
+export const WRITE_ROLES: UserRole[] = ["operator", "administrator"];
+

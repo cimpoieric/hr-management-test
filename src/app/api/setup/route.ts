@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
           name: data.adminName,
           email: data.adminEmail.toLowerCase(),
           password: hashedPassword,
-          role: "ADMIN",
+          role: "administrator",
           isActive: true,
           mustChangePassword: false,
         },

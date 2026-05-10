@@ -5,7 +5,7 @@
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { verifyToken, type AuthContext } from "@/lib/auth";
-import { canManageUsers } from "@/lib/permissions";
+import { AuthProvider } from "@/components/auth/AuthProvider";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { Header } from "@/components/layout/Header";
 import { MainContent } from "@/components/layout/MainContent";
@@ -32,15 +32,21 @@ export async function AuthenticatedDashboardShell({
     redirect("/login");
   }
 
-  const isAdmin = canManageUsers(user.role);
-
   return (
     <div className="flex min-h-screen min-h-dvh bg-gray-50">
-      <Sidebar userRole={user.role} isAdmin={isAdmin} />
-      <div className="flex flex-col flex-1 min-w-0 min-h-0">
-        <Header user={user} />
-        <MainContent>{children}</MainContent>
-      </div>
+      <AuthProvider
+        initialUser={{
+          id: user.userId,
+          email: user.email,
+          role: user.role,
+        }}
+      >
+        <Sidebar />
+        <div className="flex flex-col flex-1 min-w-0 min-h-0">
+          <Header user={user} />
+          <MainContent>{children}</MainContent>
+        </div>
+      </AuthProvider>
     </div>
   );
 }

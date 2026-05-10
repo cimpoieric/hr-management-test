@@ -11,9 +11,9 @@
  *   limit?       — default 50, max 200
  *
  * RBAC:
- *   ADMIN     — vezi toate logurile
- *   OPERATOR  — vezi doar logurile proprii + acțiunile tale
- *   ACCOUNTING și alte roluri — fără acces (403); doar ADMIN și OPERATOR
+ *   administrator     — vezi toate logurile
+ *   operator          — vezi doar logurile proprii
+ *   doar_vizualizare  — vezi doar logurile proprii
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -51,10 +51,6 @@ export async function GET(request: NextRequest) {
     return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
   }
 
-  if (user.role !== "ADMIN" && user.role !== "OPERATOR") {
-    return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
-  }
-
   try {
     const { searchParams } = request.nextUrl;
 
@@ -72,10 +68,10 @@ export async function GET(request: NextRequest) {
     // ── Build where ──
     const where: Record<string, unknown> = {};
 
-    // RBAC: OPERATOR vede doar logurile proprii
-    if (user.role === "OPERATOR") {
+    // RBAC: non-admin vede doar logurile proprii
+    if (user.role !== "administrator") {
       where.userId = user.userId;
-    } else if (filterUserId && user.role === "ADMIN") {
+    } else if (filterUserId) {
       where.userId = parseInt(filterUserId, 10);
     }
 

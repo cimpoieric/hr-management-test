@@ -251,12 +251,21 @@ export default function BackupPage() {
                 {lastCreated.filename}
               </p>
               <div className="mt-2 bg-white rounded-lg border border-amber-200 p-3">
-                <span className="text-xs text-amber-600 font-medium">
-                  Parola arhivei (salveaz-o!):
-                </span>
-                <code className="block mt-1 text-sm font-mono text-amber-800 bg-amber-100 px-2 py-1 rounded">
-                  {lastCreated.password}
-                </code>
+                {lastCreated.password ? (
+                  <>
+                    <span className="text-xs text-amber-600 font-medium">
+                      Parola arhivei (salveaz-o!):
+                    </span>
+                    <code className="block mt-1 text-sm font-mono text-amber-800 bg-amber-100 px-2 py-1 rounded">
+                      {lastCreated.password}
+                    </code>
+                  </>
+                ) : (
+                  <p className="text-xs text-amber-700 leading-relaxed">
+                    Arhiva este ZIP standard (fără parolă), creată direct în aplicație — compatibilă cu Windows.
+                    Păstrează fișierul într-un loc sigur.
+                  </p>
+                )}
               </div>
             </div>
             <button

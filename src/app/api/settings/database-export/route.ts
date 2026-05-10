@@ -6,7 +6,7 @@ import { requireAuth } from "@/lib/auth";
 const DB_PATH = join(process.cwd(), "prisma", "dev.db");
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN"]);
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
   if (authError || !user) return authError!;
 
   try {

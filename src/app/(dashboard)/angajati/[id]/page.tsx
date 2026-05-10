@@ -29,6 +29,7 @@ import { DeploymentForm } from "@/components/deployments/DeploymentForm";
 import { DeploymentList } from "@/components/deployments/DeploymentList";
 import { DeploymentTimeline } from "@/components/deployments/DeploymentTimeline";
 import { SalaryCalculatorModal } from "@/components/salary/SalaryCalculatorModal";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 
 type EmployeeDetail = {
   id: number;
@@ -647,26 +648,30 @@ function DeploymentsTab({
             Timeline
           </button>
         </div>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        >
-          <MapPin size={14} />
-          {showForm ? "Închide" : "Adaugă detașare"}
-        </button>
+        <PermissionGuard allowedRoles={["operator", "administrator"]}>
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            <MapPin size={14} />
+            {showForm ? "Închide" : "Adaugă detașare"}
+          </button>
+        </PermissionGuard>
       </div>
 
-      {showForm && (
-        <DeploymentForm
-          employeeId={employeeId}
-          employeeName={employeeName}
-          onSuccess={() => {
-            onRefresh();
-            setShowForm(false);
-          }}
-          onCancel={() => setShowForm(false)}
-        />
-      )}
+      <PermissionGuard allowedRoles={["operator", "administrator"]}>
+        {showForm && (
+          <DeploymentForm
+            employeeId={employeeId}
+            employeeName={employeeName}
+            onSuccess={() => {
+              onRefresh();
+              setShowForm(false);
+            }}
+            onCancel={() => setShowForm(false)}
+          />
+        )}
+      </PermissionGuard>
 
       {view === "list" ? (
         <Suspense

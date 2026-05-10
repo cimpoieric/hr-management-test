@@ -26,7 +26,10 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = {};
 
-    if (status && ["PENDING", "APPROVED", "REJECTED", "DRAFT"].includes(status)) {
+    if (
+      status &&
+      ["PENDING", "APPROVED", "REJECTED", "DRAFT", "COMPLETED_UPDATE"].includes(status)
+    ) {
       where.status = status;
     }
 

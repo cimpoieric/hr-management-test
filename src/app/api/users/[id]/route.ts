@@ -15,25 +15,14 @@ import { requireAuth, hashPassword } from "@/lib/auth";
 import { logAuditFF, getClientIp } from "@/lib/audit";
 import { generateTempPassword } from "@/lib/backup";
 
-function requireAdmin(user: { role: string } | null, authError: NextResponse | null) {
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
-  if (user.role !== "ADMIN") {
-    return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
-  }
-  return null;
-}
-
 // ─── GET — detalii user ──────────────────────────────────────────────────────
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { user, response: authError } = await requireAuth(request);
-  const error = requireAdmin(user, authError);
-  if (error) return error;
+  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !user) return authError!;
 
   try {
     const { id } = await params;
@@ -71,7 +60,7 @@ export async function GET(
 
 const updateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  role: z.enum(["ADMIN", "OPERATOR", "READONLY"]).optional(),
+  role: z.enum(["administrator", "operator", "doar_vizualizare"]).optional(),
   isActive: z.boolean().optional(),
   resetPassword: z.boolean().optional(),
 });
@@ -80,9 +69,8 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { user: adminUser, response: authError } = await requireAuth(request);
-  const error = requireAdmin(adminUser, authError);
-  if (error) return error;
+  const { user: adminUser, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !adminUser) return authError!;
 
   try {
     const { id } = await params;
@@ -113,9 +101,9 @@ export async function PUT(
     }
 
     // Nu poți dezactiva singurul admin
-    if (isActive === false && existing.role === "ADMIN") {
+    if (isActive === false && existing.role === "administrator") {
       const adminCount = await prisma.user.count({
-        where: { role: "ADMIN", isActive: true },
+        where: { role: "administrator", isActive: true },
       });
       if (adminCount <= 1) {
         return NextResponse.json(
@@ -220,9 +208,8 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { user: adminUser, response: authError } = await requireAuth(request);
-  const error = requireAdmin(adminUser, authError);
-  if (error) return error;
+  const { user: adminUser, response: authError } = await requireAuth(request, ["administrator"]);
+  if (authError || !adminUser) return authError!;
 
   try {
     const { id } = await params;
@@ -249,9 +236,9 @@ export async function DELETE(
     }
 
     // Nu poți șterge singurul admin
-    if (existing.role === "ADMIN") {
+    if (existing.role === "administrator") {
       const adminCount = await prisma.user.count({
-        where: { role: "ADMIN", isActive: true },
+        where: { role: "administrator", isActive: true },
       });
       if (adminCount <= 1) {
         return NextResponse.json(

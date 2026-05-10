@@ -14,9 +14,12 @@ import {
   X,
   FileText,
   Inbox,
+  Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { tImportStatus } from "@/messages";
 import { ROUTES } from "@/lib/routes";
+import { cn } from "@/lib/utils";
 
 interface PendingImport {
   id: number;
@@ -39,6 +42,7 @@ function ImporturiPageContent() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   useEffect(() => {
     const raw = searchParams.get("status")?.trim();
@@ -49,13 +53,15 @@ function ImporturiPageContent() {
       return;
     }
     const up = raw.toUpperCase();
-    if (["PENDING", "DRAFT", "APPROVED", "REJECTED"].includes(up)) {
+    if (["PENDING", "DRAFT", "APPROVED", "REJECTED", "COMPLETED_UPDATE"].includes(up)) {
       setStatusFilter(up);
     }
   }, [searchParams]);
 
-  const fetchImports = useCallback(async () => {
-    setLoading(true);
+  const fetchImports = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) {
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams();
       if (statusFilter) params.set("status", statusFilter);
@@ -70,7 +76,9 @@ function ImporturiPageContent() {
       setImports([]);
       setTotal(0);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) {
+        setLoading(false);
+      }
     }
   }, [statusFilter, sourceFilter]);
 
@@ -84,10 +92,39 @@ function ImporturiPageContent() {
     return "text-red-600";
   }
 
+  async function handleDeleteImport(importRowId: number) {
+    const ok = window.confirm(
+      "Ești sigur că vrei să ștergi acest import? Această acțiune este ireversibilă."
+    );
+    if (!ok) return;
+
+    setDeletingId(importRowId);
+    try {
+      const res = await fetch(`/api/import/${importRowId}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(typeof data.error === "string" ? data.error : "Ștergerea a eșuat");
+        return;
+      }
+      toast.success("Importul a fost șters cu succes.");
+      await fetchImports({ silent: true });
+    } catch {
+      toast.error("Eroare de rețea");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
   function statusBadge(status: string) {
     const map: Record<string, { bg: string; text: string; icon: React.ElementType; label: string }> = {
       PENDING: { bg: "bg-amber-100", text: "text-amber-700", icon: Clock, label: tImportStatus("PENDING") },
       APPROVED: { bg: "bg-green-100", text: "text-green-700", icon: CheckCircle2, label: tImportStatus("APPROVED") },
+      COMPLETED_UPDATE: {
+        bg: "bg-emerald-100",
+        text: "text-emerald-800",
+        icon: CheckCircle2,
+        label: tImportStatus("COMPLETED_UPDATE"),
+      },
       REJECTED: { bg: "bg-red-100", text: "text-red-700", icon: X, label: tImportStatus("REJECTED") },
       DRAFT: { bg: "bg-blue-100", text: "text-blue-700", icon: FileText, label: tImportStatus("DRAFT") },
     };
@@ -131,6 +168,7 @@ function ImporturiPageContent() {
           <option value="PENDING">{tImportStatus("PENDING")}</option>
           <option value="DRAFT">{tImportStatus("DRAFT")}</option>
           <option value="APPROVED">{tImportStatus("APPROVED")}</option>
+          <option value="COMPLETED_UPDATE">{tImportStatus("COMPLETED_UPDATE")}</option>
           <option value="REJECTED">{tImportStatus("REJECTED")}</option>
         </select>
 
@@ -174,21 +212,23 @@ function ImporturiPageContent() {
             </thead>
             <tbody>
               {loading ? (
-                <tr>
+                <tr key="loading">
                   <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
                     <Loader2 size={24} className="animate-spin mx-auto mb-2" />
                     Se încarcă...
                   </td>
                 </tr>
               ) : imports.length === 0 ? (
-                <tr>
+                <tr key="empty">
                   <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
-                    <Inbox size={48} className="mx-auto mb-4 text-gray-300" />
-                    <p className="text-gray-600 text-sm max-w-md mx-auto">
-                      Niciun import în așteptare. Folosește butonul{" "}
-                      <span className="font-medium text-gray-800">Upload manual</span> de sus pentru a
-                      încărca fișiere.
-                    </p>
+                    <div className="py-8 text-center text-gray-500">
+                      <Inbox size={48} className="mx-auto mb-4 text-gray-300" />
+                      <p className="text-gray-600 text-sm max-w-md mx-auto">
+                        Nu există importuri în așteptare pentru filtrele curente. Folosește butonul{" "}
+                        <span className="font-medium text-gray-800">Upload manual</span> de sus pentru a
+                        încărca fișiere.
+                      </p>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -232,6 +272,35 @@ function ImporturiPageContent() {
                         >
                           <Eye size={16} />
                         </Link>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteImport(imp.id)}
+                          disabled={deletingId !== null}
+                          className="p-1.5 rounded-lg border border-transparent text-red-600 hover:text-red-700 hover:bg-red-50 hover:border-red-100 transition-colors disabled:opacity-50"
+                          title="Șterge importul"
+                          aria-label="Șterge importul"
+                        >
+                          <span className="inline-flex items-center justify-center shrink-0 w-4 h-4">
+                            <span
+                              className={cn(
+                                "inline-flex",
+                                deletingId !== imp.id && "hidden"
+                              )}
+                              aria-hidden={deletingId !== imp.id}
+                            >
+                              <Loader2 size={16} className="animate-spin" />
+                            </span>
+                            <span
+                              className={cn(
+                                "inline-flex",
+                                deletingId === imp.id && "hidden"
+                              )}
+                              aria-hidden={deletingId === imp.id}
+                            >
+                              <Trash2 size={16} />
+                            </span>
+                          </span>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -241,11 +310,15 @@ function ImporturiPageContent() {
           </table>
         </div>
 
-        {imports.length > 0 && (
-          <div className="px-4 py-3 border-t bg-gray-50 text-xs text-gray-500">
-            Afișate {imports.length} din {total} importuri
-          </div>
-        )}
+        <div className="px-4 py-3 border-t bg-gray-50 text-xs text-gray-500 min-h-[2.75rem] flex items-center">
+          {imports.length > 0 ? (
+            <span>
+              Afișate {imports.length} din {total} importuri
+            </span>
+          ) : (
+            <span className="text-gray-400">&nbsp;</span>
+          )}
+        </div>
       </div>
     </div>
   );

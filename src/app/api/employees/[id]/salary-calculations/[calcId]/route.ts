@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireAuth, WRITE_ROLES } from "@/lib/auth";
 import { canEditEmployee } from "@/lib/permissions";
 import { logAuditFF } from "@/lib/audit";
 
@@ -28,7 +28,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string; calcId: string }> }
 ) {
-  const { user, response: authError } = await requireAuth(request, ["ADMIN", "OPERATOR"]);
+  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });

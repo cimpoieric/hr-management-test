@@ -247,14 +247,14 @@ async function main() {
     update: {
       name: "Administrator",
       password: hashedPassword,
-      role: "ADMIN",
+      role: "administrator",
       isActive: true,
     },
     create: {
       name: "Administrator",
       email: ADMIN_EMAIL,
       password: hashedPassword,
-      role: "ADMIN",
+      role: "administrator",
       isActive: true,
     },
   });

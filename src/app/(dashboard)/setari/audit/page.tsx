@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import {
   Shield,
   Search,
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ro, tAuditAction, tAuditEntity } from "@/messages";
+import { useAuth } from "@/hooks/useAuth";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -93,13 +94,13 @@ const ENTITIES = ENTITY_FILTER_VALUES.map((value) => ({
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function AuditLogPage() {
+  const { role } = useAuth();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [limit] = useState(50);
   const [error, setError] = useState("");
-  const [userRole, setUserRole] = useState<string>("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -110,14 +111,6 @@ export default function AuditLogPage() {
     dateFrom: "",
     dateTo: "",
   });
-
-  // ── Fetch current user role ──
-  useEffect(() => {
-    fetch("/api/auth/me")
-      .then((r) => r.ok ? r.json() : null)
-      .then((d) => setUserRole(d?.role ?? ""))
-      .catch(() => {});
-  }, []);
 
   // ── Fetch logs ──
   const fetchLogs = useCallback(async () => {
@@ -198,7 +191,7 @@ export default function AuditLogPage() {
   }
 
   const totalPages = Math.ceil(total / limit);
-  const isAdmin = userRole === "ADMIN";
+  const isAdmin = role === "administrator";
 
   // ═══ Render ═════════════════════════════════════════════════════════════════
 
@@ -376,7 +369,7 @@ export default function AuditLogPage() {
                 </tr>
               ) : (
                 logs.map((log) => (
-                  <>
+                  <Fragment key={log.id}>
                     <tr
                       key={log.id}
                       className="border-b last:border-b-0 hover:bg-gray-50 cursor-pointer transition-colors"
@@ -427,7 +420,7 @@ export default function AuditLogPage() {
 
                     {/* Expanded details */}
                     {expandedId === log.id && (
-                      <tr>
+                      <tr key={`${log.id}-expanded`}>
                         <td colSpan={6} className="px-4 py-4 bg-slate-50 border-b">
                           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {/* Old Values */}
@@ -470,7 +463,7 @@ export default function AuditLogPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 ))
               )}
             </tbody>
@@ -539,9 +532,9 @@ function ActionBadge({ action }: { action: string }) {
 
 function RoleBadge({ role }: { role: string }) {
   const configs: Record<string, { bg: string; text: string }> = {
-    ADMIN:    { bg: "bg-red-100",   text: "text-red-700" },
-    OPERATOR: { bg: "bg-blue-100",  text: "text-blue-700" },
-    READONLY: { bg: "bg-gray-100",  text: "text-gray-700" },
+    administrator:    { bg: "bg-red-100",   text: "text-red-700" },
+    operator: { bg: "bg-blue-100",  text: "text-blue-700" },
+    doar_vizualizare: { bg: "bg-gray-100",  text: "text-gray-700" },
   };
   const c = configs[role] ?? { bg: "bg-gray-100", text: "text-gray-600" };
   return (

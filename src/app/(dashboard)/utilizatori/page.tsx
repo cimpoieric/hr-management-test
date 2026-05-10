@@ -19,6 +19,9 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import type { UserRole } from "@/lib/auth";
+import { useAuth } from "@/hooks/useAuth";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -26,7 +29,7 @@ interface AppUser {
   id: number;
   name: string;
   email: string;
-  role: string;
+  role: UserRole;
   isActive: boolean;
   mustChangePassword: boolean;
   lastLoginAt: string | null;
@@ -36,20 +39,20 @@ interface AppUser {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ROLE_LABELS: Record<string, { label: string; desc: string; color: string }> = {
-  ADMIN: {
+const ROLE_LABELS: Record<UserRole, { label: string; desc: string; color: string }> = {
+  administrator: {
     label: "Administrator",
     desc: "Acces complet: toate funcțiile și setările",
     color: "bg-red-100 text-red-700",
   },
-  OPERATOR: {
+  operator: {
     label: "Operator",
-    desc: "Poate crea/modifica angajați și documente",
+    desc: "Acces operațional complet",
     color: "bg-blue-100 text-blue-700",
   },
-  READONLY: {
-    label: "Vizualizare",
-    desc: "Doar vizualizare, fără modificări",
+  doar_vizualizare: {
+    label: "Doar vizualizare",
+    desc: "Doar citire, fără modificări",
     color: "bg-gray-100 text-gray-700",
   },
 };
@@ -57,6 +60,7 @@ const ROLE_LABELS: Record<string, { label: string; desc: string; color: string }
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function UtilizatoriPage() {
+  const { user: me, can } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -70,7 +74,7 @@ export default function UtilizatoriPage() {
   // Form states
   const [formName, setFormName] = useState("");
   const [formEmail, setFormEmail] = useState("");
-  const [formRole, setFormRole] = useState<"OPERATOR" | "ADMIN" | "READONLY">("OPERATOR");
+  const [formRole, setFormRole] = useState<UserRole>("operator");
   const [formActive, setFormActive] = useState(true);
   const [saving, setSaving] = useState(false);
   const [tempPassword, setTempPassword] = useState("");
@@ -86,17 +90,13 @@ export default function UtilizatoriPage() {
       setUsers(data.data ?? []);
 
       // Get current user ID
-      const meRes = await fetch("/api/auth/me");
-      if (meRes.ok) {
-        const me = await meRes.json();
-        setCurrentUserId(me.id);
-      }
+      setCurrentUserId(me?.id ?? null);
     } catch {
       setError("Eroare la încărcarea utilizatorilor");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [me?.id]);
 
   useEffect(() => {
     fetchUsers();
@@ -221,7 +221,7 @@ export default function UtilizatoriPage() {
   function openCreate() {
     setFormName("");
     setFormEmail("");
-    setFormRole("OPERATOR");
+    setFormRole("operator");
     setFormActive(true);
     setTempPassword("");
     setShowPw(false);
@@ -232,7 +232,7 @@ export default function UtilizatoriPage() {
   function openEdit(user: AppUser) {
     setFormName(user.name);
     setFormEmail(user.email);
-    setFormRole(user.role as "OPERATOR" | "ADMIN" | "READONLY");
+    setFormRole(user.role);
     setFormActive(user.isActive);
     setError("");
     setShowEdit(user);
@@ -241,7 +241,8 @@ export default function UtilizatoriPage() {
   // ═══ Render ═════════════════════════════════════════════════════════════════
 
   return (
-    <div className="space-y-6">
+    <ProtectedRoute requiredRoles={["administrator"]}>
+      <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -255,6 +256,7 @@ export default function UtilizatoriPage() {
         </div>
         <button
           onClick={openCreate}
+          style={!can("users:manage") ? { display: "none" } : undefined}
           className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors"
         >
           <Plus size={16} />
@@ -430,15 +432,15 @@ export default function UtilizatoriPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
                 <select
                   value={formRole}
-                  onChange={(e) => setFormRole(e.target.value as "ADMIN" | "OPERATOR" | "READONLY")}
+                  onChange={(e) => setFormRole(e.target.value as UserRole)}
                   className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
                 >
-                  <option value="OPERATOR">Operator</option>
-                  <option value="ADMIN">Administrator</option>
-                  <option value="READONLY">Doar vizualizare</option>
+                  <option value="operator">Operator</option>
+                  <option value="administrator">Administrator</option>
+                  <option value="doar_vizualizare">Doar vizualizare</option>
                 </select>
                 <p className="text-xs text-gray-400 mt-1">
-                  {ROLE_LABELS[formRole]?.desc}
+                  {ROLE_LABELS[formRole]?.desc ?? ""}
                 </p>
               </div>
               <div className="flex gap-2 pt-2">
@@ -489,12 +491,12 @@ export default function UtilizatoriPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Rol</label>
               <select
                 value={formRole}
-                onChange={(e) => setFormRole(e.target.value as "ADMIN" | "OPERATOR" | "READONLY")}
+                onChange={(e) => setFormRole(e.target.value as UserRole)}
                 className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
               >
-                <option value="OPERATOR">Operator</option>
-                <option value="ADMIN">Administrator</option>
-                <option value="READONLY">Doar vizualizare</option>
+                <option value="operator">Operator</option>
+                <option value="administrator">Administrator</option>
+                <option value="doar_vizualizare">Doar vizualizare</option>
               </select>
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
@@ -558,7 +560,8 @@ export default function UtilizatoriPage() {
           </div>
         </Modal>
       )}
-    </div>
+      </div>
+    </ProtectedRoute>
   );
 }
 
@@ -581,7 +584,8 @@ function Modal({ children, onClose, title }: { children: React.ReactNode; onClos
 }
 
 function RoleBadge({ role }: { role: string }) {
-  const c = ROLE_LABELS[role] ?? { label: role, color: "bg-gray-100 text-gray-700" };
+  const rr = role as UserRole;
+  const c = ROLE_LABELS[rr] ?? { label: role, desc: "", color: "bg-gray-100 text-gray-700" };
   return (
     <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${c.color}`}>
       {c.label}
