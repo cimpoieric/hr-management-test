@@ -3,7 +3,7 @@
  *
  * Body: {
  *   type: "lista" | "a1" | "tara" | "fisa",
- *   params?: { countryCode?: string, employeeId?: number },
+ *   params?: { countryCode?: string, countryDisplayName?: string, employeeId?: number },
  *   employeeIds?: number[],
  *   columns?: ColumnDef[]
  * }
@@ -35,6 +35,8 @@ import {
   type EmployeeListItem,
 } from "@/lib/pdfGenerator";
 import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
+import { documentsWhereVisible } from "@/lib/documentVisibility";
+import { calculateStatus } from "@/lib/documentStatus";
 import { salaryAmountToJson } from "@/lib/salaryFields";
 import { addSettingsLogo, registerPdfFontWithFallback } from "@/lib/pdf/jsPdfBranding";
 
@@ -42,6 +44,44 @@ import { addSettingsLogo, registerPdfFontWithFallback } from "@/lib/pdf/jsPdfBra
 
 const REPORTS_DIR = join(process.cwd(), "data", "reports");
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000; // 24 ore
+
+/** Status A1 în raport — aceleași coduri ca în `generateA1ReportPDF`. */
+type A1ReportBucket = "VALID" | "EXPIRING_SOON" | "EXPIRED" | "PENDING";
+
+function a1DocumentsWhere(employeeIds: number[]): Prisma.DocumentWhereInput {
+  const hints = [
+    "A1",
+    "a1",
+    "Certificat_A1",
+    "CERTIFICAT_A1",
+    "certificat_a1",
+    "CertificatA1",
+    "Formular_A1",
+    "FORMULAR_A1",
+  ];
+  return documentsWhereVisible({
+    employeeId: { in: employeeIds },
+    OR: [{ type: "A1" }, { type: "a1" }, ...hints.map((h) => ({ fileName: { contains: h } }))],
+  });
+}
+
+/**
+ * Status pentru PDF: prioritate la data expirării (ca `calculateStatus`);
+ * dacă lipsește data, folosește câmpul `status` din DB (inclusiv etichete RO).
+ */
+function resolveA1ReportStatus(doc: {
+  expiryDate: Date | null;
+  status: string;
+}): A1ReportBucket {
+  const fromDate = calculateStatus(doc.expiryDate);
+  if (fromDate !== "PENDING") return fromDate;
+
+  const s = (doc.status || "").trim().toUpperCase();
+  if (s === "VALID" || s === "VALABIL") return "VALID";
+  if (s === "EXPIRED" || s === "EXPIRAT") return "EXPIRED";
+  if (s === "EXPIRING_SOON" || s === "EXPIRING") return "EXPIRING_SOON";
+  return "PENDING";
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +91,8 @@ interface GenerateRequest {
   type: ReportType;
   params?: {
     countryCode?: string;
+    /** Nume afișat din tabela Country (trimis de UI /rapoarte). */
+    countryDisplayName?: string;
     employeeId?: number;
   };
   employeeIds?: number[];
@@ -401,25 +443,39 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Niciun angajat cu detasare activa" }, { status: 404 });
       }
 
-      // Get A1 documents for these employees
-      const a1Docs = await prismaTyped.document.findMany({
-        where: {
-          employeeId: { in: employeeIds },
-          type: "A1",
-        },
+      const a1DocsAll = await prismaTyped.document.findMany({
+        where: a1DocumentsWhere(employeeIds),
         select: {
+          id: true,
           employeeId: true,
+          type: true,
+          fileName: true,
           status: true,
           expiryDate: true,
+          uploadedAt: true,
         },
         orderBy: { uploadedAt: "desc" },
       });
 
-      const a1ByEmployee = new Map<number, { status: string; expiryDate: Date | null }>();
-      for (const doc of a1Docs) {
-        if (!a1ByEmployee.has(doc.employeeId)) {
-          a1ByEmployee.set(doc.employeeId, { status: doc.status, expiryDate: doc.expiryDate });
-        }
+      const docsByEmployee = new Map<number, typeof a1DocsAll>();
+      for (const d of a1DocsAll) {
+        const list = docsByEmployee.get(d.employeeId) ?? [];
+        list.push(d);
+        docsByEmployee.set(d.employeeId, list);
+      }
+
+      const a1ByEmployee = new Map<
+        number,
+        { status: A1ReportBucket; expiryDate: Date | null; doc: (typeof a1DocsAll)[0] }
+      >();
+      for (const doc of a1DocsAll) {
+        if (a1ByEmployee.has(doc.employeeId)) continue;
+        const bucket = resolveA1ReportStatus(doc);
+        a1ByEmployee.set(doc.employeeId, {
+          status: bucket,
+          expiryDate: doc.expiryDate,
+          doc,
+        });
       }
 
       const employees = await prismaTyped.employee.findMany({
@@ -438,6 +494,22 @@ export async function POST(request: NextRequest) {
       const items: EmployeeListItem[] = employees.map((e) => {
         const dep = deploymentMap.get(e.id);
         const a1 = a1ByEmployee.get(e.id);
+        const docsForLog = docsByEmployee.get(e.id) ?? [];
+        const calculatedStatus = a1?.status ?? "PENDING";
+        console.log(
+          "Angajat:",
+          `${e.lastName} ${e.firstName}`,
+          "Documente:",
+          docsForLog.map((d) => ({
+            id: d.id,
+            type: d.type,
+            fileName: d.fileName,
+            status: d.status,
+            expiryDate: d.expiryDate,
+          }))
+        );
+        console.log("Status calculat:", calculatedStatus);
+
         return {
           id: e.id,
           lastName: e.lastName,
@@ -446,7 +518,7 @@ export async function POST(request: NextRequest) {
           companyName: e.company?.name ?? null,
           deploymentCountry: dep?.country ?? null,
           deploymentCity: dep?.city ?? null,
-          a1Status: a1?.status ?? null,
+          a1Status: calculatedStatus,
           a1Expiry: a1?.expiryDate ?? null,
         };
       });
@@ -463,21 +535,73 @@ export async function POST(request: NextRequest) {
 
     } else if (reportType === "tara") {
       // ─── Raport Țară ────────────────────────────────────────────────────
-      const countryCode = body.params?.countryCode;
-      if (!countryCode) {
+      const countryCodeRaw = body.params?.countryCode;
+      if (!countryCodeRaw || String(countryCodeRaw).trim() === "") {
         return NextResponse.json({ error: "Cod tara necesar" }, { status: 400 });
       }
 
-      const countryInfo = DEPLOYMENT_COUNTRIES.find((c) => c.code === countryCode);
-      const countryName = countryInfo?.name ?? countryCode;
+      const countryCode = String(countryCodeRaw).trim().toUpperCase();
+      const displayFromClient = String(body.params?.countryDisplayName ?? "").trim();
+      const countryName =
+        displayFromClient ||
+        DEPLOYMENT_COUNTRIES.find((c) => c.code === countryCode)?.name ||
+        countryCode;
+
+      const countryRow = await prismaTyped.country.findFirst({
+        where: {
+          OR: [
+            { code: countryCode },
+            { code: String(countryCodeRaw).trim() },
+          ],
+        },
+        select: { id: true, name: true, code: true },
+      });
+
+      const deploymentCountryOr: Prisma.DeploymentWhereInput[] = [];
+      const addCountryVariant = (v: string | null | undefined) => {
+        const s = v != null ? String(v).trim() : "";
+        if (s === "") return;
+        deploymentCountryOr.push({ country: s });
+        if (s.length <= 4) deploymentCountryOr.push({ country: s.toUpperCase() });
+        if (s.length <= 4) deploymentCountryOr.push({ country: s.toLowerCase() });
+      };
+      addCountryVariant(countryCode);
+      addCountryVariant(String(countryCodeRaw).trim());
+      addCountryVariant(displayFromClient);
+      const depStatic = DEPLOYMENT_COUNTRIES.find((c) => c.code === countryCode);
+      if (depStatic?.name) addCountryVariant(depStatic.name);
+      if (countryRow) {
+        addCountryVariant(countryRow.code);
+        addCountryVariant(countryRow.name);
+      }
+
+      const countryParam = {
+        countryCode,
+        countryCodeRaw: String(countryCodeRaw).trim(),
+        countryDisplayName: displayFromClient || null,
+        countryIdFromDb: countryRow?.id ?? null,
+        countryNameFromDb: countryRow?.name ?? null,
+      };
 
       const today = new Date();
+      const deploymentWhere: Prisma.DeploymentWhereInput = {
+        AND: [
+          { OR: deploymentCountryOr },
+          { status: { not: "CANCELLED" } },
+          { OR: [{ endDate: null }, { endDate: { gte: today } }] },
+        ],
+      };
+
+      const whereClause = {
+        deploymentWhere,
+        employeeByCountryId: countryRow ? { countryId: countryRow.id } : null,
+      };
+
+      console.log("Țară primită:", countryParam);
+      console.log("Query where:", JSON.stringify(whereClause));
+
       const deployments = await prismaTyped.deployment.findMany({
-        where: {
-          country: countryCode,
-          status: { not: "CANCELLED" },
-          OR: [{ endDate: null }, { endDate: { gte: today } }],
-        },
+        where: deploymentWhere,
         select: {
           employeeId: true,
           city: true,
@@ -487,18 +611,33 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      const employeeIds = deployments.map((d) => d.employeeId);
-      if (employeeIds.length === 0) {
+      const employeeIdSet = new Set<number>();
+      for (const d of deployments) employeeIdSet.add(d.employeeId);
+
+      if (countryRow) {
+        const byDomiciliu = await prismaTyped.employee.findMany({
+          where: { countryId: countryRow.id },
+          select: { id: true },
+        });
+        for (const e of byDomiciliu) employeeIdSet.add(e.id);
+      }
+
+      const mergedEmployeeIds = [...employeeIdSet];
+      if (mergedEmployeeIds.length === 0) {
+        console.log("Angajați găsiți:", 0);
         return NextResponse.json({ error: "Niciun angajat in aceasta tara" }, { status: 404 });
       }
 
       const employees = await prismaTyped.employee.findMany({
-        where: { id: { in: employeeIds } },
+        where: { id: { in: mergedEmployeeIds } },
         orderBy: { lastName: "asc" },
         include: {
           company: { select: { name: true } },
+          country: { select: { name: true, code: true } },
         },
       });
+
+      console.log("Angajați găsiți:", employees.length);
 
       const depMap = new Map<number, { city: string | null; startDate: Date; endDate: Date | null; status: string }>();
       for (const d of deployments) {
@@ -507,6 +646,8 @@ export async function POST(request: NextRequest) {
 
       const items: EmployeeListItem[] = employees.map((e) => {
         const dep = depMap.get(e.id);
+        const homeCountry =
+          e.country != null ? `${e.country.name} (${e.country.code})` : null;
         return {
           id: e.id,
           lastName: e.lastName,
@@ -515,13 +656,26 @@ export async function POST(request: NextRequest) {
           position: e.position,
           companyName: e.company?.name ?? null,
           city: e.city,
-          deploymentCity: dep?.city ?? null,
+          country: homeCountry,
+          deploymentCity: dep?.city ?? e.city ?? null,
           deploymentCountry: countryCode,
         };
       });
 
       reportTitle = body.title ?? `Raport detasari — ${countryName}`;
       employeeCount = items.length;
+
+      console.log("Primul angajat:", employees?.[0]);
+
+      const pdfInput = {
+        employees: items,
+        countryName,
+        countryCode,
+        title: reportTitle,
+        generatedBy,
+        logoPath: logoPath ?? null,
+      };
+      console.log("Date trimise la PDF:", JSON.stringify(pdfInput, null, 2));
 
       pdfBytes = generateCountryReportPDF({
         employees: items,
@@ -531,6 +685,13 @@ export async function POST(request: NextRequest) {
         generatedBy,
         logoPath,
       });
+
+      console.log(
+        "[RAPORT_TARA_PDF] bytes:",
+        pdfBytes?.length,
+        "header:",
+        Buffer.from(pdfBytes.slice(0, 8)).toString("utf8")
+      );
 
     } else {
       // ─── Raport Fișă Angajat ────────────────────────────────────────────

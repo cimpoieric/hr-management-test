@@ -53,7 +53,13 @@ function generateIbanRo(): string {
 }
 
 const ADMIN_EMAIL = "admin@firma.local";
-const ADMIN_PASSWORD = "AdminTemp123!";
+const rawSeedPassword = process.env.SEED_ADMIN_PASSWORD?.trim() ?? "";
+if (rawSeedPassword.length < 8) {
+  throw new Error(
+    "SEED_ADMIN_PASSWORD trebuie setat în mediu (minim 8 caractere) înainte de seed. Exemplu: SEED_ADMIN_PASSWORD='...' npm run db:seed"
+  );
+}
+const ADMIN_PASSWORD: string = rawSeedPassword;
 
 const SEED_COUNTRIES = [
   { name: "România", code: "RO", phoneCode: "+40" },

@@ -194,8 +194,29 @@ const dbPath = path.join(CWD, "data", "app.db");
 if (!fs.existsSync(dbPath) || fs.statSync(dbPath).size === 0) {
   log("  Baza de date e goală. Se rulează seed...", "yellow");
   try {
-    execSync("npx tsx prisma/seed.ts", { stdio: "inherit", cwd: CWD });
+    const preset = (process.env.SEED_ADMIN_PASSWORD ?? "").trim();
+    const seedAdminPassword =
+      preset.length >= 8
+        ? preset
+        : crypto.randomBytes(18).toString("base64url");
+    execSync("npx tsx prisma/seed.ts", {
+      stdio: "inherit",
+      cwd: CWD,
+      env: { ...process.env, SEED_ADMIN_PASSWORD: seedAdminPassword },
+    });
     log("  Seed complet ✓", "green");
+    if (preset.length >= 8) {
+      log(
+        "  Admin: admin@firma.local — folosit SEED_ADMIN_PASSWORD din mediu (parola nu e afișată).",
+        "dim"
+      );
+    } else {
+      log(
+        "  Salvează parola admin (nu va mai fi afișată): admin@firma.local",
+        "yellow"
+      );
+      log(`  → ${seedAdminPassword}`, "yellow");
+    }
   } catch (error) {
     log("  Eroare la seed (poți rula manual: npm run db:seed)", "red");
   }
@@ -214,7 +235,10 @@ log("\nComenzi disponibile:", "bold");
 log("  npm run dev      — mod dezvoltare (cu hot reload)");
 log("  npm run build    — build de producție");
 log("  npm start        — pornire producție");
-log("\nCont admin default:", "bold");
-log("  Email:    admin@firma.local");
-log("  Parola:   AdminTemp123!");
+log("\nCont admin (după seed):", "bold");
+log("  Email: admin@firma.local");
+log(
+  "  Parola: cea afișată la pasul seed, sau setează SEED_ADMIN_PASSWORD înainte de npm run setup",
+  "dim"
+);
 log("\n", "reset");

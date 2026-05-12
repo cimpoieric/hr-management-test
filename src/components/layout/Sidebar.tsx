@@ -24,6 +24,7 @@ import type { UserRole } from "@/lib/auth";
 import { ro } from "@/messages";
 import { LEGACY_ROUTES, ROUTES } from "@/lib/routes";
 import { useAuth } from "@/hooks/useAuth";
+import { useCompanyLogo } from "@/hooks/useCompanyLogo";
 
 function isNavActive(pathname: string, href: string): boolean {
   if (href === ROUTES.dashboard) {
@@ -129,6 +130,7 @@ function SidebarNav({
 export function Sidebar({
 }: {}) {
   const [isOpen, setIsOpen] = useState(false);
+  const { companyLogoUrl } = useCompanyLogo();
 
   return (
     <>
@@ -157,13 +159,26 @@ export function Sidebar({
       >
         {/* Logo */}
         <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-800">
-          <Link href={ROUTES.dashboard} className="flex items-center gap-2.5">
-            <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center">
-              <span className="text-slate-900 font-bold text-sm">HR</span>
-            </div>
-            <span className="font-semibold text-lg tracking-tight">
-              Manager
-            </span>
+          <Link
+            href={ROUTES.dashboard}
+            className="flex items-center gap-2.5 min-w-0"
+            onClick={() => setIsOpen(false)}
+          >
+            {companyLogoUrl ? (
+              <img
+                src={companyLogoUrl}
+                alt="Logo firmă"
+                className="max-h-10 w-auto max-w-[200px] object-contain shrink-0"
+                decoding="async"
+              />
+            ) : (
+              <>
+                <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0">
+                  <span className="text-slate-900 font-bold text-sm">HR</span>
+                </div>
+                <span className="font-semibold text-lg tracking-tight truncate">Manager</span>
+              </>
+            )}
           </Link>
           <button
             onClick={() => setIsOpen(false)}

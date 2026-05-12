@@ -19,7 +19,6 @@ import {
   Check,
   FileSpreadsheet,
 } from "lucide-react";
-import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -55,6 +54,23 @@ interface GeneratedReport {
   expiresAt: string;
   title: string;
   employeeCount: number;
+  /** Momentul generării reușite (client), pentru afișare „Generat la …”. */
+  generatedAt?: string;
+}
+
+interface CountryOption {
+  id: number;
+  name: string;
+  code: string;
+  phoneCode: string | null;
+}
+
+function formatGeneratedAtRo(iso: string): string {
+  const d = new Date(iso);
+  return `${d.toLocaleDateString("ro-RO")}, ${d.toLocaleTimeString("ro-RO", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })}`;
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -134,6 +150,31 @@ export default function RapoartePage() {
   const [error, setError] = useState("");
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [reportCountries, setReportCountries] = useState<CountryOption[]>([]);
+  const [countriesLoading, setCountriesLoading] = useState(false);
+
+  // ── Țări pentru raport pe țară (tabela Country, același API ca setările) ──
+  useEffect(() => {
+    if (reportType !== "tara") return;
+    let cancelled = false;
+    setCountriesLoading(true);
+    fetch("/api/countries")
+      .then((r) => r.json())
+      .then((data: { countries?: CountryOption[] }) => {
+        if (cancelled) return;
+        const list = data.countries ?? [];
+        setReportCountries([...list].sort((a, b) => a.name.localeCompare(b.name, "ro")));
+      })
+      .catch(() => {
+        if (!cancelled) setReportCountries([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCountriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reportType]);
 
   // ── Fetch employees for selection ──
   const fetchEmployees = useCallback(async () => {
@@ -234,7 +275,16 @@ export default function RapoartePage() {
           setGenerating(false);
           return;
         }
-        body.params = { countryCode };
+        const codeU = countryCode.trim().toUpperCase();
+        const sel = reportCountries.find((c) => c.code.trim().toUpperCase() === codeU);
+        const taraLabel = REPORT_TYPES.find((r) => r.type === "tara")?.label ?? "";
+        if (sel && (!String(reportTitle ?? "").trim() || reportTitle === taraLabel)) {
+          body.title = `Raport detasari — ${sel.name}`;
+        }
+        body.params = {
+          countryCode: codeU,
+          ...(sel?.name ? { countryDisplayName: sel.name } : {}),
+        };
       } else if (reportType === "fisa") {
         if (!selectedEmployeeId) {
           setError("Selectează un angajat");
@@ -258,7 +308,10 @@ export default function RapoartePage() {
         return;
       }
 
-      setGeneratedReport(data);
+      setGeneratedReport({
+        ...data,
+        generatedAt: new Date().toISOString(),
+      });
 
       // Load PDF for preview
       const pdfRes = await fetch(data.downloadUrl);
@@ -586,22 +639,40 @@ export default function RapoartePage() {
                 <Globe size={14} className="inline mr-1" />
                 Selectează țara
               </label>
-              <div className="flex flex-wrap gap-2">
-                {DEPLOYMENT_COUNTRIES.map((c) => (
-                  <button
-                    key={c.code}
-                    onClick={() => setCountryCode(c.code)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      countryCode === c.code
-                        ? "bg-amber-500 text-white"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                    }`}
-                  >
-                    <span>{c.flag}</span>
-                    {c.name}
-                  </button>
-                ))}
-              </div>
+              {countriesLoading ? (
+                <div className="flex items-center gap-2 text-sm text-gray-500 py-4">
+                  <Loader2 size={18} className="animate-spin" />
+                  Se încarcă țările din baza de date…
+                </div>
+              ) : reportCountries.length === 0 ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                  Nu există țări în baza de date. Adaugă țări din Setări → Țări.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {reportCountries.map((c) => {
+                    const codeU = c.code.trim().toUpperCase();
+                    const active = countryCode === codeU;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setCountryCode(codeU)}
+                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          active
+                            ? "bg-amber-500 text-white"
+                            : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        }`}
+                      >
+                        <span className={`font-mono text-xs ${active ? "text-amber-100" : "text-gray-500"}`}>
+                          {codeU}
+                        </span>
+                        {c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -734,8 +805,10 @@ export default function RapoartePage() {
                 {generatedReport.title}
               </h3>
               <p className="text-sm text-gray-500 mt-0.5">
-                {generatedReport.employeeCount} angajați · Expiră la{" "}
-                {new Date(generatedReport.expiresAt).toLocaleString("ro-RO")}
+                {generatedReport.employeeCount} angajați
+                {generatedReport.generatedAt ? (
+                  <> · Generat la {formatGeneratedAtRo(generatedReport.generatedAt)}</>
+                ) : null}
               </p>
             </div>
             <div className="flex items-center gap-2">

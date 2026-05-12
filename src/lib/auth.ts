@@ -35,9 +35,20 @@ function normalizeRole(role: unknown): UserRole {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "FALLBACK_SECRET_MINIM_32_CARACTERE_LONG_!"
-);
+let cachedJwtSecretKey: Uint8Array | null = null;
+
+/** Cheie JWT din mediu — fără fallback în cod (livrabile). */
+function getJwtSecretKey(): Uint8Array {
+  if (cachedJwtSecretKey) return cachedJwtSecretKey;
+  const s = (process.env.JWT_SECRET ?? "").trim();
+  if (s.length < 32) {
+    throw new Error(
+      "JWT_SECRET lipsește sau are sub 32 de caractere. Setează în .env sau rulează: npm run setup"
+    );
+  }
+  cachedJwtSecretKey = new TextEncoder().encode(s);
+  return cachedJwtSecretKey;
+}
 
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? "8h";
 const COOKIE_NAME = "auth-token";
@@ -79,7 +90,7 @@ export async function generateToken(
     .setExpirationTime(JWT_EXPIRES_IN)
     .setAudience("hr-management")
     .setIssuer("hr-management-api")
-    .sign(JWT_SECRET);
+    .sign(getJwtSecretKey());
 }
 
 /**
@@ -88,7 +99,7 @@ export async function generateToken(
 export async function verifyToken(
   token: string
 ): Promise<AuthContext> {
-  const { payload } = await jwtVerify(token, JWT_SECRET, {
+  const { payload } = await jwtVerify(token, getJwtSecretKey(), {
     clockTolerance: 60,
     audience: "hr-management",
     issuer: "hr-management-api",

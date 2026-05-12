@@ -80,6 +80,73 @@ function rgb(c: [number, number, number]): string {
   return `${c[0]} ${c[1]} ${c[2]}`;
 }
 
+/** Lățime aproximativă Helvetica (puncte PDF) — suficient pentru layout celule. */
+function measureTextWidthPts(text: string, fontSize: number): number {
+  let w = 0;
+  for (const c of text) {
+    w += c === " " ? fontSize * 0.28 : fontSize * 0.48;
+  }
+  return w;
+}
+
+/** O singură linie, trunchiată cu ... dacă depășește lățimea. */
+function truncateToCellWidth(text: string, maxW: number, fontSize: number): string {
+  const s = toAscii(text);
+  if (maxW <= 8) return "";
+  const ell = "...";
+  if (measureTextWidthPts(ell, fontSize) > maxW) return "";
+  if (measureTextWidthPts(s, fontSize) <= maxW) return s;
+  let lo = 0;
+  let hi = s.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const trial = s.slice(0, mid) + ell;
+    if (measureTextWidthPts(trial, fontSize) <= maxW) lo = mid;
+    else hi = mid - 1;
+  }
+  return s.slice(0, lo) + ell;
+}
+
+/** Word-wrap; la final max maxLines linii, ultima cu ellipsis dacă e nevoie. */
+function wrapCellToLines(raw: string, maxW: number, fontSize: number, maxLines: number): string[] {
+  const s = toAscii(String(raw ?? "")).trim() || " ";
+  if (maxW <= 8 || maxLines < 1) return [truncateToCellWidth(s, maxW, fontSize)];
+  const words = s.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+
+  for (const w of words) {
+    const trial = cur ? `${cur} ${w}` : w;
+    if (measureTextWidthPts(trial, fontSize) <= maxW) {
+      cur = trial;
+      continue;
+    }
+    if (cur) lines.push(cur);
+    cur = w;
+    if (measureTextWidthPts(cur, fontSize) > maxW) {
+      let buf = "";
+      for (const ch of cur) {
+        const t2 = buf + ch;
+        if (measureTextWidthPts(t2, fontSize) <= maxW) buf = t2;
+        else {
+          if (buf) lines.push(buf);
+          buf = ch;
+        }
+      }
+      cur = buf;
+    }
+  }
+  if (cur) lines.push(cur);
+  if (lines.length === 0) lines.push("");
+
+  if (lines.length > maxLines) {
+    const kept = lines.slice(0, maxLines - 1);
+    kept.push(truncateToCellWidth(lines.slice(maxLines - 1).join(" "), maxW, fontSize));
+    return kept;
+  }
+  return lines.map((ln) => truncateToCellWidth(ln, maxW, fontSize));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ═══ INTERFEȚE PUBLICE ═════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -230,8 +297,11 @@ class PDFEngine {
     }
 
     this.currentPageId = this.objId;
-    this.objects.push(""); // placeholder for page object
+    this.objects.push(""); // placeholder pentru obiectul Page la indexul (currentPageId - 1)
     this.pageObjIds.push(this.currentPageId);
+    // Rezervă ID-ul paginii: următorul addObject (stream de conținut) trebuie să aibă ID diferit.
+    // Fără increment, stream-ul și Page-ul ar primi același număr → PDF invalid, pagină albă în vieweri.
+    this.objId++;
     this.currentStream = [];
     this._contentY = PAGE_H - MARGIN;
   }
@@ -303,14 +373,15 @@ class PDFEngine {
   drawText(x: number, y: number, text: string, font: "F1" | "F2" = "F1", size = 9, color?: [number, number, number]): void {
     const cmds: string[] = [];
     if (color) cmds.push(`${rgb(color)} rg`);
-    cmds.push(`BT /${font} ${size} Tf ${x} ${y} Td (${esc(toAscii(text))}) Tj ET`);
+    // Tm = matrice text absolută (x,y) în spațiul utilizator — Td nu poziționează corect în toți viewerii
+    cmds.push(`BT /${font} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${esc(toAscii(text))}) Tj ET`);
     this.currentStream.push(cmds.join("\n"));
   }
 
   drawTextRight(x: number, y: number, text: string, font: "F1" | "F2" = "F1", size = 9, color?: [number, number, number]): void {
     const cmds: string[] = [];
     if (color) cmds.push(`${rgb(color)} rg`);
-    cmds.push(`BT /${font} ${size} Tf ${x} ${y} Td (${esc(toAscii(text))}) Tj ET`);
+    cmds.push(`BT /${font} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${esc(toAscii(text))}) Tj ET`);
     this.currentStream.push(cmds.join("\n"));
   }
 
@@ -377,6 +448,101 @@ class PDFEngine {
 
   // ─── Table Rendering ───────────────────────────────────────────────────────
 
+  private drawTableMultiLine(
+    headers: string[],
+    rows: string[][],
+    colWidths: number[],
+    options: {
+      headerBg?: [number, number, number];
+      headerTextColor?: [number, number, number];
+      altRowBg?: [number, number, number];
+      borderColor?: [number, number, number];
+      fontSize?: number;
+      maxLinesPerCell?: number;
+      cellPaddingX?: number;
+      cellPaddingY?: number;
+      /** Înălțime minimă rând corp (puncte), util pentru o singură linie de text. */
+      minRowHeight?: number;
+    }
+  ): boolean {
+    const headerBg = options.headerBg ?? COLOR_HEADER_BG;
+    const headerTextColor = options.headerTextColor ?? COLOR_HEADER_TEXT;
+    const altRowBg = options.altRowBg ?? COLOR_ROW_ALT;
+    const borderColor = options.borderColor ?? COLOR_BORDER;
+    const fontSize = options.fontSize ?? 8;
+    const maxLines = Math.max(1, Math.min(12, options.maxLinesPerCell ?? 6));
+    const padX = options.cellPaddingX ?? 4;
+    const padY = options.cellPaddingY ?? 3;
+    const minRowH = options.minRowHeight ?? 0;
+    const lineStep = fontSize * 1.22;
+
+    const totalW = colWidths.reduce((a, b) => a + b, 0);
+    const scale = CONTENT_W / totalW;
+    const scaledWidths = colWidths.map((w) => w * scale);
+    const inner = (i: number) => Math.max(8, (scaledWidths[i] ?? 0) - 2 * padX);
+
+    const headerCellLines = headers.map((h, i) => wrapCellToLines(h ?? "", inner(i), fontSize, maxLines));
+    const headerLines = Math.max(1, ...headerCellLines.map((l) => l.length));
+    const headerHeight = padY * 2 + headerLines * lineStep;
+
+    const bodyLayout: { h: number; lines: string[][] }[] = [];
+    for (const row of rows) {
+      const linesPerCol = row.map((cell, i) => wrapCellToLines(cell ?? "", inner(i), fontSize, maxLines));
+      const n = Math.max(1, ...linesPerCol.map((l) => l.length));
+      const h = Math.max(minRowH, padY * 2 + n * lineStep);
+      bodyLayout.push({ h, lines: linesPerCol });
+    }
+
+    const totalH = headerHeight + bodyLayout.reduce((sum, b) => sum + b.h, 0);
+    if (!this.fits(totalH) && rows.length > 0) {
+      return false;
+    }
+
+    this.drawRect(MARGIN, this._contentY - headerHeight, CONTENT_W, headerHeight, headerBg);
+    let x = MARGIN;
+    for (let i = 0; i < headers.length && i < scaledWidths.length; i++) {
+      const lines = headerCellLines[i] ?? [""];
+      const topBaseline = this._contentY - padY - fontSize * 0.35;
+      for (let li = 0; li < lines.length; li++) {
+        this.drawText(x + padX, topBaseline - li * lineStep, lines[li] ?? "", "F2", fontSize, headerTextColor);
+      }
+      x += scaledWidths[i] ?? 0;
+    }
+    this._contentY -= headerHeight;
+    this.drawLine(MARGIN, this._contentY, PAGE_W - MARGIN, this._contentY, borderColor, 0.35);
+
+    for (let r = 0; r < rows.length; r++) {
+      const layout = bodyLayout[r];
+      if (!layout) continue;
+      const { h: rowH, lines: linesPerCol } = layout;
+
+      if (!this.fits(rowH)) {
+        this.drawLine(MARGIN, this._contentY, PAGE_W - MARGIN, this._contentY, borderColor, 0.5);
+        return false;
+      }
+
+      const rowBg = r % 2 === 0 ? COLOR_ROW_WHITE : altRowBg;
+      this.drawRect(MARGIN, this._contentY - rowH, CONTENT_W, rowH, rowBg);
+
+      x = MARGIN;
+      for (let i = 0; i < linesPerCol.length && i < scaledWidths.length; i++) {
+        const lines = linesPerCol[i] ?? [""];
+        const topBaseline = this._contentY - padY - fontSize * 0.35;
+        for (let li = 0; li < lines.length; li++) {
+          this.drawText(x + padX, topBaseline - li * lineStep, lines[li] ?? "", "F1", fontSize, COLOR_TEXT);
+        }
+        x += scaledWidths[i] ?? 0;
+      }
+
+      this.drawLine(MARGIN, this._contentY - rowH, PAGE_W - MARGIN, this._contentY - rowH, borderColor, 0.25);
+      this._contentY -= rowH;
+    }
+
+    this.drawLine(MARGIN, this._contentY, PAGE_W - MARGIN, this._contentY, borderColor, 0.5);
+    this._contentY -= 4;
+    return true;
+  }
+
   drawTable(
     headers: string[],
     rows: string[][],
@@ -389,8 +555,17 @@ class PDFEngine {
       fontSize?: number;
       rowHeight?: number;
       startY?: number;
+      multiLineCells?: boolean;
+      maxLinesPerCell?: number;
+      cellPaddingX?: number;
+      cellPaddingY?: number;
+      minRowHeight?: number;
     }
   ): boolean {
+    if (options?.multiLineCells) {
+      return this.drawTableMultiLine(headers, rows, colWidths, options);
+    }
+
     const {
       headerBg = COLOR_HEADER_BG,
       headerTextColor = COLOR_HEADER_TEXT,
@@ -663,38 +838,74 @@ export function generateA1ReportPDF(options: A1ReportOptions): Uint8Array {
 
   pdf.moveDown(10);
 
-  // Detail table
+  // Detail table — lățimi relative (≈ % din lățimea tabelului): Nume 12, Prenume 12, Firmă 22, Țară 10, Status 12, Expiră 12
   pdf.drawSectionTitle("Detalii per angajat");
   pdf.moveDown(6);
 
   const headers = ["Nume", "Prenume", "Firma", "Tara detasare", "Status A1", "Expira"];
-  const colWidths = [18, 16, 20, 16, 18, 14];
+  const colWidths = [12, 12, 22, 10, 12, 12];
+  /** Placeholder ASCII: `toAscii` înlocuiește em-dash cu "?" și strică layout-ul. */
+  const cellEmpty = "-";
 
   const rows = employees.map((emp) => {
     const statusLabel = emp.a1Status === "VALID" ? "Valid" :
                         emp.a1Status === "EXPIRING_SOON" ? "Expira curand" :
                         emp.a1Status === "EXPIRED" ? "Expirat" : "Lipsa";
-    const expiryStr = emp.a1Expiry ? new Date(emp.a1Expiry).toLocaleDateString("ro-RO") : "—";
+    const expiryStr = emp.a1Expiry ? new Date(emp.a1Expiry).toLocaleDateString("ro-RO") : cellEmpty;
 
     return [
       emp.lastName,
       emp.firstName,
-      emp.companyName ?? "—",
-      emp.deploymentCountry ?? "—",
+      emp.companyName?.trim() ? emp.companyName : cellEmpty,
+      emp.deploymentCountry?.trim() ? emp.deploymentCountry : cellEmpty,
       statusLabel,
       expiryStr,
     ];
   });
 
-  pdf.drawTable(headers, rows, colWidths, {
+  const a1TableOpts = {
     headerBg: COLOR_HEADER_BG,
     headerTextColor: COLOR_HEADER_TEXT,
-  });
+    multiLineCells: true as const,
+    fontSize: 9,
+    cellPaddingX: 3,
+    cellPaddingY: 3,
+    maxLinesPerCell: 8,
+    minRowHeight: 13,
+  };
+
+  let rowIndex = 0;
+  let rowsPerChunk = 18;
+  while (rowIndex < rows.length) {
+    const chunk = rows.slice(rowIndex, rowIndex + rowsPerChunk);
+    let ok = pdf.drawTable(headers, chunk, colWidths, a1TableOpts);
+    if (ok) {
+      rowIndex += chunk.length;
+      rowsPerChunk = 18;
+      continue;
+    }
+    if (chunk.length > 1) {
+      rowsPerChunk = Math.max(1, Math.floor(chunk.length / 2));
+      continue;
+    }
+    pdf.newPage();
+    pdf.drawHeader(title, dateStr, logoText);
+    pdf.drawSectionTitle(rowIndex === 0 ? "Detalii per angajat" : "Detalii per angajat (continuare)");
+    pdf.moveDown(6);
+    ok = pdf.drawTable(headers, chunk, colWidths, a1TableOpts);
+    rowIndex += 1;
+    rowsPerChunk = 18;
+  }
 
   return pdf.finalize(title, generatedBy);
 }
 
 // ─── 3. Raport pe Țară ───────────────────────────────────────────────────────
+
+function cellOrNespecificat(v: string | null | undefined): string {
+  const s = String(v ?? "").trim();
+  return s.length > 0 ? s : "Nespecificat";
+}
 
 export function generateCountryReportPDF(options: CountryReportOptions): Uint8Array {
   const { employees, countryName, countryCode, title, generatedBy, logoPath } = options;
@@ -704,50 +915,103 @@ export function generateCountryReportPDF(options: CountryReportOptions): Uint8Ar
   const dateStr = new Date().toLocaleDateString("ro-RO");
   const logoText = logoPath ? "" : "HR Manager";
 
-  // Stats
   const activeCount = employees.filter((e) => e.status === "ACTIVE").length;
   const terminatedCount = employees.filter((e) => e.status === "TERMINATED").length;
 
-  pdf.newPage();
-  pdf.drawHeader(title, dateStr, logoText);
+  const headers = [
+    "Nume",
+    "Prenume",
+    "Firma",
+    "Functie",
+    "Oras detasare",
+    "Tara domiciliu",
+    "Status",
+  ];
+  const colWidths = [15, 15, 20, 20, 15, 10, 5];
 
-  // Title section
-  pdf.drawSectionTitle(`Tara: ${countryName} (${countryCode})`);
-  pdf.moveDown(4);
+  const rowTuples = (chunk: EmployeeListItem[]) =>
+    chunk.map((emp) => [
+      cellOrNespecificat(emp.lastName),
+      cellOrNespecificat(emp.firstName),
+      cellOrNespecificat(emp.companyName),
+      cellOrNespecificat(emp.position),
+      cellOrNespecificat(emp.deploymentCity ?? emp.city),
+      cellOrNespecificat(emp.country),
+      emp.status === "ACTIVE" ? "Activ" : "Terminat",
+    ]);
 
-  pdf.drawInfoRow("Total angajati detasati", String(employees.length));
-  pdf.drawInfoRow("Angajati activi", String(activeCount));
-  pdf.drawInfoRow("Angajati terminati", String(terminatedCount));
-  pdf.drawInfoRow("Data raport", dateStr);
-  pdf.moveDown(10);
+  let rowIndex = 0;
+  let tablePageIndex = 0;
+  const initialChunkTry = 18;
 
-  // Employee table
-  pdf.drawSectionTitle("Lista angajati detasati");
-  pdf.moveDown(6);
+  while (rowIndex < employees.length) {
+    pdf.newPage();
+    pdf.drawHeader(title, dateStr, logoText);
 
-  const headers = ["Nume", "Prenume", "Firma", "Functie", "Oras", "Status"];
-  const colWidths = [18, 16, 22, 18, 16, 12];
+    if (tablePageIndex === 0) {
+      pdf.drawSectionTitle(`Tara: ${countryName} (${countryCode})`);
+      pdf.moveDown(4);
+      pdf.drawInfoRow("Total angajati detasati", String(employees.length));
+      pdf.drawInfoRow("Angajati activi", String(activeCount));
+      pdf.drawInfoRow("Angajati terminati", String(terminatedCount));
+      pdf.drawInfoRow("Data raport", dateStr);
+      pdf.moveDown(10);
+    }
 
-  const rows = employees.map((emp) => [
-    emp.lastName,
-    emp.firstName,
-    emp.companyName ?? "—",
-    emp.position ?? "—",
-    emp.deploymentCity ?? emp.city ?? "—",
-    emp.status === "ACTIVE" ? "Activ" : "Terminat",
-  ]);
+    pdf.drawSectionTitle(
+      tablePageIndex === 0 ? "Lista angajati detasati" : "Lista angajati detasati (continuare)"
+    );
+    pdf.moveDown(6);
 
-  pdf.drawTable(headers, rows, colWidths, {
-    headerBg: COLOR_HEADER_BG,
-    headerTextColor: COLOR_HEADER_TEXT,
-  });
+    let chunkSize = Math.min(initialChunkTry, employees.length - rowIndex);
+    let advanced = false;
 
-  // Contact section (placeholder)
+    while (!advanced && chunkSize >= 1) {
+      const slice = employees.slice(rowIndex, rowIndex + chunkSize);
+      const ok = pdf.drawTable(headers, rowTuples(slice), colWidths, {
+        headerBg: COLOR_HEADER_BG,
+        headerTextColor: COLOR_HEADER_TEXT,
+        multiLineCells: true,
+        fontSize: 8,
+        maxLinesPerCell: 6,
+        cellPaddingX: 4,
+        cellPaddingY: 3,
+      });
+      if (ok) {
+        rowIndex += slice.length;
+        advanced = true;
+      } else if (chunkSize <= 1) {
+        const skipped = employees[rowIndex];
+        rowIndex += 1;
+        advanced = true;
+        pdf.drawText(
+          MARGIN,
+          pdf.contentY,
+          `Rand omis (angajat ID ${skipped?.id ?? "?"}): continut prea mare pentru spatiul ramas.`,
+          "F1",
+          8,
+          COLOR_RED
+        );
+      } else {
+        chunkSize = Math.max(1, Math.floor(chunkSize / 2));
+      }
+    }
+
+    tablePageIndex += 1;
+  }
+
   if (employees.length > 0) {
-    pdf.moveDown(10);
+    pdf.moveDown(8);
     pdf.drawSectionTitle("Informatii contact");
     pdf.moveDown(4);
-    pdf.drawText(MARGIN, pdf.contentY, "Pentru informatii suplimentare contactati departamentul HR.", "F1", 9, COLOR_TEXT_LIGHT);
+    pdf.drawText(
+      MARGIN,
+      pdf.contentY,
+      "Pentru informatii suplimentare contactati departamentul HR.",
+      "F1",
+      9,
+      COLOR_TEXT_LIGHT
+    );
   }
 
   return pdf.finalize(title, generatedBy);
@@ -776,7 +1040,7 @@ export function generateEmployeeSheetPDF(options: EmployeeSheetOptions): Uint8Ar
   pdf.drawInfoRow("Telefon", employee.phone ?? "—");
   pdf.drawInfoRow("Adresa", employee.address ?? "—");
   pdf.drawInfoRow("Oras", employee.city ?? "—");
-  pdf.drawInfoRow("Tara", employee.country ?? "RO");
+  pdf.drawInfoRow("Tara", employee.country?.trim() ? employee.country : "Nespecificat");
   pdf.moveDown(10);
 
   // ═══ Secțiunea 2: Date contract ═══

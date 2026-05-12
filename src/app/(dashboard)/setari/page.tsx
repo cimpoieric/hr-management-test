@@ -3,27 +3,24 @@
 import { useMemo, useState } from "react";
 import {
   Settings,
-  Users,
   SlidersHorizontal,
   ClipboardList,
   Mail,
 } from "lucide-react";
 import Link from "next/link";
 import { useAuth } from "@/hooks/useAuth";
-import { UsersSettingsPanel } from "@/components/settings/UsersSettingsPanel";
 import { AppPreferencesPanel } from "@/components/settings/AppPreferencesPanel";
 import { EmailSettingsPanel } from "@/components/settings/EmailSettingsPanel";
 
 export default function SetariPage() {
   const { role, loading } = useAuth();
-  const [activeTab, setActiveTab] = useState<"users" | "prefs" | "email" | "audit">("users");
+  const [activeTab, setActiveTab] = useState<"prefs" | "email" | "audit">("prefs");
 
   const isAdmin = role === "administrator";
 
   const tabs = useMemo(
     () =>
       [
-        { id: "users" as const, label: "Utilizatori", icon: Users },
         { id: "prefs" as const, label: "Preferințe aplicație", icon: SlidersHorizontal },
         { id: "email" as const, label: "Email", icon: Mail },
         { id: "audit" as const, label: "Jurnal activitate", icon: ClipboardList },
@@ -39,7 +36,7 @@ export default function SetariPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Setări</h1>
           <p className="text-sm text-gray-500">
-            Administrare sistem — utilizatori, preferințe, audit
+            Administrare sistem — preferințe, email, audit
           </p>
         </div>
       </div>
@@ -75,9 +72,7 @@ export default function SetariPage() {
 
           {/* Conținut tab */}
           <section className="min-w-0">
-            {activeTab === "users" ? (
-              <UsersSettingsPanel />
-            ) : activeTab === "prefs" ? (
+            {activeTab === "prefs" ? (
               <AppPreferencesPanel />
             ) : activeTab === "email" ? (
               <EmailSettingsPanel />

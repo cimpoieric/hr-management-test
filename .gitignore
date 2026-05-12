@@ -1,5 +1,26 @@
+# Dependencies
 node_modules/
+package-lock.json
+
+# Next.js
 .next/
+*.log
+
+# Environment
+.env
+.env.local
+.env.*
+!.env.example
+
+# Prisma
+prisma/*.db-journal
+prisma/*.backup
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build & local data
 dist/
 *.db
 data/
@@ -9,7 +30,4 @@ release-electron/
 *.exe
 *.asar
 
-.env
-.env.*
-!.env.example
 *.tsbuildinfo

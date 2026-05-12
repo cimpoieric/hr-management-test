@@ -10,6 +10,7 @@
   },
   "scripts": {
     "setup": "node scripts/setup.js",
+    "final-cleanup": "node scripts/final-cleanup.js",
     "dev": "next dev",
     "build": "next build",
     "start": "node scripts/start.js",

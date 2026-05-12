@@ -11,7 +11,10 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { ro } from "@/messages";
+import { ROUTES } from "@/lib/routes";
 import { useAuth } from "@/hooks/useAuth";
+import { useCompanyLogo } from "@/hooks/useCompanyLogo";
+import Link from "next/link";
 
 type NotificationItem = {
   id: number;
@@ -32,6 +35,7 @@ export function Header(_props?: { user?: unknown }) {
   const router = useRouter();
   const pathname = usePathname();
   const { user, role } = useAuth();
+  const { companyLogoUrl } = useCompanyLogo();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -81,12 +85,28 @@ export function Header(_props?: { user?: unknown }) {
 
   return (
     <header className="h-14 bg-white border-b flex items-center justify-between px-4 lg:px-6 shrink-0">
-      {/* Spacer pentru hamburger pe mobile */}
-      <div className="w-8 lg:hidden" />
-
-      {/* Titlu pagină — placeholder, poate fi extins cu breadcrumb */}
-      <div className="hidden md:flex items-center text-sm text-gray-500">
-        <span className="font-medium text-gray-900">{ro.nav.dashboard}</span>
+      <div className="flex items-center min-w-0 flex-1 gap-2">
+        {/* Spațiu sub butonul hamburger (fixed) pe mobil / tabletă */}
+        <div className="w-8 shrink-0 lg:hidden" aria-hidden />
+        {/* Branding când sidebar-ul e ascuns (sub lg) */}
+        <div className="lg:hidden flex items-center min-w-0">
+          <Link href={ROUTES.dashboard} className="flex items-center min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded">
+            {companyLogoUrl ? (
+              <img
+                src={companyLogoUrl}
+                alt="Logo firmă"
+                className="max-h-10 w-auto max-w-[140px] object-contain shrink-0"
+                decoding="async"
+              />
+            ) : (
+              <span className="text-sm font-semibold text-gray-900 truncate">HR Manager</span>
+            )}
+          </Link>
+        </div>
+        {/* Titlu pagină — desktop */}
+        <div className="hidden md:flex items-center text-sm text-gray-500 min-w-0">
+          <span className="font-medium text-gray-900">{ro.nav.dashboard}</span>
+        </div>
       </div>
 
       {/* Acțiuni dreapta */}

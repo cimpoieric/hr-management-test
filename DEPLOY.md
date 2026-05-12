@@ -68,9 +68,9 @@ npm start
 
 Deschide browserul la: **http://localhost:3000**
 
-Cont admin default:
+Cont admin (după `npm run setup` sau `npm run db:seed` cu `SEED_ADMIN_PASSWORD`):
 - Email: `admin@firma.local`
-- Parolă: `Admin123!`
+- Parola: cea generată la setup (afișată o singură dată în consolă) sau cea setată în `SEED_ADMIN_PASSWORD` înainte de seed.
 
 ---
 
