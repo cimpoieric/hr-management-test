@@ -5,13 +5,17 @@
  * AuditLog: BACKUP action
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth";
-import { createBackup, cleanupOldBackups } from "@/lib/backup";
-import { logAuditFF, getClientIp } from "@/lib/audit";
+import { getClientIp, logAuditFF } from "@/lib/audit";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
+import { cleanupOldBackups, createBackup } from "@/lib/backup";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
@@ -39,12 +43,15 @@ export async function POST(request: NextRequest) {
       sizeFormatted: formatBytes(backup.size),
       password: backup.password,
     });
-
   } catch (error) {
     console.error("[BACKUP_CREATE]", error);
     return NextResponse.json(
-      { error: "Eroare la crearea backup: " + (error instanceof Error ? error.message : "unknown") },
-      { status: 500 }
+      {
+        error:
+          "Eroare la crearea backup: " +
+          (error instanceof Error ? error.message : "unknown"),
+      },
+      { status: 500 },
     );
   }
 }
@@ -54,5 +61,7 @@ function formatBytes(bytes: number): string {
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  return (
+    Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
+  );
 }

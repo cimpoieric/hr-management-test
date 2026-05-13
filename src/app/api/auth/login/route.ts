@@ -8,18 +8,11 @@
  * - NU returnează niciodată passwordHash
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { getClientIp, logAuditFF } from "@/lib/audit";
+import { generateToken, setAuthCookie, verifyPassword } from "@/lib/auth";
+import { prismaBase as prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { PrismaClient } from "@prisma/client";
-import {
-  verifyPassword,
-  generateToken,
-  setAuthCookie,
-  type UserRole,
-} from "@/lib/auth";
-import { logAuditFF, getClientIp } from "@/lib/audit";
-
-const prisma = new PrismaClient();
 
 // ─── Rate Limiting (memorie simplă) ──────────────────────────────────────────
 
@@ -74,7 +67,7 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Date invalide", issues: parsed.error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -85,7 +78,7 @@ export async function POST(request: NextRequest) {
     if (!checkRateLimit(clientIp)) {
       return NextResponse.json(
         { error: "Prea multe încercări. Încearcă din nou peste 15 minute." },
-        { status: 429 }
+        { status: 429 },
       );
     }
 
@@ -98,6 +91,7 @@ export async function POST(request: NextRequest) {
         email: true,
         password: true,
         role: true,
+        organizationId: true,
         isActive: true,
         mustChangePassword: true,
       },
@@ -113,7 +107,7 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json(
         { error: "Email sau parolă invalidă" },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -124,7 +118,7 @@ export async function POST(request: NextRequest) {
       logAuditFF({
         action: "LOGIN_FAILED",
         entity: "User",
-        entityId: user.id,
+        entityId: null,
         userId: user.id,
         userName: user.name || user.email,
         userRole: user.role,
@@ -133,14 +127,21 @@ export async function POST(request: NextRequest) {
       });
       return NextResponse.json(
         { error: "Email sau parolă invalidă" },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
     // 4. Autentificare reușită — curăță contorul, generează token
     clearAttempts(clientIp);
 
-    const token = await generateToken(user.id, user.email, user.role as UserRole);
+    const organizationId = String(user.organizationId);
+
+    const token = await generateToken(
+      user.id,
+      user.email,
+      user.role,
+      organizationId,
+    );
 
     // Update last login
     try {
@@ -156,7 +157,7 @@ export async function POST(request: NextRequest) {
     logAuditFF({
       action: "LOGIN",
       entity: "User",
-      entityId: user.id,
+      entityId: null,
       userId: user.id,
       userName: user.name || user.email,
       userRole: user.role,
@@ -172,10 +173,11 @@ export async function POST(request: NextRequest) {
           name: user.name,
           email: user.email,
           role: user.role,
+          organizationId,
           mustChangePassword: user.mustChangePassword,
         },
       },
-      { status: 200 }
+      { status: 200 },
     );
 
     setAuthCookie(response, token);
@@ -185,7 +187,7 @@ export async function POST(request: NextRequest) {
     console.error("[AUTH_LOGIN]", error);
     return NextResponse.json(
       { error: "Eroare server intern" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

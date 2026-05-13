@@ -6,15 +6,16 @@
  * Moduri: preview (simulare) sau commit (scriere în DB).
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import type { Prisma } from "@prisma/client";
-import { prismaTyped } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canApproveImport } from "@/lib/permissions";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { dedupeEmployee } from "@/lib/dedupe";
 import { encrypt, hashSha256 } from "@/lib/encryption";
+import { canApproveImport } from "@/lib/permissions";
+import { prismaTyped } from "@/lib/prisma";
 import { validateCNP, validateIBAN } from "@/lib/validation";
+import type { Prisma } from "@prisma/client";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 const importRowSchema = z.object({
   cnp: z.string().regex(/^[0-9]{13}$/, "CNP invalid"),
@@ -56,10 +57,16 @@ export type ImportRowResult =
 
 export async function POST(request: NextRequest) {
   // ─── Auth + Permissions ──────────────────────────────────────────────
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
 
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   if (!canApproveImport(user.role)) {
@@ -73,7 +80,7 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Payload invalid", issues: parsed.error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -139,6 +146,7 @@ export async function POST(request: NextRequest) {
 
             const created = await prismaTyped.employee.create({
               data: {
+                organizationId: user.organizationId,
                 cnp: item.cnp,
                 cnpEncrypted,
                 cnpHash,
@@ -152,7 +160,9 @@ export async function POST(request: NextRequest) {
                 address: item.address ?? null,
                 city: item.city ?? null,
                 companyId: item.companyId,
-                ...(item.countryId != null ? { countryId: item.countryId } : {}),
+                ...(item.countryId != null
+                  ? { countryId: item.countryId }
+                  : {}),
               } as unknown as Prisma.EmployeeUncheckedCreateInput,
             });
             results.push({
@@ -237,7 +247,8 @@ export async function POST(request: NextRequest) {
           cnp: item.cnp,
           result: "ERROR",
           confidence: null,
-          message: rowError instanceof Error ? rowError.message : "Eroare necunoscuta",
+          message:
+            rowError instanceof Error ? rowError.message : "Eroare necunoscuta",
           diff: null,
           existing: null,
         });
@@ -258,7 +269,7 @@ export async function POST(request: NextRequest) {
     console.error("[IMPORT_POST]", error);
     return NextResponse.json(
       { error: "Eroare server intern" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

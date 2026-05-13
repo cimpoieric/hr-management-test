@@ -6,8 +6,8 @@
 
 import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../src/lib/auth";
-import { encrypt, hashSha256 } from "../src/lib/encryption";
 import { calculateStatus } from "../src/lib/documentStatus";
+import { encrypt, hashSha256 } from "../src/lib/encryption";
 
 const prisma = new PrismaClient();
 
@@ -18,7 +18,7 @@ function cnpChecksum(cnp12: string): number {
   for (let i = 0; i < 12; i++) {
     const digit = cnp12.charAt(i);
     if (!digit) throw new Error("Invalid CNP length");
-    sum += parseInt(digit, 10) * (CNP_WEIGHTS[i] ?? 0);
+    sum += Number.parseInt(digit, 10) * (CNP_WEIGHTS[i] ?? 0);
   }
   const rest = sum % 11;
   return rest < 10 ? rest : 1;
@@ -30,7 +30,7 @@ function generateCnp(
   month: number,
   day: number,
   county: number,
-  seq: number
+  seq: number,
 ): string {
   const yy = String(year).slice(-2).padStart(2, "0");
   const mm = String(month).padStart(2, "0");
@@ -56,7 +56,7 @@ const ADMIN_EMAIL = "admin@firma.local";
 const rawSeedPassword = process.env.SEED_ADMIN_PASSWORD?.trim() ?? "";
 if (rawSeedPassword.length < 8) {
   throw new Error(
-    "SEED_ADMIN_PASSWORD trebuie setat în mediu (minim 8 caractere) înainte de seed. Exemplu: SEED_ADMIN_PASSWORD='...' npm run db:seed"
+    "SEED_ADMIN_PASSWORD trebuie setat în mediu (minim 8 caractere) înainte de seed. Exemplu: SEED_ADMIN_PASSWORD='...' npm run db:seed",
   );
 }
 const ADMIN_PASSWORD: string = rawSeedPassword;
@@ -244,28 +244,50 @@ function buildSeedEmployees(): SeedEmployee[] {
 }
 
 async function main() {
-  console.log("🌱 Seeding database...\n");
+  console.info("🌱 Seeding database...\n");
 
   const hashedPassword = await hashPassword(ADMIN_PASSWORD);
+
+  const organization = await prisma.organization.upsert({
+    where: { slug: "seed-demo-org" },
+    update: { name: "Seed Organization" },
+    create: {
+      name: "Seed Organization",
+      slug: "seed-demo-org",
+      defaultLanguage: "ro",
+    },
+  });
+
+  await prisma.settings.upsert({
+    where: { organizationId: organization.id },
+    create: {
+      organizationId: organization.id,
+      logoUrl: null,
+      language: "en",
+    },
+    update: {},
+  });
 
   await prisma.user.upsert({
     where: { email: ADMIN_EMAIL },
     update: {
       name: "Administrator",
       password: hashedPassword,
-      role: "administrator",
+      role: "ORG_ADMIN",
+      organizationId: organization.id,
       isActive: true,
     },
     create: {
       name: "Administrator",
       email: ADMIN_EMAIL,
       password: hashedPassword,
-      role: "administrator",
+      role: "ORG_ADMIN",
+      organizationId: organization.id,
       isActive: true,
     },
   });
 
-  console.log(`[1/5] Admin: ${ADMIN_EMAIL}`);
+  console.info(`[1/5] Admin: ${ADMIN_EMAIL}`);
 
   const countryByCode = new Map<string, { id: number; code: string }>();
   for (const c of SEED_COUNTRIES) {
@@ -275,14 +297,19 @@ async function main() {
       create: { name: c.name, code: c.code, phoneCode: c.phoneCode ?? null },
     });
     countryByCode.set(c.code, row);
-    console.log(`[2/5] Țară: ${row.name} (${row.code})`);
+    console.info(`[2/5] Țară: ${row.name} (${row.code})`);
   }
 
   const companies: { id: number; name: string }[] = [];
   for (const company of SEED_COMPANIES) {
     const cid = countryByCode.get(company.countryCode)?.id ?? null;
     const upserted = await prisma.company.upsert({
-      where: { name: company.name },
+      where: {
+        organizationId_name: {
+          organizationId: organization.id,
+          name: company.name,
+        },
+      },
       update: {
         taxCode: company.taxCode,
         address: company.address,
@@ -290,6 +317,7 @@ async function main() {
         status: "Activ",
       },
       create: {
+        organizationId: organization.id,
         name: company.name,
         taxCode: company.taxCode,
         address: company.address,
@@ -298,7 +326,7 @@ async function main() {
       },
     });
     companies.push(upserted);
-    console.log(`[3/5] Firmă: ${upserted.name}`);
+    console.info(`[3/5] Firmă: ${upserted.name}`);
   }
 
   const seedEmployees = buildSeedEmployees();
@@ -314,10 +342,16 @@ async function main() {
     const company = companies[emp.companyIndex];
     if (!company) continue;
 
-    const countryId = countryByCode.get(emp.countryCode)?.id ?? defaultRoId ?? null;
+    const countryId =
+      countryByCode.get(emp.countryCode)?.id ?? defaultRoId ?? null;
 
     const employee = await prisma.employee.upsert({
-      where: { cnp: emp.cnp },
+      where: {
+        organizationId_cnp: {
+          organizationId: organization.id,
+          cnp: emp.cnp,
+        },
+      },
       update: {
         firstName: emp.firstName,
         lastName: emp.lastName,
@@ -332,6 +366,7 @@ async function main() {
         companyId: company.id,
       },
       create: {
+        organizationId: organization.id,
         cnp: emp.cnp,
         cnpEncrypted,
         cnpHash,
@@ -349,7 +384,7 @@ async function main() {
       },
     });
 
-    console.log(`[4/5] Angajat: ${emp.firstName} ${emp.lastName}`);
+    console.info(`[4/5] Angajat: ${emp.firstName} ${emp.lastName}`);
 
     if (emp.documents?.length) {
       for (const doc of emp.documents) {
@@ -360,6 +395,7 @@ async function main() {
           const status = calculateStatus(doc.expiryDate);
           await prisma.document.create({
             data: {
+              organizationId: organization.id,
               type: doc.type,
               fileName: doc.fileName,
               employeeId: employee.id,
@@ -396,8 +432,8 @@ async function main() {
     }
   }
 
-  console.log("\n✅ Seeding complet!");
-  console.log(`   Login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
+  console.info("\n✅ Seeding complet!");
+  console.info(`   Login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);
 }
 
 main()

@@ -1,101 +1,44 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  Clock,
-  MapPin,
-  Download,
-  BarChart3,
-  FileSpreadsheet,
-  Settings,
-  Shield,
-  Database,
-  Menu,
-  X,
-  Factory,
-  Globe2,
-} from "lucide-react";
-import type { UserRole } from "@/lib/auth";
-import { ro } from "@/messages";
-import { LEGACY_ROUTES, ROUTES } from "@/lib/routes";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompanyLogo } from "@/hooks/useCompanyLogo";
+import { useTranslation } from "@/hooks/useTranslation";
+import { ROUTES } from "@/lib/routes";
+import { isJwtRoleIn, UserRole } from "@/lib/roles";
+import { Menu, X } from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useMemo, useState } from "react";
+import {
+  isNavActive,
+  ORG_ADMIN_SIDEBAR_HREFS_WITH_ADMIN_BADGE,
+  SIDEBAR_ROUTE_DEFS,
+  SUPER_ADMIN_SIDEBAR_ROUTE_DEFS,
+} from "./navConfig";
 
-function isNavActive(pathname: string, href: string): boolean {
-  if (href === ROUTES.dashboard) {
-    return pathname === ROUTES.dashboard || pathname === LEGACY_ROUTES.dashboard;
-  }
-  if (href === ROUTES.imports) {
-    return (
-      pathname === ROUTES.imports ||
-      pathname.startsWith(`${ROUTES.imports}/`) ||
-      pathname === LEGACY_ROUTES.importsList ||
-      pathname.startsWith(`${LEGACY_ROUTES.importsList}/`)
-    );
-  }
-  if (href === ROUTES.settings) {
-    return pathname === ROUTES.settings;
-  }
-  return pathname === href || pathname.startsWith(`${href}/`);
-}
-
-interface RouteItem {
-  href: string;
-  label: string;
-  icon: React.ElementType;
-  adminOnly?: boolean;
-  hideFor?: UserRole[];
-}
-
-function PlataNavIcon({ size = 18 }: { size?: number }) {
-  return (
-    <span
-      className="flex items-center justify-center shrink-0 leading-none"
-      style={{ fontSize: size }}
-      aria-hidden
-    >
-      💰
-    </span>
-  );
-}
-
-const routes: RouteItem[] = [
-  { href: ROUTES.dashboard, label: ro.nav.dashboard, icon: LayoutDashboard },
-  { href: ROUTES.employees, label: ro.nav.employees, icon: Users },
-  { href: ROUTES.documents, label: ro.nav.documents, icon: FileText },
-  { href: ROUTES.deployments, label: ro.nav.deployments, icon: MapPin },
-  { href: ROUTES.imports, label: ro.nav.imports, icon: Download, hideFor: ["doar_vizualizare"] },
-  { href: ROUTES.reports, label: ro.nav.reports, icon: BarChart3 },
-  { href: ROUTES.export, label: ro.nav.export, icon: FileSpreadsheet, hideFor: ["doar_vizualizare"] },
-  { href: ROUTES.pay, label: ro.nav.pay, icon: PlataNavIcon },
-  { href: ROUTES.timesheets, label: "Pontaj", icon: Clock },
-  { href: ROUTES.payslips, label: "Fluturași", icon: FileText },
-  { href: ROUTES.settings, label: ro.nav.settings, icon: Settings, adminOnly: true },
-  { href: ROUTES.companies, label: ro.nav.companies, icon: Factory, adminOnly: true },
-  { href: ROUTES.countries, label: ro.nav.countries, icon: Globe2, adminOnly: true },
-  { href: ROUTES.users, label: ro.nav.users, icon: Shield, adminOnly: true },
-  { href: ROUTES.backup, label: ro.nav.backup, icon: Database, adminOnly: true },
-];
-
-function SidebarNav({
-  onNavigate,
-}: {
-  onNavigate?: () => void;
-}) {
+function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { role } = useAuth();
-  const isAdmin = role === "administrator";
+  const { t } = useTranslation();
 
-  const visibleRoutes = routes.filter((r) => {
-    if (r.adminOnly && !isAdmin) return false;
-    if (r.hideFor && role && r.hideFor.includes(role)) return false;
-    return true;
-  });
+  const visibleRoutes = useMemo(() => {
+    if (!role) return [];
+
+    const isSuperAdmin = role === UserRole.SUPER_ADMIN;
+    const baseRoutes = SIDEBAR_ROUTE_DEFS.filter((route) => {
+      if (isSuperAdmin && ORG_ADMIN_SIDEBAR_HREFS_WITH_ADMIN_BADGE.has(route.href)) {
+        return false;
+      }
+      if (!route.rolesAllowed?.length) return true;
+      return isJwtRoleIn({ role: role as UserRole }, route.rolesAllowed, {
+        superAdminBypass: false,
+      });
+    });
+
+    return isSuperAdmin
+      ? [...baseRoutes, ...SUPER_ADMIN_SIDEBAR_ROUTE_DEFS]
+      : baseRoutes;
+  }, [role]);
 
   return (
     <nav className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 py-3 lg:py-4 space-y-1">
@@ -114,10 +57,10 @@ function SidebarNav({
             }`}
           >
             <route.icon size={18} />
-            <span>{route.label}</span>
-            {route.adminOnly && (
+            <span>{t(route.i18nKey)}</span>
+            {route.showAdminBadge && (
               <span className="ml-auto text-[10px] uppercase tracking-wider text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">
-                Admin
+                {t("components.layout.sidebarAdminBadge")}
               </span>
             )}
           </Link>
@@ -127,37 +70,37 @@ function SidebarNav({
   );
 }
 
-export function Sidebar({
-}: {}) {
+export function Sidebar({}: {}) {
   const [isOpen, setIsOpen] = useState(false);
   const { companyLogoUrl } = useCompanyLogo();
+  const { t } = useTranslation();
 
   return (
     <>
-      {/* Mobile hamburger */}
       <button
         onClick={() => setIsOpen(true)}
         className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-lg bg-slate-900 text-white shadow-lg"
-        aria-label="Deschide meniul"
+        aria-label={t("components.layout.sidebarOpenMenu")}
+        suppressHydrationWarning
+        type="button"
       >
         <Menu size={20} />
       </button>
 
-      {/* Mobile overlay */}
       {isOpen && (
         <div
           className="lg:hidden fixed inset-0 bg-black/50 z-40"
           onClick={() => setIsOpen(false)}
+          aria-hidden
         />
       )}
 
-      {/* Sidebar */}
       <aside
+        suppressHydrationWarning
         className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-slate-900 text-white flex flex-col min-h-0 h-dvh lg:h-dvh transform transition-transform duration-200 lg:transform-none ${
           isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
-        {/* Logo */}
         <div className="shrink-0 flex items-center justify-between px-5 py-4 border-b border-slate-800">
           <Link
             href={ROUTES.dashboard}
@@ -165,38 +108,50 @@ export function Sidebar({
             onClick={() => setIsOpen(false)}
           >
             {companyLogoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- dynamic logo URL from API
               <img
                 src={companyLogoUrl}
-                alt="Logo firmă"
+                alt={t("components.layout.sidebarLogoAlt")}
                 className="max-h-10 w-auto max-w-[200px] object-contain shrink-0"
                 decoding="async"
               />
             ) : (
               <>
                 <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shrink-0">
-                  <span className="text-slate-900 font-bold text-sm">HR</span>
+                  <span
+                    className="text-slate-900 font-bold text-sm"
+                    suppressHydrationWarning
+                  >
+                    {t("components.layout.sidebarBrandInitials")}
+                  </span>
                 </div>
-                <span className="font-semibold text-lg tracking-tight truncate">Manager</span>
+                <span
+                  className="font-semibold text-lg tracking-tight truncate"
+                  suppressHydrationWarning
+                >
+                  {t("components.layout.sidebarFallbackProductName")}
+                </span>
               </>
             )}
           </Link>
           <button
+            type="button"
             onClick={() => setIsOpen(false)}
             className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
-            aria-label="Închide meniul"
+            aria-label={t("components.layout.sidebarCloseMenu")}
+            suppressHydrationWarning
           >
             <X size={18} />
           </button>
         </div>
 
-        {/* Navigation */}
-        <SidebarNav
-          onNavigate={() => setIsOpen(false)}
-        />
+        <SidebarNav onNavigate={() => setIsOpen(false)} />
 
-        {/* Footer */}
-        <div className="shrink-0 px-5 py-3 border-t border-slate-800 text-xs text-slate-500">
-          HR Manager v0.1.0
+        <div
+          suppressHydrationWarning
+          className="shrink-0 px-5 py-3 border-t border-slate-800 text-xs text-slate-500"
+        >
+          {t("components.layout.sidebarFooterVersion")}
         </div>
       </aside>
     </>

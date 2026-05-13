@@ -6,19 +6,23 @@
  * Setează mustChangePassword = false
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { getClientIp, logAuditFF } from "@/lib/audit";
+import { hashPassword, verifyAuth, verifyPassword } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { verifyAuth, verifyPassword, hashPassword } from "@/lib/auth";
-import { logAuditFF, getClientIp } from "@/lib/audit";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 const changeSchema = z.object({
   oldPassword: z.string().min(1),
-  newPassword: z.string()
+  newPassword: z
+    .string()
     .min(8, "Minim 8 caractere")
     .regex(/[A-Z]/, "Cel putin o majuscula")
     .regex(/[0-9]/, "Cel putin o cifra")
-    .regex(/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/, "Cel putin un caracter special"),
+    .regex(
+      /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/,
+      "Cel putin un caracter special",
+    ),
 });
 
 export async function POST(request: NextRequest) {
@@ -34,7 +38,7 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: parsed.error.issues[0]?.message ?? "Date invalide" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -47,12 +51,18 @@ export async function POST(request: NextRequest) {
     });
 
     if (!user) {
-      return NextResponse.json({ error: "Utilizator negasit" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Utilizator negasit" },
+        { status: 404 },
+      );
     }
 
     const valid = await verifyPassword(oldPassword, user.password);
     if (!valid) {
-      return NextResponse.json({ error: "Parola curenta e incorecta" }, { status: 401 });
+      return NextResponse.json(
+        { error: "Parola curenta e incorecta" },
+        { status: 401 },
+      );
     }
 
     // Hash și salvează parola nouă
@@ -69,15 +79,18 @@ export async function POST(request: NextRequest) {
     logAuditFF({
       action: "PASSWORD_CHANGE",
       entity: "User",
-      entityId: user.id,
+      entityId: null,
       userId: user.id,
+      userName: user.email,
       userRole: user.role,
       ipAddress: getClientIp(request),
       details: "Schimbare parola de catre utilizator",
     });
 
-    return NextResponse.json({ success: true, message: "Parola schimbata cu succes" });
-
+    return NextResponse.json({
+      success: true,
+      message: "Parola schimbata cu succes",
+    });
   } catch {
     return NextResponse.json({ error: "Eroare" }, { status: 500 });
   }

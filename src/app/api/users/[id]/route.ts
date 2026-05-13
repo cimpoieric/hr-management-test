@@ -1,35 +1,47 @@
 /**
- * PUT    /api/users/[id] — Editează utilizator (ADMIN)
- * DELETE /api/users/[id] — Soft delete (ADMIN)
- *
- * Acțiuni:
- *   PUT { name, role, isActive } — editare
- *   PUT { resetPassword: true } — resetare parolă (generează nouă temporară)
- *   DELETE — dezactivează user (soft delete)
+ * PUT    /api/users/[id] — Editează utilizator
+ * DELETE /api/users/[id] — Soft delete
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { requireAuth, hashPassword } from "@/lib/auth";
-import { logAuditFF, getClientIp } from "@/lib/audit";
+import { getClientIp, logAuditFF } from "@/lib/audit";
+import { hashPassword, requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN, UserRole } from "@/lib/roles";
 import { generateTempPassword } from "@/lib/backup";
+import { prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
-// ─── GET — detalii user ──────────────────────────────────────────────────────
+const cuidParam = z.string().cuid();
+
+function isDbAdminRole(role: string): boolean {
+  return role === "ORG_ADMIN" || role === "SUPER_ADMIN";
+}
+
+function assertSameOrg(
+  actor: { role: UserRole; organizationId: string },
+  targetOrgId: string,
+): boolean {
+  if (actor.role === UserRole.SUPER_ADMIN) return true;
+  return actor.organizationId === targetOrgId;
+}
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
     const { id } = await params;
-    const userId = parseInt(id, 10);
-    if (isNaN(userId)) {
+    const idParsed = cuidParam.safeParse(id);
+    if (!idParsed.success) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
+    const userId = idParsed.data;
 
     const u = await prisma.user.findUnique({
       where: { id: userId },
@@ -38,6 +50,7 @@ export async function GET(
         name: true,
         email: true,
         role: true,
+        organizationId: true,
         isActive: true,
         mustChangePassword: true,
         lastLoginAt: true,
@@ -47,7 +60,14 @@ export async function GET(
     });
 
     if (!u) {
-      return NextResponse.json({ error: "Utilizator negasit" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Utilizator negasit" },
+        { status: 404 },
+      );
+    }
+
+    if (!assertSameOrg(user, u.organizationId)) {
+      return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
     }
 
     return NextResponse.json({ data: u });
@@ -56,72 +76,94 @@ export async function GET(
   }
 }
 
-// ─── PUT — editare / resetare parolă ─────────────────────────────────────────
-
 const updateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  role: z.enum(["administrator", "operator", "doar_vizualizare"]).optional(),
+  role: z.nativeEnum(UserRole).optional(),
   isActive: z.boolean().optional(),
   resetPassword: z.boolean().optional(),
 });
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user: adminUser, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user: adminUser, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !adminUser) return authError!;
 
   try {
     const { id } = await params;
-    const userId = parseInt(id, 10);
-    if (isNaN(userId)) {
+    const idParsed = cuidParam.safeParse(id);
+    if (!idParsed.success) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
+    const userId = idParsed.data;
 
     const body = await request.json();
     const parsed = updateSchema.safeParse(body);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Date invalide", issues: parsed.error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const { name, role, isActive, resetPassword } = parsed.data;
 
-    // Verifică că userul există
     const existing = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, email: true, role: true, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        organizationId: true,
+      },
     });
 
     if (!existing) {
-      return NextResponse.json({ error: "Utilizator negasit" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Utilizator negasit" },
+        { status: 404 },
+      );
     }
 
-    // Nu poți dezactiva singurul admin
-    if (isActive === false && existing.role === "administrator") {
+    if (!assertSameOrg(adminUser, existing.organizationId)) {
+      return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
+    }
+
+    if (
+      role === UserRole.SUPER_ADMIN &&
+      adminUser.role !== UserRole.SUPER_ADMIN
+    ) {
+      return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
+    }
+
+    if (isActive === false && isDbAdminRole(existing.role)) {
       const adminCount = await prisma.user.count({
-        where: { role: "administrator", isActive: true },
+        where: {
+          role: { in: ["ORG_ADMIN", "SUPER_ADMIN"] },
+          isActive: true,
+        },
       });
       if (adminCount <= 1) {
         return NextResponse.json(
           { error: "Nu poti dezactiva singurul administrator" },
-          { status: 400 }
+          { status: 400 },
         );
       }
     }
 
-    // Nu te poți dezactiva pe tine însuți
-    if (isActive === false && userId === adminUser!.userId) {
+    if (isActive === false && userId === adminUser.userId) {
       return NextResponse.json(
         { error: "Nu te poti dezactiva pe tine insuti" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    // Resetare parolă
     if (resetPassword) {
       const tempPassword = generateTempPassword();
       const passwordHash = await hashPassword(tempPassword);
@@ -134,14 +176,13 @@ export async function PUT(
         },
       });
 
-      // Audit log
       logAuditFF({
         action: "PASSWORD_CHANGE",
         entity: "User",
-        entityId: userId,
-        userId: adminUser!.userId,
-        userName: adminUser!.email,
-        userRole: adminUser!.role,
+        entityId: null,
+        userId: adminUser.userId,
+        userName: adminUser.email,
+        userRole: adminUser.role,
         ipAddress: getClientIp(request),
         details: `Resetare parola pentru ${existing.email}`,
       });
@@ -157,7 +198,6 @@ export async function PUT(
       });
     }
 
-    // Editare normală
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name.trim();
     if (role !== undefined) updateData.role = role;
@@ -175,93 +215,111 @@ export async function PUT(
         name: true,
         email: true,
         role: true,
+        organizationId: true,
         isActive: true,
         mustChangePassword: true,
         updatedAt: true,
       },
     });
 
-    // Audit log
     logAuditFF({
       action: "UPDATE",
       entity: "User",
-      entityId: userId,
-      userId: adminUser!.userId,
-      userName: adminUser!.email,
-      userRole: adminUser!.role,
+      entityId: null,
+      userId: adminUser.userId,
+      userName: adminUser.email,
+      userRole: adminUser.role,
       ipAddress: getClientIp(request),
-      oldValues: { name: existing.name, role: existing.role, isActive: existing.isActive },
+      oldValues: {
+        name: existing.name,
+        role: existing.role,
+        isActive: existing.isActive,
+      },
       newValues: updateData,
     });
 
     return NextResponse.json({ user: updated });
-
   } catch (error) {
     console.error("[USERS_PUT]", error);
     return NextResponse.json({ error: "Eroare" }, { status: 500 });
   }
 }
 
-// ─── DELETE — soft delete (dezactivează) ─────────────────────────────────────
-
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user: adminUser, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user: adminUser, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !adminUser) return authError!;
 
   try {
     const { id } = await params;
-    const userId = parseInt(id, 10);
-    if (isNaN(userId)) {
+    const idParsed = cuidParam.safeParse(id);
+    if (!idParsed.success) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
+    const userId = idParsed.data;
 
-    // Nu te poți șterge pe tine însuți
-    if (userId === adminUser!.userId) {
+    if (userId === adminUser.userId) {
       return NextResponse.json(
         { error: "Nu te poti sterge pe tine insuti" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const existing = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, email: true, role: true, isActive: true },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        isActive: true,
+        organizationId: true,
+      },
     });
 
     if (!existing) {
-      return NextResponse.json({ error: "Utilizator negasit" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Utilizator negasit" },
+        { status: 404 },
+      );
     }
 
-    // Nu poți șterge singurul admin
-    if (existing.role === "administrator") {
+    if (!assertSameOrg(adminUser, existing.organizationId)) {
+      return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
+    }
+
+    if (isDbAdminRole(existing.role)) {
       const adminCount = await prisma.user.count({
-        where: { role: "administrator", isActive: true },
+        where: {
+          role: { in: ["ORG_ADMIN", "SUPER_ADMIN"] },
+          isActive: true,
+        },
       });
       if (adminCount <= 1) {
         return NextResponse.json(
           { error: "Nu poti sterge singurul administrator" },
-          { status: 400 }
+          { status: 400 },
         );
       }
     }
 
-    // Soft delete: dezactivează
     await prisma.user.update({
       where: { id: userId },
       data: { isActive: false },
     });
 
-    // Audit log
     logAuditFF({
       action: "DELETE",
       entity: "User",
-      entityId: userId,
-      userId: adminUser!.userId,
-      userName: adminUser!.email,
-      userRole: adminUser!.role,
+      entityId: null,
+      userId: adminUser.userId,
+      userName: adminUser.email,
+      userRole: adminUser.role,
       ipAddress: getClientIp(request),
       oldValues: { isActive: existing.isActive },
       newValues: { isActive: false },
@@ -271,7 +329,6 @@ export async function DELETE(
       message: "Utilizator dezactivat",
       userId,
     });
-
   } catch (error) {
     console.error("[USERS_DELETE]", error);
     return NextResponse.json({ error: "Eroare" }, { status: 500 });

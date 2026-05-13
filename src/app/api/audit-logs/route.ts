@@ -16,24 +16,40 @@
  *   doar_vizualizare  — vezi doar logurile proprii
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { isJwtRoleIn, ROLES_SETTINGS_ADMIN } from "@/lib/roles";
+import { prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
 
 // ─── Tipuri acțiuni pentru filtrare ──────────────────────────────────────────
 
 const VALID_ACTIONS = [
-  "LOGIN", "LOGOUT", "LOGIN_FAILED",
-  "CREATE", "UPDATE", "DELETE",
-  "VIEW", "EXPORT_EXCEL", "EXPORT_PDF", "REPORT_GENERATE",
-  "IMPORT_APPROVE", "IMPORT_REJECT",
-  "BACKUP", "PASSWORD_CHANGE", "SETTINGS_CHANGE",
+  "LOGIN",
+  "LOGOUT",
+  "LOGIN_FAILED",
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+  "VIEW",
+  "EXPORT_EXCEL",
+  "EXPORT_PDF",
+  "REPORT_GENERATE",
+  "IMPORT_APPROVE",
+  "IMPORT_REJECT",
+  "BACKUP",
+  "PASSWORD_CHANGE",
+  "SETTINGS_CHANGE",
 ];
 
 const VALID_ENTITIES = [
-  "Employee", "Document", "Deployment",
-  "User", "Report", "System",
-  "PendingImport", "Company",
+  "Employee",
+  "Document",
+  "Deployment",
+  "User",
+  "Report",
+  "System",
+  "PendingImport",
+  "Company",
 ];
 
 // ─── Helper: parse date ──────────────────────────────────────────────────────
@@ -48,15 +64,24 @@ function parseDate(dateStr: string): Date | null {
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
     const { searchParams } = request.nextUrl;
 
     // ── Parse params ──
-    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
-    const limit = Math.min(200, Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10)));
+    const page = Math.max(
+      1,
+      Number.parseInt(searchParams.get("page") ?? "1", 10),
+    );
+    const limit = Math.min(
+      200,
+      Math.max(1, Number.parseInt(searchParams.get("limit") ?? "50", 10)),
+    );
     const skip = (page - 1) * limit;
 
     const filterUserId = searchParams.get("userId");
@@ -69,10 +94,10 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = {};
 
     // RBAC: non-admin vede doar logurile proprii
-    if (user.role !== "administrator") {
+    if (!isJwtRoleIn(user, ROLES_SETTINGS_ADMIN)) {
       where.userId = user.userId;
     } else if (filterUserId) {
-      where.userId = parseInt(filterUserId, 10);
+      where.userId = Number.parseInt(filterUserId, 10);
     }
 
     if (entityType && VALID_ENTITIES.includes(entityType)) {
@@ -142,10 +167,12 @@ export async function GET(request: NextRequest) {
       limit,
       totalPages: Math.ceil(total / limit),
     });
-
   } catch (error) {
     console.error("[AUDIT_LOGS_GET]", error);
-    return NextResponse.json({ error: "Eroare la citirea logurilor" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Eroare la citirea logurilor" },
+      { status: 500 },
+    );
   }
 }
 

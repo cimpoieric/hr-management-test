@@ -1,21 +1,21 @@
-const path = require('path');
-const fs = require('fs');
-const os = require('os');
-const http = require('http');
-const { spawn, exec } = require('child_process');
-const { app, BrowserWindow, dialog } = require('electron');
+const path = require("path");
+const fs = require("fs");
+const os = require("os");
+const http = require("http");
+const { spawn, exec } = require("child_process");
+const { app, BrowserWindow, dialog } = require("electron");
 
-const windowIcon = path.join(__dirname, 'icon.ico');
-const loadingHtml = path.join(__dirname, 'loading.html');
+const windowIcon = path.join(__dirname, "icon.ico");
+const loadingHtml = path.join(__dirname, "loading.html");
 
 const DEFAULT_PORT = (() => {
-  const p = parseInt(process.env.PORT || '', 10);
+  const p = parseInt(process.env.PORT || "", 10);
   return !Number.isNaN(p) && p > 0 && p < 65536 ? p : 3000;
 })();
-const SERVER_HOST = '127.0.0.1';
+const SERVER_HOST = "127.0.0.1";
 const SERVER_START_TIMEOUT_MS = 180_000;
 const SERVER_POLL_INTERVAL_MS = 400;
-/** Short probe when checking if user already ran `npm run start` */
+/** Short probe when checking if user already ran `npm run start:script` */
 const EXISTING_SERVER_PROBE_MS = 2_500;
 const DEBUG_LOG_MAX_BYTES = 512 * 1024;
 
@@ -25,16 +25,22 @@ let debugLogPath = null;
 function getDebugLogPath() {
   if (!debugLogPath) {
     try {
-      debugLogPath = path.join(app.getPath('userData'), 'electron-server-debug.log');
+      debugLogPath = path.join(
+        app.getPath("userData"),
+        "electron-server-debug.log",
+      );
     } catch {
-      debugLogPath = path.join(os.tmpdir(), 'hr-management-electron-server-debug.log');
+      debugLogPath = path.join(
+        os.tmpdir(),
+        "hr-management-electron-server-debug.log",
+      );
     }
   }
   return debugLogPath;
 }
 
 function debugLog(...parts) {
-  const line = `[${new Date().toISOString()}] ${parts.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ')}\n`;
+  const line = `[${new Date().toISOString()}] ${parts.map((p) => (typeof p === "string" ? p : JSON.stringify(p))).join(" ")}\n`;
   try {
     console.log(line.trimEnd());
   } catch {
@@ -42,7 +48,7 @@ function debugLog(...parts) {
   }
   try {
     const logFile = getDebugLogPath();
-    fs.appendFileSync(logFile, line, 'utf8');
+    fs.appendFileSync(logFile, line, "utf8");
     trimDebugLogIfNeeded(logFile);
   } catch {
     /* ignore */
@@ -65,38 +71,43 @@ function trimDebugLogIfNeeded(logFile) {
  * Windows: Explorer-launched apps often get a minimal PATH. Merge Machine+User PATH from registry layer.
  */
 function getAugmentedPath(appRoot) {
-  const binDir = path.join(appRoot, 'node_modules', '.bin');
-  const prefix = fs.existsSync(binDir) ? `${binDir}${path.delimiter}` : '';
+  const binDir = path.join(appRoot, "node_modules", ".bin");
+  const prefix = fs.existsSync(binDir) ? `${binDir}${path.delimiter}` : "";
 
-  let base = process.env.Path || process.env.PATH || '';
-  if (process.platform === 'win32') {
+  let base = process.env.Path || process.env.PATH || "";
+  if (process.platform === "win32") {
     try {
       const ps = path.join(
-        process.env.SystemRoot || 'C:\\Windows',
-        'System32',
-        'WindowsPowerShell',
-        'v1.0',
-        'powershell.exe',
+        process.env.SystemRoot || "C:\\Windows",
+        "System32",
+        "WindowsPowerShell",
+        "v1.0",
+        "powershell.exe",
       );
       if (fs.existsSync(ps)) {
-        const { execFileSync } = require('child_process');
+        const { execFileSync } = require("child_process");
         const machineUser = execFileSync(
           ps,
           [
-            '-NoProfile',
-            '-NonInteractive',
-            '-Command',
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
             "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')",
           ],
-          { encoding: 'utf8', timeout: 8000, windowsHide: true },
+          { encoding: "utf8", timeout: 8000, windowsHide: true },
         ).trim();
         if (machineUser.length > 0) {
           base = machineUser;
-          debugLog('PATH refreshed from Machine+User (PowerShell)', { length: base.length });
+          debugLog("PATH refreshed from Machine+User (PowerShell)", {
+            length: base.length,
+          });
         }
       }
     } catch (e) {
-      debugLog('PATH refresh failed, using process.env', String(e && e.message));
+      debugLog(
+        "PATH refresh failed, using process.env",
+        String(e && e.message),
+      );
     }
   }
 
@@ -104,48 +115,56 @@ function getAugmentedPath(appRoot) {
 }
 
 function findNodeExecutable() {
-  if (process.env.npm_node_execpath && fs.existsSync(process.env.npm_node_execpath)) {
+  if (
+    process.env.npm_node_execpath &&
+    fs.existsSync(process.env.npm_node_execpath)
+  ) {
     return process.env.npm_node_execpath;
   }
-  const pf = process.env.ProgramFiles || 'C:\\Program Files';
-  const pfx86 = process.env['ProgramFiles(x86)'] || '';
-  const local = process.env.LocalAppData || '';
+  const pf = process.env.ProgramFiles || "C:\\Program Files";
+  const pfx86 = process.env["ProgramFiles(x86)"] || "";
+  const local = process.env.LocalAppData || "";
   const candidates = [
-    path.join(pf, 'nodejs', 'node.exe'),
-    pfx86 ? path.join(pfx86, 'nodejs', 'node.exe') : '',
-    local ? path.join(local, 'Programs', 'Microsoft VS Code', 'node.exe') : '',
-    local ? path.join(local, 'Programs', 'nodejs', 'node.exe') : '',
+    path.join(pf, "nodejs", "node.exe"),
+    pfx86 ? path.join(pfx86, "nodejs", "node.exe") : "",
+    local ? path.join(local, "Programs", "Microsoft VS Code", "node.exe") : "",
+    local ? path.join(local, "Programs", "nodejs", "node.exe") : "",
   ].filter(Boolean);
 
   for (const c of candidates) {
     if (fs.existsSync(c)) {
-      debugLog('Resolved node.exe', c);
+      debugLog("Resolved node.exe", c);
       return c;
     }
   }
 
-  const dirs = (process.env.Path || process.env.PATH || '').split(path.delimiter);
+  const dirs = (process.env.Path || process.env.PATH || "").split(
+    path.delimiter,
+  );
   for (const dir of dirs) {
     if (!dir) continue;
-    const n = path.join(dir, process.platform === 'win32' ? 'node.exe' : 'node');
+    const n = path.join(
+      dir,
+      process.platform === "win32" ? "node.exe" : "node",
+    );
     if (fs.existsSync(n)) {
-      debugLog('Resolved node from PATH', n);
+      debugLog("Resolved node from PATH", n);
       return n;
     }
   }
 
-  debugLog('Falling back to bare node (hope PATH is sufficient)');
-  return 'node';
+  debugLog("Falling back to bare node (hope PATH is sufficient)");
+  return "node";
 }
 
 function resolveNpmCmd(nodeExe) {
   const dir = path.dirname(nodeExe);
-  const npmCmd = path.join(dir, 'npm.cmd');
-  if (process.platform === 'win32' && fs.existsSync(npmCmd)) {
-    debugLog('Resolved npm.cmd', npmCmd);
+  const npmCmd = path.join(dir, "npm.cmd");
+  if (process.platform === "win32" && fs.existsSync(npmCmd)) {
+    debugLog("Resolved npm.cmd", npmCmd);
     return npmCmd;
   }
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
 function probeHttpOkOnce(port) {
@@ -155,8 +174,8 @@ function probeHttpOkOnce(port) {
       res.resume();
       resolve(true);
     });
-    req.on('error', () => resolve(false));
-    req.on('timeout', () => {
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => {
       req.destroy();
       resolve(false);
     });
@@ -192,10 +211,10 @@ function waitForHttpOk(port, timeoutMs) {
         res.resume();
         resolve();
       });
-      req.on('error', () => {
+      req.on("error", () => {
         setTimeout(attempt, SERVER_POLL_INTERVAL_MS);
       });
-      req.on('timeout', () => {
+      req.on("timeout", () => {
         req.destroy();
         setTimeout(attempt, SERVER_POLL_INTERVAL_MS);
       });
@@ -210,34 +229,34 @@ let serverStartPromise = null;
 
 function getAppRoot() {
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'hr-next');
+    return path.join(process.resourcesPath, "hr-next");
   }
-  return path.join(__dirname, '..');
+  return path.join(__dirname, "..");
 }
 
 /** If resources/hr-next/.env is missing, copy from .env next to the .exe (portable / read-only install). */
 function ensurePackagedEnvFile() {
   if (!app.isPackaged) return;
-  const appRoot = path.join(process.resourcesPath, 'hr-next');
-  const dest = path.join(appRoot, '.env');
+  const appRoot = path.join(process.resourcesPath, "hr-next");
+  const dest = path.join(appRoot, ".env");
   if (fs.existsSync(dest)) return;
-  const besideExe = path.join(path.dirname(process.execPath), '.env');
+  const besideExe = path.join(path.dirname(process.execPath), ".env");
   if (!fs.existsSync(besideExe)) return;
   try {
     fs.copyFileSync(besideExe, dest);
-    debugLog('Copied .env from beside exe to hr-next');
+    debugLog("Copied .env from beside exe to hr-next");
   } catch (e) {
-    debugLog('Could not copy .env beside exe', String(e && e.message));
+    debugLog("Could not copy .env beside exe", String(e && e.message));
   }
 }
 
 function getServerPort() {
-  const envPath = path.join(getAppRoot(), '.env');
+  const envPath = path.join(getAppRoot(), ".env");
   if (!fs.existsSync(envPath)) {
     return DEFAULT_PORT;
   }
   try {
-    const raw = fs.readFileSync(envPath, 'utf8');
+    const raw = fs.readFileSync(envPath, "utf8");
     const m = raw.match(/^\s*PORT\s*=\s*(\d+)/m);
     if (m) {
       const p = parseInt(m[1], 10);
@@ -252,12 +271,12 @@ function getServerPort() {
 function killServerProcessTree() {
   if (!nextServerChild || !nextServerChild.pid) return;
   const pid = nextServerChild.pid;
-  debugLog('Killing server process tree', { pid });
-  if (process.platform === 'win32') {
+  debugLog("Killing server process tree", { pid });
+  if (process.platform === "win32") {
     exec(`taskkill /PID ${pid} /T /F`, () => {});
   } else {
     try {
-      nextServerChild.kill('SIGTERM');
+      nextServerChild.kill("SIGTERM");
     } catch {
       /* ignore */
     }
@@ -268,33 +287,37 @@ function killServerProcessTree() {
 function attachChildLogging(child) {
   if (!child.stdout || !child.stderr) return;
   const append = (buf, label) => {
-    const s = buf.toString('utf8');
+    const s = buf.toString("utf8");
     if (!s.trim()) return;
     for (const line of s.split(/\r?\n/)) {
       if (line) debugLog(`[child ${label}]`, line);
     }
   };
-  child.stdout.on('data', (d) => append(d, 'stdout'));
-  child.stderr.on('data', (d) => append(d, 'stderr'));
+  child.stdout.on("data", (d) => append(d, "stdout"));
+  child.stderr.on("data", (d) => append(d, "stderr"));
 }
 
 function spawnNextServer(appRoot, port) {
   if (nextServerChild && !nextServerChild.killed) {
-    debugLog('spawnNextServer: child already tracked, skipping new spawn');
+    debugLog("spawnNextServer: child already tracked, skipping new spawn");
     return Promise.resolve();
   }
 
-  const pkgPath = path.join(appRoot, 'package.json');
+  const pkgPath = path.join(appRoot, "package.json");
   if (!fs.existsSync(pkgPath)) {
     return Promise.reject(
-      new Error(`Lipsește package.json în ${appRoot}. Instalarea aplicației pare incompletă. Jurnal: ${getDebugLogPath()}`),
+      new Error(
+        `Lipsește package.json în ${appRoot}. Instalarea aplicației pare incompletă. Jurnal: ${getDebugLogPath()}`,
+      ),
     );
   }
 
-  const startScript = path.join(appRoot, 'scripts', 'start.js');
+  const startScript = path.join(appRoot, "scripts", "start.js");
   if (!fs.existsSync(startScript)) {
     return Promise.reject(
-      new Error(`Lipsește scripts/start.js în ${appRoot}. Jurnal: ${getDebugLogPath()}`),
+      new Error(
+        `Lipsește scripts/start.js în ${appRoot}. Jurnal: ${getDebugLogPath()}`,
+      ),
     );
   }
 
@@ -304,33 +327,35 @@ function spawnNextServer(appRoot, port) {
     Path: augmentedPath,
     PATH: augmentedPath,
     PORT: String(port),
-    HOST: process.env.HOST || '0.0.0.0',
-    ELECTRON_RUN: '1',
+    HOST: process.env.HOST || "0.0.0.0",
+    ELECTRON_RUN: "1",
   };
 
-  debugLog('--- server start ---', {
+  debugLog("--- server start ---", {
     appRoot,
     port,
     packaged: app.isPackaged,
     execPath: process.execPath,
     cwd: process.cwd(),
-    pathHead: augmentedPath.split(path.delimiter).slice(0, 6).join(' | '),
+    pathHead: augmentedPath.split(path.delimiter).slice(0, 6).join(" | "),
   });
 
-  return tryStartWithExistingServer(port)
-    .then((already) => {
-      if (already) {
-        debugLog('HTTP already responding; using existing server (no spawn)');
-        return Promise.resolve();
-      }
-      return spawnChildAndWait(appRoot, port, env, startScript);
-    });
+  return tryStartWithExistingServer(port).then((already) => {
+    if (already) {
+      debugLog("HTTP already responding; using existing server (no spawn)");
+      return Promise.resolve();
+    }
+    return spawnChildAndWait(appRoot, port, env, startScript);
+  });
 }
 
 function tryStartWithExistingServer(port) {
-  debugLog('Probing for existing server', { port, ms: EXISTING_SERVER_PROBE_MS });
+  debugLog("Probing for existing server", {
+    port,
+    ms: EXISTING_SERVER_PROBE_MS,
+  });
   return serverAlreadyRunning(port).then((ok) => {
-    debugLog('Existing server probe result', ok);
+    debugLog("Existing server probe result", ok);
     return ok;
   });
 }
@@ -359,13 +384,13 @@ function spawnChildAndWait(appRoot, port, env, startScript) {
     waitForHttpOk(port, SERVER_START_TIMEOUT_MS).then(succeed).catch(fail);
 
     function wireExit(c) {
-      c.on('exit', (code, signal) => {
-        debugLog('child exit', { code, signal, pid: c.pid });
+      c.on("exit", (code, signal) => {
+        debugLog("child exit", { code, signal, pid: c.pid });
         if (nextServerChild === c) nextServerChild = null;
         if (!settled && code !== 0 && code != null) {
           fail(
             new Error(
-              `Serverul s-a oprit neașteptat (cod ${code}${signal ? `, ${signal}` : ''}). Verifică .env și baza de date (npm run setup). Jurnal: ${getDebugLogPath()}`,
+              `Serverul s-a oprit neașteptat (cod ${code}${signal ? `, ${signal}` : ""}). Verifică .env și baza de date (npm run setup). Jurnal: ${getDebugLogPath()}`,
             ),
           );
         }
@@ -373,23 +398,23 @@ function spawnChildAndWait(appRoot, port, env, startScript) {
     }
 
     function trySpawn(exe, args, label) {
-      debugLog('Spawning', label, { exe, args, cwd: appRoot });
+      debugLog("Spawning", label, { exe, args, cwd: appRoot });
       const c = spawn(exe, args, {
         cwd: appRoot,
         env,
         windowsHide: true,
         shell: false,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ["ignore", "pipe", "pipe"],
       });
       nextServerChild = c;
       attachChildLogging(c);
       wireExit(c);
-      c.on('error', (err) => {
-        debugLog('spawn error', label, err.message, err.code);
+      c.on("error", (err) => {
+        debugLog("spawn error", label, err.message, err.code);
         if (nextServerChild === c) nextServerChild = null;
-        if (!npmTried && label === 'node+start.js') {
+        if (!npmTried && label === "node+start.js") {
           npmTried = true;
-          trySpawn(npmCmd, ['run', 'start'], 'npm run start');
+          trySpawn(npmCmd, ["run", "start:script"], "npm run start:script");
           return;
         }
         fail(
@@ -400,7 +425,7 @@ function spawnChildAndWait(appRoot, port, env, startScript) {
       });
     }
 
-    trySpawn(nodeExe, [startScript], 'node+start.js');
+    trySpawn(nodeExe, [startScript], "node+start.js");
   });
 }
 
@@ -410,7 +435,7 @@ function startEmbeddedServerIfNeeded() {
   ensurePackagedEnvFile();
   const appRoot = getAppRoot();
   const port = getServerPort();
-  debugLog('startEmbeddedServerIfNeeded', { appRoot, port });
+  debugLog("startEmbeddedServerIfNeeded", { appRoot, port });
   serverStartPromise = spawnNextServer(appRoot, port).catch((err) => {
     serverStartPromise = null;
     throw err;
@@ -436,13 +461,13 @@ function createMainWindow(port) {
   startEmbeddedServerIfNeeded()
     .then(() => {
       if (mainWindow.isDestroyed()) return;
-      debugLog('Loading app URL', `http://${SERVER_HOST}:${port}/`);
+      debugLog("Loading app URL", `http://${SERVER_HOST}:${port}/`);
       mainWindow.loadURL(`http://${SERVER_HOST}:${port}`);
     })
     .catch((err) => {
-      debugLog('FATAL start', err.message);
+      debugLog("FATAL start", err.message);
       dialog.showErrorBox(
-        'HR Management — eroare pornire',
+        "HR Management — eroare pornire",
         `${err.message || String(err)}\n\nJurnal: ${getDebugLogPath()}`,
       );
       if (!mainWindow.isDestroyed()) {
@@ -458,7 +483,7 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on("second-instance", () => {
     const wins = BrowserWindow.getAllWindows();
     if (wins.length > 0) {
       const w = wins[0];
@@ -468,23 +493,26 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
-    debugLog('app ready', { userData: app.getPath('userData'), packaged: app.isPackaged });
+    debugLog("app ready", {
+      userData: app.getPath("userData"),
+      packaged: app.isPackaged,
+    });
     const port = getServerPort();
     createMainWindow(port);
   });
 
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
       killServerProcessTree();
       app.quit();
     }
   });
 
-  app.on('before-quit', () => {
+  app.on("before-quit", () => {
     killServerProcessTree();
   });
 
-  app.on('activate', () => {
+  app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       const port = getServerPort();
       createMainWindow(port);

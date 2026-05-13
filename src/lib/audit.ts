@@ -17,14 +17,24 @@ import "server-only";
  */
 
 import type { NextRequest } from "next/server";
-import { prisma } from "./prisma";
 import {
+  createSafeAuditLog,
+} from "./auditInsert";
+import {
+  type AuditContextData,
   auditStorage,
-  setAuditContext,
   clearAuditContext,
   getClientIp,
-  type AuditContextData,
+  setAuditContext,
 } from "./auditContext";
+import { prismaBase } from "./prisma";
+
+export {
+  createSafeAuditLog,
+  resolveAuditEntityId,
+  resolveSafeAuditUserId,
+  type SafeAuditLogInput,
+} from "./auditInsert";
 
 export { auditStorage, setAuditContext, clearAuditContext, getClientIp };
 export type { AuditContextData };
@@ -61,7 +71,11 @@ export type EntityType =
   | "Company";
 
 /** Acțiuni tracate automat de Prisma middleware */
-export const AUTO_TRACED_ACTIONS: AuditAction[] = ["CREATE", "UPDATE", "DELETE"];
+export const AUTO_TRACED_ACTIONS: AuditAction[] = [
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+];
 
 /** Acțiuni care NU sunt tracate automat (doar manual) */
 export const MANUAL_ONLY_ACTIONS: AuditAction[] = [
@@ -101,24 +115,32 @@ const SENSITIVE_FIELDS = [
 
 /** Verifică dacă un key conține câmp sensibil */
 function isSensitiveField(key: string): boolean {
-  return SENSITIVE_FIELDS.some((sf) => key.toLowerCase().includes(sf.toLowerCase()));
+  return SENSITIVE_FIELDS.some((sf) =>
+    key.toLowerCase().includes(sf.toLowerCase()),
+  );
 }
 
 /** Strip-ează câmpuri sensibile dintr-un obiect (deep, recursiv) */
-export function stripSensitiveValues(obj: Record<string, unknown>): Record<string, unknown> {
+export function stripSensitiveValues(
+  obj: Record<string, unknown>,
+): Record<string, unknown> {
   if (!obj || typeof obj !== "object" || obj === null) return {};
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
     if (isSensitiveField(key)) {
       result[key] = "***REDACTED***";
-    } else if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    } else if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
       result[key] = stripSensitiveValues(value as Record<string, unknown>);
     } else if (Array.isArray(value)) {
       result[key] = value.map((item) =>
         typeof item === "object" && item !== null
           ? stripSensitiveValues(item as Record<string, unknown>)
-          : item
+          : item,
       );
     } else {
       result[key] = value;
@@ -149,11 +171,12 @@ export function sanitizeValues(values: unknown): string {
 export interface LogAuditOptions {
   action: AuditAction;
   entity: EntityType;
-  entityId?: number;
+  entityId?: number | null;
   oldValues?: unknown;
   newValues?: unknown;
   details?: string; // Text scurt descriere, opțional
-  userId?: number;
+  /** Stored as string on `AuditLog.userId` (User.id is cuid). Numbers are coerced. */
+  userId?: string | number | null;
   userName?: string;
   userRole?: string;
   ipAddress?: string;
@@ -170,35 +193,24 @@ export interface LogAuditOptions {
 export async function logAudit(options: LogAuditOptions): Promise<void> {
   const ctx = auditStorage.getStore();
 
-  const userId = options.userId ?? ctx?.userId ?? null;
+  const rawUserId = options.userId ?? ctx?.userId ?? null;
   const userName = options.userName ?? ctx?.userName ?? null;
   const userRole = options.userRole ?? ctx?.userRole ?? null;
   const ipAddress = options.ipAddress ?? ctx?.ipAddress ?? null;
   const userAgent = options.userAgent ?? ctx?.userAgent ?? null;
 
-  try {
-    await prisma.auditLog.create({
-      data: {
-        action: options.action,
-        entity: options.entity,
-        entityId: options.entityId ?? null,
-        userId,
-        userName,
-        userRole,
-        oldValues: options.oldValues ? sanitizeValues(options.oldValues) : null,
-        newValues: options.newValues ? sanitizeValues(options.newValues) : null,
-        ipAddress,
-        userAgent,
-      },
-    });
-  } catch (error) {
-    // Loghează eroarea dar NU o propagă — audit-ul nu trebuie să blocheze funcționalitatea
-    console.error("[AUDIT_LOG_ERROR]", {
-      action: options.action,
-      entity: options.entity,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
+  await createSafeAuditLog({
+    action: options.action,
+    entity: options.entity,
+    entityId: options.entityId ?? null,
+    userId: rawUserId,
+    userName,
+    userRole,
+    oldValues: options.oldValues ? sanitizeValues(options.oldValues) : null,
+    newValues: options.newValues ? sanitizeValues(options.newValues) : null,
+    ipAddress,
+    userAgent,
+  });
 }
 
 /**
@@ -219,14 +231,14 @@ export function logAuditFF(options: LogAuditOptions): void {
  * Rezolvă utilizatorul din request pentru context audit.
  */
 export async function resolveUserForAudit(
-  request: NextRequest
+  request: NextRequest,
 ): Promise<AuditContextData | null> {
   try {
     const { verifyAuth } = await import("./auth");
     const auth = await verifyAuth(request);
     if (!auth) return null;
 
-    const user = await prisma.user.findUnique({
+    const user = await prismaBase.user.findUnique({
       where: { id: auth.userId },
       select: { id: true, name: true, email: true, role: true },
     });
@@ -259,12 +271,17 @@ export async function resolveUserForAudit(
  */
 export async function withAuditContext<T>(
   request: NextRequest,
-  handler: () => Promise<T>
+  handler: () => Promise<T>,
 ): Promise<T> {
   const userInfo = await resolveUserForAudit(request);
 
   if (userInfo) {
-    setAuditContext(request, userInfo.userId, userInfo.userName, userInfo.userRole);
+    setAuditContext(
+      request,
+      userInfo.userId,
+      userInfo.userName,
+      userInfo.userRole,
+    );
   }
 
   try {

@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { Save, X, AlertCircle, Globe } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
   DEPLOYMENT_COUNTRIES,
   DEPLOYMENT_STATUSES,
   getCountryLabel,
 } from "@/lib/countries";
+import { AlertCircle, Globe, Save, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
 interface DeploymentFormProps {
   employeeId: number;
@@ -16,50 +16,59 @@ interface DeploymentFormProps {
   onCancel?: () => void;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  PLANNED: "Planificată",
-  ACTIVE: "Activă",
-  COMPLETED: "Finalizată",
-  CANCELLED: "Anulată",
-};
-
 export function DeploymentForm({
   employeeId,
   employeeName,
   onSuccess,
   onCancel,
 }: DeploymentFormProps) {
+  const { t } = useTranslation();
   const [form, setForm] = useState({
     country: "NL",
     city: "",
-    startDate: new Date().toISOString().split("T")[0],
+    startDate: "",
     endDate: "",
     status: "ACTIVE" as string,
     notes: "",
   });
+
+  useEffect(() => {
+    setForm((prev) =>
+      prev.startDate
+        ? prev
+        : {
+            ...prev,
+            startDate: new Date().toISOString().split("T")[0] ?? "",
+          },
+    );
+  }, []);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [overlapWarning, setOverlapWarning] = useState<string | null>(null);
 
-  const update = useCallback(
-    (field: string, value: string) => {
-      setForm((prev) => ({ ...prev, [field]: value }));
-      setErrors((prev) => {
-        const n = { ...prev };
-        delete n[field];
-        return n;
-      });
-      setOverlapWarning(null);
-    },
-    []
-  );
+  const update = useCallback((field: string, value: string) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    setErrors((prev) => {
+      const n = { ...prev };
+      delete n[field];
+      return n;
+    });
+    setOverlapWarning(null);
+  }, []);
+
+  function statusLabel(code: string): string {
+    const k = `pages.deployments.status.${code}`;
+    const label = t(k);
+    return label === k ? code : label;
+  }
 
   function validate(): boolean {
     const e: Record<string, string> = {};
 
-    if (!form.startDate) e.startDate = "Data de început este obligatorie";
+    if (!form.startDate)
+      e.startDate = t("components.deployments.form.valStartRequired");
     if (form.endDate && form.startDate && form.endDate <= form.startDate) {
-      e.endDate = "Data de sfârșit trebuie să fie după data de început";
+      e.endDate = t("components.deployments.form.valEndAfterStart");
     }
 
     setErrors(e);
@@ -97,14 +106,19 @@ export function DeploymentForm({
       }
 
       if (!res.ok) {
-        setErrors({ submit: data.error ?? "Eroare la salvare" });
+        setErrors({
+          submit:
+            typeof data.error === "string"
+              ? data.error
+              : t("components.deployments.form.saveFailed"),
+        });
         setSaving(false);
         return;
       }
 
       onSuccess?.();
     } catch {
-      setErrors({ submit: "Eroare de rețea" });
+      setErrors({ submit: t("components.toast.networkError") });
     } finally {
       setSaving(false);
     }
@@ -115,15 +129,17 @@ export function DeploymentForm({
       <div className="flex items-center gap-2 pb-3 border-b">
         <Globe size={18} className="text-gray-400" />
         <h3 className="font-semibold text-gray-900">
-          Detașare nouă — {employeeName}
+          {t("components.deployments.form.newTitle", {
+            emDash: t("common.emDash"),
+            name: employeeName,
+          })}
         </h3>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Țară */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Țară *
+            {t("components.deployments.form.countryLabel")}
           </label>
           <select
             value={form.country}
@@ -138,24 +154,22 @@ export function DeploymentForm({
           </select>
         </div>
 
-        {/* Oraș */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Oraș
+            {t("components.deployments.form.cityLabel")}
           </label>
           <input
             type="text"
             value={form.city}
             onChange={(e) => update("city", e.target.value)}
-            placeholder="Amsterdam"
+            placeholder={t("components.deployments.form.cityPlaceholder")}
             className="w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
           />
         </div>
 
-        {/* Start date */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Data început *
+            {t("components.deployments.form.startDateLabel")}
           </label>
           <input
             type="date"
@@ -170,10 +184,9 @@ export function DeploymentForm({
           )}
         </div>
 
-        {/* End date */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Data sfârșit (lasă gol dacă în desfășurare)
+            {t("components.deployments.form.endDateLabel")}
           </label>
           <input
             type="date"
@@ -188,10 +201,9 @@ export function DeploymentForm({
           )}
         </div>
 
-        {/* Status */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Status
+            {t("components.deployments.form.statusLabel")}
           </label>
           <select
             value={form.status}
@@ -200,28 +212,26 @@ export function DeploymentForm({
           >
             {DEPLOYMENT_STATUSES.map((s) => (
               <option key={s} value={s}>
-                {STATUS_LABELS[s] ?? s}
+                {statusLabel(s)}
               </option>
             ))}
           </select>
         </div>
 
-        {/* Notes */}
         <div className="sm:col-span-2">
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Observații
+            {t("components.deployments.form.notesLabel")}
           </label>
           <textarea
             value={form.notes}
             onChange={(e) => update("notes", e.target.value)}
-            placeholder="Note despre detașare..."
+            placeholder={t("components.deployments.form.notesPlaceholder")}
             rows={2}
             className="w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950 resize-none"
           />
         </div>
       </div>
 
-      {/* Overlap warning */}
       {overlapWarning && (
         <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
           <AlertCircle size={16} className="shrink-0 mt-0.5" />
@@ -229,11 +239,8 @@ export function DeploymentForm({
         </div>
       )}
 
-      {errors.submit && (
-        <p className="text-sm text-red-600">{errors.submit}</p>
-      )}
+      {errors.submit && <p className="text-sm text-red-600">{errors.submit}</p>}
 
-      {/* Actions */}
       <div className="flex items-center justify-end gap-2 pt-2 border-t">
         {onCancel && (
           <button
@@ -241,7 +248,7 @@ export function DeploymentForm({
             className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
           >
             <X size={16} />
-            Anulează
+            {t("common.cancel")}
           </button>
         )}
         <button
@@ -250,7 +257,9 @@ export function DeploymentForm({
           className="flex items-center gap-2 px-6 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors"
         >
           <Save size={16} />
-          {saving ? "Se salvează..." : "Salvează detașarea"}
+          {saving
+            ? t("components.deployments.form.saving")
+            : t("components.deployments.form.save")}
         </button>
       </div>
     </div>

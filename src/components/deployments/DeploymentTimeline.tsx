@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
-import { Calendar } from "lucide-react";
+import { useClientNowMs } from "@/hooks/useClientNowMs";
+import { useTranslation } from "@/hooks/useTranslation";
 import { DEPLOYMENT_COUNTRIES, getCountryName } from "@/lib/countries";
+import { Calendar } from "lucide-react";
+import { useMemo } from "react";
 
 interface TimelineDeployment {
   id: number;
@@ -20,22 +22,28 @@ interface DeploymentTimelineProps {
   showEmployee?: boolean;
 }
 
-/**
- * Timeline vizual simplu — listează detașările grupate pe luni.
- * Fiecare entry are o bară vizuală care reprezintă durata relativă.
- */
 export function DeploymentTimeline({
   deployments,
   showEmployee = false,
 }: DeploymentTimelineProps) {
+  const { t, i18n } = useTranslation();
+  const clientNowMs = useClientNowMs();
+  const dateLocale = i18n.language?.startsWith("ro") ? "ro-RO" : "en-US";
+
+  const monthNames = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) =>
+        t(`components.deploymentTimeline.month${i}` as const),
+      ),
+    [t],
+  );
+
   const grouped = useMemo(() => {
-    // Sortează descrescător după startDate
     const sorted = [...deployments].sort(
       (a, b) =>
-        new Date(b.startDate).getTime() - new Date(a.startDate).getTime()
+        new Date(b.startDate).getTime() - new Date(a.startDate).getTime(),
     );
 
-    // Grupează pe an-lună
     const groups: Record<string, TimelineDeployment[]> = {};
     for (const dep of sorted) {
       const date = new Date(dep.startDate);
@@ -44,28 +52,11 @@ export function DeploymentTimeline({
       groups[key].push(dep);
     }
 
-    // Sortează cheile descrescător
-    return Object.entries(groups).sort(
-      ([a], [b]) => b.localeCompare(a)
-    );
+    return Object.entries(groups).sort(([a], [b]) => b.localeCompare(a));
   }, [deployments]);
 
-  const monthNames = [
-    "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
-    "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
-  ];
-
-  if (deployments.length === 0) {
-    return (
-      <div className="text-center py-12 text-gray-400">
-        <Calendar size={48} className="mx-auto mb-4 text-gray-300" />
-        <p>Nicio detașare de afișat</p>
-      </div>
-    );
-  }
-
-  // Calculează durata maximă pentru scale
   const maxDuration = useMemo(() => {
+    if (deployments.length === 0) return 1;
     let max = 0;
     for (const dep of deployments) {
       const start = new Date(dep.startDate).getTime();
@@ -74,15 +65,24 @@ export function DeploymentTimeline({
           ? new Date(dep.updatedAt ?? dep.startDate).getTime()
           : dep.endDate
             ? new Date(dep.endDate).getTime()
-            : Date.now();
+            : (clientNowMs ?? start);
       max = Math.max(max, end - start);
     }
     return max;
-  }, [deployments]);
+  }, [deployments, clientNowMs]);
+
+  if (deployments.length === 0) {
+    return (
+      <div className="text-center py-12 text-gray-400">
+        <Calendar size={48} className="mx-auto mb-4 text-gray-300" />
+        <p>{t("components.deploymentTimeline.empty")}</p>
+      </div>
+    );
+  }
 
   function barWidth(start: string, end: string | null): string {
     const s = new Date(start).getTime();
-    const e = end ? new Date(end).getTime() : Date.now();
+    const e = end ? new Date(end).getTime() : (clientNowMs ?? s);
     const pct = maxDuration > 0 ? ((e - s) / maxDuration) * 100 : 10;
     return `${Math.max(pct, 8)}%`;
   }
@@ -106,10 +106,15 @@ export function DeploymentTimeline({
     <div className="space-y-6">
       {grouped.map(([key, list]) => {
         const [year, month = "1"] = key.split("-");
-        const monthIdx = Math.max(0, parseInt(month, 10) - 1);
+        const monthIdx = Math.max(0, Number.parseInt(month, 10) - 1);
+        const countLabel =
+          list.length === 1
+            ? t("components.deploymentTimeline.deploymentsOne")
+            : t("components.deploymentTimeline.deploymentsMany", {
+                count: list.length,
+              });
         return (
           <div key={key}>
-            {/* Header lună */}
             <div className="flex items-center gap-3 mb-3">
               <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center text-xs font-bold">
                 {month}
@@ -117,16 +122,13 @@ export function DeploymentTimeline({
               <h4 className="font-semibold text-gray-900">
                 {monthNames[monthIdx] ?? month} {year}
               </h4>
-              <span className="text-xs text-gray-400">
-                {list.length} detașare{list.length > 1 ? "ri" : ""}
-              </span>
+              <span className="text-xs text-gray-400">{countLabel}</span>
             </div>
 
-            {/* Entries */}
             <div className="space-y-2 ml-4 border-l-2 border-gray-200 pl-4">
               {list.map((dep) => {
                 const country = DEPLOYMENT_COUNTRIES.find(
-                  (c) => c.code === dep.country
+                  (c) => c.code === dep.country,
                 );
 
                 return (
@@ -135,31 +137,29 @@ export function DeploymentTimeline({
                     className="bg-white rounded-lg border p-3 hover:shadow-sm transition-shadow"
                   >
                     <div className="flex items-center gap-3">
-                      {/* Bară vizuală durată */}
                       <div className="w-16 h-2 bg-gray-100 rounded-full overflow-hidden shrink-0">
                         <div
                           className={`h-full rounded-full ${statusColor(
-                            dep.status
+                            dep.status,
                           )}`}
                           style={{
                             width: barWidth(
                               dep.startDate,
                               dep.status === "CANCELLED"
-                                ? dep.updatedAt ?? dep.startDate
-                                : dep.endDate
+                                ? (dep.updatedAt ?? dep.startDate)
+                                : dep.endDate,
                             ),
                           }}
                         />
                       </div>
 
-                      {/* Info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
                           <span className="text-lg">
                             {country?.flag ?? "🌍"}
                           </span>
                           <span className="font-medium text-gray-900 text-sm">
-                            {country?.name ?? dep.country}
+                            {country?.name ?? getCountryName(dep.country)}
                           </span>
                           {dep.city && (
                             <span className="text-xs text-gray-500">
@@ -178,33 +178,37 @@ export function DeploymentTimeline({
                           {dep.status === "CANCELLED" ? (
                             <>
                               <span className="inline-flex items-center rounded-full bg-gray-200 px-1.5 py-0.5 font-medium text-gray-800">
-                                Anulată la:{" "}
+                                {t("components.deploymentTimeline.cancelledAt")}{" "}
                                 {new Date(
-                                  dep.updatedAt ?? dep.endDate ?? dep.startDate
-                                ).toLocaleDateString("ro-RO")}
+                                  dep.updatedAt ?? dep.endDate ?? dep.startDate,
+                                ).toLocaleDateString(dateLocale)}
                               </span>
                               <span className="block mt-0.5 text-gray-400">
-                                Prevăzut: {new Date(dep.startDate).toLocaleDateString("ro-RO")}
+                                {t("components.deploymentTimeline.planned")}{" "}
+                                {new Date(dep.startDate).toLocaleDateString(
+                                  dateLocale,
+                                )}
                                 {dep.endDate
-                                  ? ` — ${new Date(dep.endDate).toLocaleDateString("ro-RO")}`
+                                  ? ` — ${new Date(dep.endDate).toLocaleDateString(dateLocale)}`
                                   : ""}
                               </span>
                             </>
                           ) : (
                             <>
-                              {new Date(dep.startDate).toLocaleDateString("ro-RO")}
+                              {new Date(dep.startDate).toLocaleDateString(
+                                dateLocale,
+                              )}
                               {dep.endDate
-                                ? ` → ${new Date(dep.endDate).toLocaleDateString("ro-RO")}`
-                                : " → în desfășurare"}
+                                ? ` → ${new Date(dep.endDate).toLocaleDateString(dateLocale)}`
+                                : t("components.deploymentTimeline.ongoing")}
                             </>
                           )}
                         </p>
                       </div>
 
-                      {/* Status dot */}
                       <div
                         className={`w-2.5 h-2.5 rounded-full ${statusColor(
-                          dep.status
+                          dep.status,
                         )}`}
                         title={dep.status}
                       />
@@ -217,23 +221,22 @@ export function DeploymentTimeline({
         );
       })}
 
-      {/* Legendă */}
       <div className="flex flex-wrap items-center gap-4 pt-4 border-t text-xs text-gray-500">
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-          Activă
+          {t("components.deploymentTimeline.legendActive")}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-blue-400" />
-          Planificată
+          {t("components.deploymentTimeline.legendPlanned")}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-gray-400" />
-          Finalizată
+          {t("components.deploymentTimeline.legendCompleted")}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-gray-400" />
-          Anulată
+          {t("components.deploymentTimeline.legendCancelled")}
         </span>
       </div>
     </div>

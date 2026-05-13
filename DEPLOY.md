@@ -6,13 +6,13 @@ Aplicație web locală pentru gestionarea angajaților, documentelor și detaș�
 
 ## Cerințe Sistem
 
-| Componentă | Versiune minimă |
-|-----------|----------------|
-| Node.js | >= 20 |
-| npm | >= 10 |
+| Componentă        | Versiune minimă                         |
+| ----------------- | --------------------------------------- |
+| Node.js           | >= 20                                   |
+| npm               | >= 10                                   |
 | Sistem de operare | Windows 10/11, Ubuntu 22.04+, macOS 13+ |
-| RAM | 2 GB (4 GB recomandat) |
-| Spațiu disk | 1 GB (variază în funcție de documente) |
+| RAM               | 2 GB (4 GB recomandat)                  |
+| Spațiu disk       | 1 GB (variază în funcție de documente)  |
 
 ### Verificare Node.js
 
@@ -47,6 +47,7 @@ npm run setup
 ```
 
 Acest script:
+
 - Verifică Node.js >= 20
 - Creează fișierul `.env` cu chei secrete auto-generate
 - Creează structura de directoare (`data/`, `documents/`, `backups/` etc.)
@@ -69,6 +70,7 @@ npm start
 Deschide browserul la: **http://localhost:3000**
 
 Cont admin (după `npm run setup` sau `npm run db:seed` cu `SEED_ADMIN_PASSWORD`):
+
 - Email: `admin@firma.local`
 - Parola: cea generată la setup (afișată o singură dată în consolă) sau cea setată în `SEED_ADMIN_PASSWORD` înainte de seed.
 
@@ -136,6 +138,7 @@ DEBUG=false
 Interfață web: http://localhost:3000/backup
 
 Sau via API:
+
 ```bash
 curl -X POST http://localhost:3000/api/backup/create \
   -H "Cookie: token=YOUR_JWT_TOKEN"
@@ -144,12 +147,14 @@ curl -X POST http://localhost:3000/api/backup/create \
 ### Backup automat
 
 **Windows (Task Scheduler):**
+
 ```powershell
 # Creează task zilnic la 2:00 AM
 schtasks /create /tn "HR Backup" /tr "curl -X POST http://localhost:3000/api/backup/create" /sc daily /st 02:00
 ```
 
 **Linux (cron):**
+
 ```bash
 # Editează cron: crontab -e
 # Adaugă linia:
@@ -158,6 +163,7 @@ schtasks /create /tn "HR Backup" /tr "curl -X POST http://localhost:3000/api/bac
 
 **Din aplicație (dacă rulează 24/7):**
 Setează în `.env`:
+
 ```env
 BACKUP_AUTO=true
 BACKUP_INTERVAL_MS=86400000
@@ -176,11 +182,11 @@ BACKUP_INTERVAL_MS=86400000
 
 ### Roluri disponibile
 
-| Rol | Permisiuni |
-|-----|-----------|
-| **ADMIN** | Full access: toate paginile, setări, backup, gestionare utilizatori |
-| **OPERATOR** | CRUD angajați, documente, detașări, importuri |
-| **READONLY** | Doar vizualizare (dashboard, angajați, rapoarte) |
+| Rol          | Permisiuni                                                          |
+| ------------ | ------------------------------------------------------------------- |
+| **ADMIN**    | Full access: toate paginile, setări, backup, gestionare utilizatori |
+| **OPERATOR** | CRUD angajați, documente, detașări, importuri                       |
+| **READONLY** | Doar vizualizare (dashboard, angajați, rapoarte)                    |
 
 ### Creare utilizator
 
@@ -205,8 +211,8 @@ curl -X POST http://localhost:3000/api/backup/create
 # 4. Reinstalează dependențele
 npm install
 
-# 5. Migrează baza de date
-npm run db:migrate
+# 5. Migrează baza de date (producție)
+npm run db:migrate:deploy
 
 # 6. Pornește aplicația
 npm start
@@ -281,6 +287,7 @@ npm install
 ## Suport
 
 Pentru probleme sau întrebări, verifică:
+
 1. Log-urile aplicației (terminal)
 2. Audit log: http://localhost:3000/setari/audit
 3. Baza de date: `npm run db:studio`

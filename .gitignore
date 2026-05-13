@@ -31,3 +31,6 @@ release-electron/
 *.asar
 
 *.tsbuildinfo
+
+# Font subsetting backups (regenerabile cu npm run subset-pdf-fonts)
+assets/fonts/*.pre-subset.bak

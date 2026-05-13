@@ -1,5 +1,6 @@
 "use client";
 
+import { UserRole } from "@/lib/roles";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -18,7 +19,7 @@ export type DeleteDocumentDialogProps = {
 
 function deleteBlockedForNonAdmin(
   status: string,
-  employeeHasActiveDeployment: boolean
+  employeeHasActiveDeployment: boolean,
 ): { blocked: boolean; reasons: string[] } {
   const reasons: string[] = [];
   if (status === "EXPIRED") {
@@ -26,7 +27,7 @@ function deleteBlockedForNonAdmin(
   }
   if (employeeHasActiveDeployment) {
     reasons.push(
-      "Angajat cu detașare activă: doar administratorul poate șterge documentul."
+      "Angajat cu detașare activă: doar administratorul poate șterge documentul.",
     );
   }
   return { blocked: reasons.length > 0, reasons };
@@ -43,10 +44,11 @@ export function DeleteDocumentDialog({
   onSuccess,
 }: DeleteDocumentDialogProps) {
   const [deleting, setDeleting] = useState(false);
-  const isAdmin = userRole === "administrator";
+  const isAdmin =
+    userRole === UserRole.ORG_ADMIN || userRole === UserRole.SUPER_ADMIN;
   const { blocked, reasons } = deleteBlockedForNonAdmin(
     status,
-    employeeHasActiveDeployment
+    employeeHasActiveDeployment,
   );
   const deleteDisabled = !isAdmin && blocked;
 

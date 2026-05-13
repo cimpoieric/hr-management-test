@@ -8,7 +8,7 @@ import "server-only";
  * Returnează text + scor mediu de încredere.
  */
 
-import { createWorker, type Worker } from "tesseract.js";
+import { type Worker, createWorker } from "tesseract.js";
 
 const OCR_TIMEOUT_MS = 60_000;
 
@@ -25,14 +25,20 @@ export async function extractTextFromImage(buffer: Buffer): Promise<OcrResult> {
   let worker: Worker | null = null;
 
   const timeoutPromise = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error("OCR timeout — procesarea imaginii a durat prea mult (>60s)")), OCR_TIMEOUT_MS);
+    setTimeout(
+      () =>
+        reject(
+          new Error(
+            "OCR timeout — procesarea imaginii a durat prea mult (>60s)",
+          ),
+        ),
+      OCR_TIMEOUT_MS,
+    );
   });
 
   const ocrPromise = (async () => {
     try {
-      worker = await createWorker("rum+eng", 1, {
-        // logger: (m) => console.log(m), // decomentează pentru debug
-      });
+      worker = await createWorker("rum+eng", 1);
 
       const {
         data: { text, confidence },

@@ -1,21 +1,23 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { Upload, FileText, X, CheckCircle2, AlertCircle, FileImage } from "lucide-react";
 import {
   DOCUMENT_TYPE_OPTIONS,
-  isValidDocumentType,
   type DocumentType,
+  isValidDocumentType,
 } from "@/lib/documentConstants";
-import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { calculateStatus } from "@/lib/documentStatus";
 import { notifyDocumentsChanged } from "@/lib/documentsSync";
-
-interface EmployeeOption {
-  id: number;
-  firstName: string;
-  lastName: string;
-}
+import {
+  AlertCircle,
+  CheckCircle2,
+  FileImage,
+  FileText,
+  Upload,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { EmployeeOption } from "@/types";
+import { DocumentStatusBadge } from "./DocumentStatusBadge";
 
 interface DocumentUploadProps {
   /**
@@ -26,7 +28,10 @@ interface DocumentUploadProps {
   onSuccess?: () => void;
 }
 
-export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: DocumentUploadProps) {
+export function DocumentUpload({
+  employeeId: employeeIdProp,
+  onSuccess,
+}: DocumentUploadProps) {
   const fixedEmployeeId =
     employeeIdProp != null && employeeIdProp > 0 ? employeeIdProp : null;
   const needsEmployeePicker = fixedEmployeeId == null;
@@ -38,7 +43,9 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
   const [expiryDate, setExpiryDate] = useState("");
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
   const [employeeSearch, setEmployeeSearch] = useState("");
-  const [employeeFieldError, setEmployeeFieldError] = useState<string | null>(null);
+  const [employeeFieldError, setEmployeeFieldError] = useState<string | null>(
+    null,
+  );
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [employeesError, setEmployeesError] = useState<string | null>(null);
@@ -72,8 +79,12 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
             credentials: "same-origin",
           });
           if (!res.ok) {
-            const err = (await res.json().catch(() => ({}))) as { error?: string };
-            throw new Error(err.error ?? "Nu s-a putut încărca lista de angajați");
+            const err = (await res.json().catch(() => ({}))) as {
+              error?: string;
+            };
+            throw new Error(
+              err.error ?? "Nu s-a putut încărca lista de angajați",
+            );
           }
           const json = (await res.json()) as {
             data?: Array<{ id: number; firstName: string; lastName: string }>;
@@ -94,7 +105,9 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
       } catch (e) {
         if (!cancelled) {
           setEmployees([]);
-          setEmployeesError(e instanceof Error ? e.message : "Eroare la încărcare");
+          setEmployeesError(
+            e instanceof Error ? e.message : "Eroare la încărcare",
+          );
         }
       } finally {
         if (!cancelled) setEmployeesLoading(false);
@@ -119,7 +132,8 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
     const q = employeeSearch.trim().toLowerCase();
     if (!q) return employees;
     return employees.filter((e) => {
-      const full = `${e.lastName} ${e.firstName} ${e.firstName} ${e.lastName}`.toLowerCase();
+      const full =
+        `${e.lastName} ${e.firstName} ${e.firstName} ${e.lastName}`.toLowerCase();
       return full.includes(q);
     });
   }, [employees, employeeSearch]);
@@ -175,7 +189,8 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
       setEmployeeFieldError(null);
     }
 
-    const uploadEmployeeId = fixedEmployeeId ?? parseInt(selectedEmployeeId, 10);
+    const uploadEmployeeId =
+      fixedEmployeeId ?? Number.parseInt(selectedEmployeeId, 10);
     if (!uploadEmployeeId || Number.isNaN(uploadEmployeeId)) {
       setEmployeeFieldError("Angajatul este obligatoriu");
       setResult(null);
@@ -183,7 +198,10 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
     }
 
     if (!number.trim()) {
-      setResult({ success: false, message: "Completează numărul documentului." });
+      setResult({
+        success: false,
+        message: "Completează numărul documentului.",
+      });
       return;
     }
     if (!issueDate) {
@@ -241,7 +259,10 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
           setResult(null);
         } else {
           setEmployeeFieldError(null);
-          setResult({ success: false, message: data.error ?? "Eroare la upload" });
+          setResult({
+            success: false,
+            message: data.error ?? "Eroare la upload",
+          });
         }
       }
     } catch {
@@ -320,8 +341,8 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
             Angajat *
           </label>
           <p className="mb-3 text-xs text-slate-600">
-            Selectați angajatul activ căruia îi aparține documentul (obligatoriu înainte de
-            încărcare).
+            Selectați angajatul activ căruia îi aparține documentul (obligatoriu
+            înainte de încărcare).
           </p>
           {employeesLoading ? (
             <div
@@ -336,8 +357,8 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
             </p>
           ) : employees.length === 0 ? (
             <p className="text-sm text-amber-800">
-              Nu există angajați activi în sistem. Adăugați un angajat sau activați unul
-              existent.
+              Nu există angajați activi în sistem. Adăugați un angajat sau
+              activați unul existent.
             </p>
           ) : (
             <>
@@ -358,7 +379,9 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
                   setResult(null);
                 }}
                 className={`w-full rounded-lg border bg-white px-3 py-3 text-sm font-medium text-slate-900 shadow-inner outline-none focus:ring-2 focus:ring-slate-900 ${
-                  employeeFieldError ? "border-red-400 ring-1 ring-red-200" : "border-slate-300"
+                  employeeFieldError
+                    ? "border-red-400 ring-1 ring-red-200"
+                    : "border-slate-300"
                 }`}
                 aria-invalid={employeeFieldError ? "true" : "false"}
                 aria-describedby={
@@ -382,7 +405,9 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
                 </p>
               )}
               {employeeSearch.trim() && filteredEmployees.length === 0 && (
-                <p className="mt-2 text-xs text-slate-500">Niciun angajat nu se potrivește filtrului.</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Niciun angajat nu se potrivește filtrului.
+                </p>
               )}
             </>
           )}
@@ -459,7 +484,9 @@ export function DocumentUpload({ employeeId: employeeIdProp, onSuccess }: Docume
 
           {expiryDate && (
             <div className="sm:col-span-2 flex items-center gap-2">
-              <span className="text-sm text-gray-500">Status previzualizat:</span>
+              <span className="text-sm text-gray-500">
+                Status previzualizat:
+              </span>
               <DocumentStatusBadge status={previewStatus} />
             </div>
           )}

@@ -4,16 +4,16 @@ Aplicație web (și opțional desktop Electron) pentru **gestiunea locală** a a
 
 ## Tehnologii
 
-| Strat | Tehnologie |
-|--------|-------------|
-| Framework | [Next.js 15](https://nextjs.org/) (App Router) |
-| Limbaj | TypeScript |
-| Bază de date | SQLite + [Prisma ORM](https://www.prisma.io/) |
-| Autentificare | JWT (cookie httpOnly), fără NextAuth |
-| UI | React, Tailwind CSS, componente Radix |
-| Email | Nodemailer (SMTP), configurare în aplicație |
-| Import email | IMAP (opțional, variabile de mediu) |
-| Desktop | Electron (opțional) |
+| Strat         | Tehnologie                                     |
+| ------------- | ---------------------------------------------- |
+| Framework     | [Next.js 15](https://nextjs.org/) (App Router) |
+| Limbaj        | TypeScript                                     |
+| Bază de date  | SQLite + [Prisma ORM](https://www.prisma.io/)  |
+| Autentificare | JWT (cookie httpOnly), fără NextAuth           |
+| UI            | React, Tailwind CSS, componente Radix          |
+| Email         | Nodemailer (SMTP), configurare în aplicație    |
+| Import email  | IMAP (opțional, variabile de mediu)            |
+| Desktop       | Electron (opțional)                            |
 
 ## Cerințe sistem
 
@@ -83,7 +83,7 @@ Datele SMTP se stochează în baza de date (criptate unde e cazul), nu în cod. 
   npm run db:push
   ```
 
-  Pentru medii cu migrări versionate: `npm run db:migrate`.
+  Pentru medii cu migrări versionate (dezvoltare): `npm run db:migrate` (`prisma migrate dev`). Pe server/CI folosește `npm run db:migrate:deploy` (`prisma migrate deploy`).
 
 - **Seed date demo**
 
@@ -98,22 +98,23 @@ Datele SMTP se stochează în baza de date (criptate unde e cazul), nu în cod. 
 
 ## Pornire aplicație
 
-| Scop | Comandă |
-|------|---------|
-| Dezvoltare (hot reload) | `npm run dev` |
-| Producție (după build) | `npm run build` apoi `npm start` |
-| Curățare artefacte build | `npm run final-cleanup` |
+| Scop                                                    | Comandă                                         |
+| ------------------------------------------------------- | ----------------------------------------------- |
+| Dezvoltare (hot reload)                                 | `npm run dev`                                   |
+| Producție (după build)                                  | `npm run build` apoi `npm start` (`next start`) |
+| Producție cu verificări `.env` / foldere (script local) | `npm run build` apoi `npm run start:script`     |
+| Curățare artefacte build                                | `npm run final-cleanup`                         |
 
-`npm start` pornește Next pe host/port din `.env` (`HOST`, `PORT`), cu verificări pentru chei obligatorii.
+`npm start` pornește Next.js în mod producție (`next start`). Pentru scriptul local cu verificări chei și structură directoare, folosește `npm run start:script` (echivalentul vechiului `npm start`).
 
 ## Structura rolurilor
 
 Rolurile sunt definite în schema Prisma și normalizate în cod (`UserRole`):
 
-| Rol | Cod | Descriere sumară |
-|-----|-----|------------------|
-| **Operator** | `operator` | Utilizare zilnică: înregistrări, modificări acolo unde politica RBAC permite (împreună cu administratorul pe rute de scriere). |
-| **Administrator** | `administrator` | Acces complet la configurări critice, utilizatori, setări sensibile și operațiuni administrative. |
+| Rol                  | Cod                | Descriere sumară                                                                                                                                 |
+| -------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Operator**         | `operator`         | Utilizare zilnică: înregistrări, modificări acolo unde politica RBAC permite (împreună cu administratorul pe rute de scriere).                   |
+| **Administrator**    | `administrator`    | Acces complet la configurări critice, utilizatori, setări sensibile și operațiuni administrative.                                                |
 | **Doar vizualizare** | `doar_vizualizare` | Acces în principal citire; nu poate efectua acțiuni de scriere acolo unde aplicația restricționează la `WRITE_ROLES` (operator + administrator). |
 
 Valorile vechi sau alternative (`admin`, `vizualizare`, `read_only`) sunt mapate la echivalentul canonic în stratul de autentificare.

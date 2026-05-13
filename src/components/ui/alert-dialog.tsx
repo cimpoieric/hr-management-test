@@ -1,9 +1,10 @@
 "use client";
 
-import * as React from "react";
-import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "@/hooks/useTranslation";
+import { cn } from "@/lib/utils";
+import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
+import * as React from "react";
 
 export const AlertDialog = AlertDialogPrimitive.Root;
 export const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
@@ -31,7 +32,7 @@ export const AlertDialogContent = React.forwardRef<
       ref={ref}
       className={cn(
         "fixed left-[50%] top-[50%] z-50 w-full max-w-md translate-x-[-50%] translate-y-[-50%] rounded-xl border bg-white p-6 shadow-lg",
-        className
+        className,
       )}
       {...props}
     />
@@ -39,12 +40,28 @@ export const AlertDialogContent = React.forwardRef<
 ));
 AlertDialogContent.displayName = "AlertDialogContent";
 
-export function AlertDialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("flex flex-col space-y-1.5", className)} {...props} />;
+export function AlertDialogHeader({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn("flex flex-col space-y-1.5", className)} {...props} />
+  );
 }
 
-export function AlertDialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end", className)} {...props} />;
+export function AlertDialogFooter({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn(
+        "mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 export const AlertDialogTitle = React.forwardRef<
@@ -74,24 +91,29 @@ AlertDialogDescription.displayName = "AlertDialogDescription";
 export const AlertDialogCancel = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Cancel>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Cancel>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Cancel ref={ref} asChild {...props}>
-    <Button variant="outline" className={className}>
-      Anulează
-    </Button>
-  </AlertDialogPrimitive.Cancel>
-));
+>(({ className, children, ...props }, ref) => {
+  const { t } = useTranslation();
+  return (
+    <AlertDialogPrimitive.Cancel ref={ref} asChild {...props}>
+      <Button variant="outline" className={className}>
+        {children ?? t("common.cancel")}
+      </Button>
+    </AlertDialogPrimitive.Cancel>
+  );
+});
 AlertDialogCancel.displayName = "AlertDialogCancel";
 
 export const AlertDialogAction = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Action>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Action>
->(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Action ref={ref} asChild {...props}>
-    <Button variant="destructive" className={className}>
-      Confirmă
-    </Button>
-  </AlertDialogPrimitive.Action>
-));
+>(({ className, children, ...props }, ref) => {
+  const { t } = useTranslation();
+  return (
+    <AlertDialogPrimitive.Action ref={ref} asChild {...props}>
+      <Button variant="destructive" className={className}>
+        {children ?? t("common.confirm")}
+      </Button>
+    </AlertDialogPrimitive.Action>
+  );
+});
 AlertDialogAction.displayName = "AlertDialogAction";
-

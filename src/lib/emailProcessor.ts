@@ -14,13 +14,15 @@
  */
 
 import path from "path";
-import fs from "fs/promises";
-import { prisma } from "@/lib/prisma";
-import { extractTextFromPDF } from "@/lib/parsers/pdfParser";
-import { extractTextFromImage } from "@/lib/parsers/ocrParser";
 import { extractFields } from "@/lib/parsers/fieldExtractor";
+import { extractTextFromImage } from "@/lib/parsers/ocrParser";
+import { extractTextFromPDF } from "@/lib/parsers/pdfParser";
+import { prisma, prismaBase } from "@/lib/prisma";
+import { UserRole } from "@/lib/roles";
+import { runWithTenantContext } from "@/lib/tenantRequestStorage";
+import fs from "fs/promises";
 import { markAsSeen } from "./imapClient";
-import type { EmailMessage, EmailAttachment } from "./imapClient";
+import type { EmailAttachment, EmailMessage } from "./imapClient";
 import { ALLOWED_EXTENSIONS, getMimeType } from "./storage";
 
 const IMPORT_BASE_DIR = "./data/import";
@@ -29,13 +31,46 @@ async function ensureDir(dir: string) {
   await fs.mkdir(dir, { recursive: true });
 }
 
+async function resolveDefaultOrganizationIdForEmailCron(): Promise<string> {
+  const o = await prismaBase.organization.findFirst({
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  if (!o?.id) {
+    throw new Error("Lipseste Organization pentru import email.");
+  }
+  return o.id;
+}
+
 /**
  * Procesează un email: verifică deduplicare, salvează atașamente,
- * creează PendingImport-uri.
+ * creează PendingImport-uri (tenant = prima organizație din DB — IMAP global).
  */
-export async function processEmail(
-  message: EmailMessage
-): Promise<{ emailImportId: number; pendingImports: number; errors: string[] }> {
+export async function processEmail(message: EmailMessage): Promise<{
+  emailImportId: number;
+  pendingImports: number;
+  errors: string[];
+}> {
+  const organizationId = await resolveDefaultOrganizationIdForEmailCron();
+  return runWithTenantContext(
+    {
+      organizationId,
+      userId: "email-cron",
+      email: "cron@local",
+      role: UserRole.OPERATOR,
+    },
+    () => processEmailCore(message, organizationId),
+  );
+}
+
+async function processEmailCore(
+  message: EmailMessage,
+  organizationId: string,
+): Promise<{
+  emailImportId: number;
+  pendingImports: number;
+  errors: string[];
+}> {
   const errors: string[] = [];
 
   // 1. Deduplicare — verifică dacă acest UID a mai fost procesat
@@ -44,7 +79,11 @@ export async function processEmail(
   });
 
   if (existing) {
-    return { emailImportId: existing.id, pendingImports: 0, errors: ["Email deja procesat"] };
+    return {
+      emailImportId: existing.id,
+      pendingImports: 0,
+      errors: ["Email deja procesat"],
+    };
   }
 
   // 2. Creează EmailImport
@@ -75,7 +114,8 @@ export async function processEmail(
         emailDir,
         attachment,
         i,
-        message
+        message,
+        organizationId,
       );
       if (result) pendingCount++;
     } catch (err) {
@@ -101,7 +141,11 @@ export async function processEmail(
     errors.push("Nu s-a putut marca emailul ca citit pe server");
   }
 
-  return { emailImportId: emailImport.id, pendingImports: pendingCount, errors };
+  return {
+    emailImportId: emailImport.id,
+    pendingImports: pendingCount,
+    errors,
+  };
 }
 
 /**
@@ -116,7 +160,8 @@ async function processAttachment(
   emailDir: string,
   attachment: EmailAttachment,
   index: number,
-  message: EmailMessage
+  message: EmailMessage,
+  organizationId: string,
 ): Promise<boolean> {
   const ext = path.extname(attachment.filename).toLowerCase();
 
@@ -159,6 +204,7 @@ async function processAttachment(
   // Creează PendingImport
   await prisma.pendingImport.create({
     data: {
+      organizationId,
       sourceType: "EMAIL",
       fileName: attachment.filename,
       filePath: filePath,

@@ -6,22 +6,23 @@
  * Salvează pe disk, creează record DB cu status automat.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee } from "@/lib/permissions";
-import {
-  saveFile,
-  isValidDocumentType,
-  isAllowedMimeType,
-  isAllowedExtension,
-  MAX_FILE_SIZE,
-  getMimeType,
-  getFileSize,
-  initStorage,
-} from "@/lib/storage";
-import { calculateStatus } from "@/lib/documentStatus";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { DOCUMENT_TYPES } from "@/lib/documentConstants";
+import { calculateStatus } from "@/lib/documentStatus";
+import { canEditEmployee } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import {
+  MAX_FILE_SIZE,
+  getFileSize,
+  getMimeType,
+  initStorage,
+  isAllowedExtension,
+  isAllowedMimeType,
+  isValidDocumentType,
+  saveFile,
+} from "@/lib/storage";
+import { type NextRequest, NextResponse } from "next/server";
 
 function parsePositiveIntFormValue(raw: unknown): number | null {
   if (raw == null) return null;
@@ -33,7 +34,10 @@ function parsePositiveIntFormValue(raw: unknown): number | null {
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -53,7 +57,7 @@ export async function POST(request: NextRequest) {
           error: "Selectați un angajat valid din listă.",
           field: "employeeId",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -66,16 +70,15 @@ export async function POST(request: NextRequest) {
           : "";
     const numberRaw = (formData.get("number") as string) ?? "";
     const number = numberRaw.trim() || null;
-    const issueDateStr = ((formData.get("issueDate") as string) ?? "").trim() || null;
-    const expiryDateStr = ((formData.get("expiryDate") as string) ?? "").trim() || null;
+    const issueDateStr =
+      ((formData.get("issueDate") as string) ?? "").trim() || null;
+    const expiryDateStr =
+      ((formData.get("expiryDate") as string) ?? "").trim() || null;
 
     // ─── Validare ────────────────────────────────────────────────
 
     if (!file) {
-      return NextResponse.json(
-        { error: "Fișier lipsă" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Fișier lipsă" }, { status: 400 });
     }
 
     if (!isValidDocumentType(type)) {
@@ -84,31 +87,42 @@ export async function POST(request: NextRequest) {
           error: "Tip document invalid",
           validTypes: [...DOCUMENT_TYPES],
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     if (!number) {
       return NextResponse.json(
         { error: "Număr document obligatoriu (ex. nr. contract, serie CI)" },
-        { status: 400 }
+        { status: 400 },
       );
     }
     if (!issueDateStr) {
-      return NextResponse.json({ error: "Data emiterii este obligatorie" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Data emiterii este obligatorie" },
+        { status: 400 },
+      );
     }
     if (!expiryDateStr) {
-      return NextResponse.json({ error: "Data expirării este obligatorie" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Data expirării este obligatorie" },
+        { status: 400 },
+      );
     }
 
     const employee = await prisma.employee.findUnique({
       where: { id: employeeId },
-      select: { id: true, firstName: true, lastName: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        organizationId: true,
+      },
     });
     if (!employee) {
       return NextResponse.json(
         { error: "Angajatul nu există", field: "employeeId" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -116,7 +130,7 @@ export async function POST(request: NextRequest) {
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
         { error: `Fișier prea mare. Maxim: ${MAX_FILE_SIZE / 1024 / 1024}MB` },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -124,7 +138,7 @@ export async function POST(request: NextRequest) {
     if (!isAllowedMimeType(mimeType) || !isAllowedExtension(file.name)) {
       return NextResponse.json(
         { error: "Tip fișier neacceptat. Acceptate: PDF, JPG, PNG" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -133,16 +147,22 @@ export async function POST(request: NextRequest) {
     const issueDate = new Date(issueDateStr!);
     const expiryDate = new Date(expiryDateStr!);
     if (Number.isNaN(issueDate.getTime())) {
-      return NextResponse.json({ error: "Data emiterii invalidă" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Data emiterii invalidă" },
+        { status: 400 },
+      );
     }
     if (Number.isNaN(expiryDate.getTime())) {
-      return NextResponse.json({ error: "Data expirării invalidă" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Data expirării invalidă" },
+        { status: 400 },
+      );
     }
 
     if (expiryDate < issueDate) {
       return NextResponse.json(
         { error: "Data expirării trebuie să fie după data emiterii" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -155,7 +175,7 @@ export async function POST(request: NextRequest) {
       employeeId,
       type,
       file.name,
-      buffer
+      buffer,
     );
 
     // ─── Calculează status automat ───────────────────────────────
@@ -166,6 +186,7 @@ export async function POST(request: NextRequest) {
 
     const document = await prisma.document.create({
       data: {
+        organizationId: employee.organizationId,
         employeeId,
         type,
         number,
@@ -210,18 +231,17 @@ export async function POST(request: NextRequest) {
         fileSize: document.fileSize,
         mimeType: document.mimeType,
         issueDate: document.issueDate ? document.issueDate.toISOString() : null,
-        expiryDate: document.expiryDate ? document.expiryDate.toISOString() : null,
+        expiryDate: document.expiryDate
+          ? document.expiryDate.toISOString()
+          : null,
         employee: document.employee,
         downloadUrl: `/api/documents/${document.id}/download`,
         createdAt: document.createdAt.toISOString(),
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     console.error("[DOCUMENT_UPLOAD]", error);
-    return NextResponse.json(
-      { error: "Eroare la upload" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Eroare la upload" }, { status: 500 });
   }
 }

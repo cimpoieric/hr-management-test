@@ -1,49 +1,44 @@
 /**
- * Sistem autentificare JWT custom pentru HR Management.
- *
- * - Nu folosește NextAuth (auth 100% local)
- * - JWT semnat cu HS256 via `jose` (Edge-compatible)
- * - Cookie httpOnly, Secure, SameSite=Strict
- * - Niciodată nu expune passwordHash în responses
+ * JWT auth (HS256, httpOnly cookie). Payload: userId, email, role, organizationId.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
+import { SignJWT, jwtVerify } from "jose";
+import { type NextRequest, NextResponse } from "next/server";
+import { forbiddenJson, unauthorizedJson } from "@/lib/apiErrorResponse";
+import {
+  assertValidJwtRole,
+  parseJwtRole,
+  type RequireRoleOptions,
+  UserRole,
+} from "./roles";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-export type UserRole = "operator" | "administrator" | "doar_vizualizare";
+export type { RequireRoleOptions, UserRole } from "./roles";
+export {
+  assertValidJwtRole,
+  isJwtRoleIn,
+  parseJwtRole,
+  ROLES_EMPLOYEES_RW,
+  ROLES_PAYROLL,
+  ROLES_SETTINGS_ADMIN,
+  WRITE_ROLES,
+} from "./roles";
 
 export type AuthContext = {
-  userId: number;
+  userId: string;
   email: string;
   role: UserRole;
+  organizationId: string;
 };
-
-function normalizeRole(role: unknown): UserRole {
-  const r = String(role ?? "").trim().toLowerCase();
-  // Backwards compatibility with older tokens/values.
-  if (r === "admin" || r === "administrator") return "administrator";
-  if (r === "operator") return "operator";
-  if (r === "doar_vizualizare" || r === "vizualizare" || r === "read_only" || r === "readonly") {
-    return "doar_vizualizare";
-  }
-  // Safest default
-  return "doar_vizualizare";
-}
-
-// ─── Constants ───────────────────────────────────────────────────────────────
 
 let cachedJwtSecretKey: Uint8Array | null = null;
 
-/** Cheie JWT din mediu — fără fallback în cod (livrabile). */
 function getJwtSecretKey(): Uint8Array {
   if (cachedJwtSecretKey) return cachedJwtSecretKey;
   const s = (process.env.JWT_SECRET ?? "").trim();
   if (s.length < 32) {
     throw new Error(
-      "JWT_SECRET lipsește sau are sub 32 de caractere. Setează în .env sau rulează: npm run setup"
+      "JWT_SECRET lipsește sau are sub 32 de caractere. Setează în .env sau rulează: npm run setup",
     );
   }
   cachedJwtSecretKey = new TextEncoder().encode(s);
@@ -51,40 +46,33 @@ function getJwtSecretKey(): Uint8Array {
 }
 
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? "8h";
-const COOKIE_NAME = "auth-token";
+export const AUTH_TOKEN_COOKIE = "auth-token";
+const COOKIE_NAME = AUTH_TOKEN_COOKIE;
 const BCRYPT_ROUNDS = 12;
 
-// ─── Password Hashing ────────────────────────────────────────────────────────
-
-/**
- * Hash parolă cu bcrypt, 12 rounds.
- */
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_ROUNDS);
 }
 
-/**
- * Verifică parola contra hash-ului stocat.
- */
 export async function verifyPassword(
   password: string,
-  hash: string
+  hash: string,
 ): Promise<boolean> {
   return bcrypt.compare(password, hash);
 }
 
-// ─── JWT Token ───────────────────────────────────────────────────────────────
-
-/**
- * Generează JWT semnat cu HS256. Expiră în 8h (default).
- * Include: userId, email, role.
- */
 export async function generateToken(
-  userId: number,
+  userId: string,
   email: string,
-  role: UserRole
+  role: UserRole,
+  organizationId: string,
 ): Promise<string> {
-  return new SignJWT({ userId, email, role })
+  return new SignJWT({
+    userId,
+    email,
+    role,
+    organizationId,
+  })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(JWT_EXPIRES_IN)
@@ -93,47 +81,55 @@ export async function generateToken(
     .sign(getJwtSecretKey());
 }
 
-/**
- * Verifică token JWT. Throw dacă invalid / expirat.
- */
-export async function verifyToken(
-  token: string
-): Promise<AuthContext> {
+export async function verifyToken(token: string): Promise<AuthContext> {
   const { payload } = await jwtVerify(token, getJwtSecretKey(), {
     clockTolerance: 60,
     audience: "hr-management",
     issuer: "hr-management-api",
   });
 
+  const organizationId = payload.organizationId;
+  if (
+    organizationId === undefined ||
+    organizationId === null ||
+    String(organizationId).trim() === ""
+  ) {
+    throw new Error("JWT invalid: lipsește organizationId");
+  }
+
+  const rawUserId = payload.userId;
+  const userId =
+    typeof rawUserId === "string"
+      ? rawUserId
+      : rawUserId !== undefined && rawUserId !== null
+        ? String(rawUserId)
+        : "";
+
+  if (!userId) {
+    throw new Error("JWT invalid: lipsește userId");
+  }
+
+  const role = parseJwtRole(payload.role);
+  assertValidJwtRole(role);
+
   return {
-    userId: payload.userId as number,
-    email: payload.email as string,
-    role: normalizeRole(payload.role),
+    userId,
+    email: String(payload.email ?? ""),
+    role,
+    organizationId: String(organizationId),
   };
 }
 
-// ─── Cookie Helpers ──────────────────────────────────────────────────────────
-
-/**
- * Setează cookie httpOnly cu tokenul JWT.
- * SameSite=Strict pentru protecție CSRF.
- */
-export function setAuthCookie(
-  response: NextResponse,
-  token: string
-): void {
+export function setAuthCookie(response: NextResponse, token: string): void {
   response.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "strict",
-    maxAge: 60 * 60 * 8, // 8 ore
+    maxAge: 60 * 60 * 8,
     path: "/",
   });
 }
 
-/**
- * Șterge cookie-ul de autentificare (logout).
- */
 export function clearAuthCookie(response: NextResponse): void {
   response.cookies.set(COOKIE_NAME, "", {
     httpOnly: true,
@@ -144,63 +140,77 @@ export function clearAuthCookie(response: NextResponse): void {
   });
 }
 
-// ─── Request Helpers ─────────────────────────────────────────────────────────
-
-/**
- * Extrage și verifică token din request (cookie).
- * Returnează AuthContext sau null.
- */
 export async function verifyAuth(
-  request: NextRequest
+  request: NextRequest,
 ): Promise<AuthContext | null> {
   try {
     const token = request.cookies.get(COOKIE_NAME)?.value;
     if (!token) return null;
-    return await verifyToken(token);
+    const ctx = await verifyToken(token);
+    const { enterTenantContextFromAuth } =
+      await import("./tenantRequestStorage");
+    enterTenantContextFromAuth({
+      organizationId: ctx.organizationId,
+      userId: ctx.userId,
+      email: ctx.email,
+      role: ctx.role,
+    });
+    return ctx;
   } catch {
     return null;
   }
 }
 
-/**
- * Verifică autentificare + rol permis.
- * Returnează user valid sau un NextResponse de eroare.
- */
 export async function requireAuth(
   request: NextRequest,
-  allowedRoles?: UserRole[]
 ): Promise<
-  | { user: AuthContext; response: null }
-  | { user: null; response: NextResponse }
+  { user: AuthContext; response: null } | { user: null; response: NextResponse }
 > {
   const user = await verifyAuth(request);
 
   if (!user) {
     return {
       user: null,
-      response: NextResponse.json(
-        { error: "Neautentificat" },
-        { status: 401 }
-      ),
-    };
-  }
-
-  if (allowedRoles && !allowedRoles.includes(user.role)) {
-    return {
-      user: null,
-      response: NextResponse.json(
-        { error: "Acces interzis" },
-        { status: 403 }
-      ),
+      response: unauthorizedJson(request),
     };
   }
 
   return { user, response: null };
 }
 
-/**
- * Helper: utilizat pe rute write pentru RBAC simplu.
- * operator + administrator au voie să modifice, doar_vizualizare nu.
- */
-export const WRITE_ROLES: UserRole[] = ["operator", "administrator"];
+export async function requireRole(
+  request: NextRequest,
+  allowed: UserRole[],
+  options?: RequireRoleOptions,
+): Promise<
+  { user: AuthContext; response: null } | { user: null; response: NextResponse }
+> {
+  const base = await requireAuth(request);
+  if (!base.user) return base;
 
+  const bypass = options?.superAdminBypass !== false;
+  if (bypass && base.user.role === UserRole.SUPER_ADMIN) {
+    return { user: base.user, response: null };
+  }
+
+  if (!allowed.includes(base.user.role)) {
+    return {
+      user: null,
+      response: forbiddenJson(request),
+    };
+  }
+
+  return { user: base.user, response: null };
+}
+
+export async function requireOrgAdmin(request: NextRequest) {
+  return requireRole(request, [UserRole.ORG_ADMIN, UserRole.SUPER_ADMIN], {
+    superAdminBypass: false,
+  });
+}
+
+export async function requireSuperAdmin(request: NextRequest) {
+  return requireRole(request, [UserRole.SUPER_ADMIN], {
+    superAdminBypass: false,
+  });
+}

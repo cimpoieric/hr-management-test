@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { toast } from "sonner";
 
 export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
@@ -9,7 +9,10 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
   const [busy, setBusy] = useState(false);
 
   async function post(url: string) {
-    const res = await fetch(url, { method: "POST", credentials: "same-origin" });
+    const res = await fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+    });
     const data = (await res.json().catch(() => ({}))) as { error?: string };
     if (!res.ok) throw new Error(data.error ?? "Operațiunea a eșuat");
     return data;
@@ -22,7 +25,10 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
-    const data = (await res.json().catch(() => ({}))) as { error?: string; [k: string]: unknown };
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      [k: string]: unknown;
+    };
     if (!res.ok) throw new Error(data.error ?? "Operațiunea a eșuat");
     return data;
   }
@@ -31,7 +37,7 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
     <div className="flex flex-wrap items-center gap-2">
       <a
         className="rounded-lg border bg-white px-3 py-2 text-sm hover:bg-gray-50"
-        href={`/api/payslips/${payslipId}/pdf`}
+        href={`/api/payroll/${payslipId}/pdf`}
         target="_blank"
         rel="noreferrer"
       >
@@ -61,4 +67,3 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
     </div>
   );
 }
-

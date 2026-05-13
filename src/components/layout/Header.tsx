@@ -1,20 +1,23 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import {
-  Bell,
-  RefreshCw,
-  LogOut,
-  ChevronDown,
-  UserCircle,
-  ShieldCheck,
-} from "lucide-react";
-import { ro } from "@/messages";
-import { ROUTES } from "@/lib/routes";
+import { LanguageSelector } from "@/components/shared/LanguageSelector";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompanyLogo } from "@/hooks/useCompanyLogo";
+import { useTranslation } from "@/hooks/useTranslation";
+import { ROUTES } from "@/lib/routes";
+import {
+  Bell,
+  ChevronDown,
+  LogOut,
+  RefreshCw,
+  ShieldCheck,
+  UserCircle,
+} from "lucide-react";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isNavActive, SIDEBAR_ROUTE_DEFS } from "./navConfig";
+import type { TFunction } from "i18next";
 
 type NotificationItem = {
   id: number;
@@ -24,11 +27,46 @@ type NotificationItem = {
   read: boolean;
 };
 
-function roleBadgeMeta(role: string | null) {
-  if (role === "administrator") return { label: "administrator", cls: "bg-red-100 text-red-700" };
-  if (role === "operator") return { label: "operator", cls: "bg-blue-100 text-blue-700" };
-  if (role === "doar_vizualizare") return { label: "doar vizualizare", cls: "bg-gray-100 text-gray-700" };
-  return { label: role ?? "—", cls: "bg-gray-100 text-gray-700" };
+function roleBadgeMeta(role: string | null, t: TFunction) {
+  if (role === "SUPER_ADMIN")
+    return {
+      label: t("components.roles.superAdmin"),
+      cls: "bg-violet-100 text-violet-800",
+    };
+  if (role === "ORG_ADMIN")
+    return {
+      label: t("components.roles.orgAdmin"),
+      cls: "bg-red-100 text-red-700",
+    };
+  if (role === "OPERATOR")
+    return {
+      label: t("components.roles.operator"),
+      cls: "bg-blue-100 text-blue-700",
+    };
+  if (role === "EMPLOYEE")
+    return {
+      label: t("components.roles.employee"),
+      cls: "bg-gray-100 text-gray-700",
+    };
+  if (role === "administrator")
+    return {
+      label: t("components.roles.orgAdmin"),
+      cls: "bg-red-100 text-red-700",
+    };
+  if (role === "operator")
+    return {
+      label: t("components.roles.operator"),
+      cls: "bg-blue-100 text-blue-700",
+    };
+  if (role === "doar_vizualizare")
+    return {
+      label: t("components.roles.readOnly"),
+      cls: "bg-gray-100 text-gray-700",
+    };
+  return {
+    label: role ?? t("common.emDash"),
+    cls: "bg-gray-100 text-gray-700",
+  };
 }
 
 export function Header(_props?: { user?: unknown }) {
@@ -36,14 +74,47 @@ export function Header(_props?: { user?: unknown }) {
   const pathname = usePathname();
   const { user, role } = useAuth();
   const { companyLogoUrl } = useCompanyLogo();
+  const { t } = useTranslation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [notifications, setNotifications] = useState<NotificationItem[]>([
-    { id: 1, type: "warning", message: "3 documente expirate necesită atenție.", time: "Acum 2 ore", read: false },
-    { id: 2, type: "info", message: "Import nou în așteptare de aprobare.", time: "Acum 5 ore", read: false },
-    { id: 3, type: "success", message: "Backup zilnic finalizat cu succes.", time: "Ieri, 22:10", read: true },
-  ]);
+  const notificationsFromApi = useRef(false);
+
+  const fallbackNotifications = useMemo((): NotificationItem[] => {
+    return [
+      {
+        id: 1,
+        type: "warning",
+        message: t("components.layout.notifMock1"),
+        time: t("components.layout.notifTime1"),
+        read: false,
+      },
+      {
+        id: 2,
+        type: "info",
+        message: t("components.layout.notifMock2"),
+        time: t("components.layout.notifTime2"),
+        read: false,
+      },
+      {
+        id: 3,
+        type: "success",
+        message: t("components.layout.notifMock3"),
+        time: t("components.layout.notifTime3"),
+        read: true,
+      },
+    ];
+  }, [t]);
+
+  const [notifications, setNotifications] = useState<NotificationItem[]>(
+    fallbackNotifications,
+  );
+
+  useEffect(() => {
+    if (!notificationsFromApi.current) {
+      setNotifications(fallbackNotifications);
+    }
+  }, [fallbackNotifications]);
 
   useEffect(() => {
     setDropdownOpen(false);
@@ -52,19 +123,27 @@ export function Header(_props?: { user?: unknown }) {
 
   useEffect(() => {
     fetch("/api/notifications", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
+      .then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error("Failed")),
+      )
       .then((data) => {
         if (Array.isArray(data.data)) {
+          notificationsFromApi.current = true;
           setNotifications(data.data as NotificationItem[]);
         }
       })
       .catch(() => {
-        // fallback: păstrăm notificările mock locale
+        // keep mock / fallback
       });
   }, []);
 
   const notificationCount = notifications.filter((n) => !n.read).length;
-  const roleMeta = useMemo(() => roleBadgeMeta(role), [role]);
+  const roleMeta = useMemo(() => roleBadgeMeta(role, t), [role, t]);
+
+  const pageTitle = useMemo(() => {
+    const def = SIDEBAR_ROUTE_DEFS.find((d) => isNavActive(pathname, d.href));
+    return def ? t(def.i18nKey) : t("nav.dashboard");
+  }, [pathname, t]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -72,7 +151,6 @@ export function Header(_props?: { user?: unknown }) {
       router.push("/login");
       router.refresh();
     } catch {
-      // Fallback: redirect chiar dacă logout API eșuează
       router.push("/login");
     }
   }, [router]);
@@ -84,52 +162,55 @@ export function Header(_props?: { user?: unknown }) {
   }, [router]);
 
   return (
-    <header className="h-14 bg-white border-b flex items-center justify-between px-4 lg:px-6 shrink-0">
+    <header
+      suppressHydrationWarning
+      className="h-14 bg-white border-b flex items-center justify-between px-4 lg:px-6 shrink-0"
+    >
       <div className="flex items-center min-w-0 flex-1 gap-2">
-        {/* Spațiu sub butonul hamburger (fixed) pe mobil / tabletă */}
         <div className="w-8 shrink-0 lg:hidden" aria-hidden />
-        {/* Branding când sidebar-ul e ascuns (sub lg) */}
         <div className="lg:hidden flex items-center min-w-0">
-          <Link href={ROUTES.dashboard} className="flex items-center min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded">
+          <Link
+            href={ROUTES.dashboard}
+            className="flex items-center min-w-0 outline-none focus-visible:ring-2 focus-visible:ring-slate-400 rounded"
+          >
             {companyLogoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element -- dynamic logo URL from API
               <img
                 src={companyLogoUrl}
-                alt="Logo firmă"
+                alt={t("components.layout.headerLogoAlt")}
                 className="max-h-10 w-auto max-w-[140px] object-contain shrink-0"
                 decoding="async"
               />
             ) : (
-              <span className="text-sm font-semibold text-gray-900 truncate">HR Manager</span>
+              <span className="text-sm font-semibold text-gray-900 truncate">
+                {t("components.layout.headerBrandFallback")}
+              </span>
             )}
           </Link>
         </div>
-        {/* Titlu pagină — desktop */}
         <div className="hidden md:flex items-center text-sm text-gray-500 min-w-0">
-          <span className="font-medium text-gray-900">{ro.nav.dashboard}</span>
+          <span className="font-medium text-gray-900">{pageTitle}</span>
         </div>
       </div>
 
-      {/* Acțiuni dreapta */}
       <div className="flex items-center gap-2">
-        {/* Refresh */}
+        <LanguageSelector />
         <button
+          type="button"
           onClick={handleRefresh}
           disabled={refreshing}
           className="p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors disabled:opacity-50"
-          title="Reîmprospătează datele"
+          title={t("components.layout.headerRefreshTitle")}
         >
-          <RefreshCw
-            size={18}
-            className={refreshing ? "animate-spin" : ""}
-          />
+          <RefreshCw size={18} className={refreshing ? "animate-spin" : ""} />
         </button>
 
-        {/* Notificări */}
         <div className="relative">
           <button
+            type="button"
             onClick={() => setNotificationsOpen((v) => !v)}
             className="relative p-2 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors"
-            title="Notificări"
+            title={t("components.layout.headerNotificationsTitle")}
           >
             <Bell size={18} />
             {notificationCount > 0 && (
@@ -147,20 +228,28 @@ export function Header(_props?: { user?: unknown }) {
               />
               <div className="absolute right-0 top-full mt-1 w-80 bg-white rounded-xl border shadow-lg z-20 py-2">
                 <div className="px-4 py-2 border-b flex items-center justify-between">
-                  <p className="text-sm font-semibold text-gray-900">Notificări</p>
-                  <span className="text-xs text-gray-500">{notificationCount} necitite</span>
+                  <p className="text-sm font-semibold text-gray-900">
+                    {t("components.layout.headerNotificationsHeading")}
+                  </p>
+                  <span className="text-xs text-gray-500">
+                    {notificationCount}{" "}
+                    {t("components.layout.headerUnreadSuffix")}
+                  </span>
                 </div>
                 <div className="max-h-80 overflow-y-auto">
                   {notifications.map((n) => (
-                    <div key={n.id} className="px-4 py-3 border-b last:border-b-0">
+                    <div
+                      key={n.id}
+                      className="px-4 py-3 border-b last:border-b-0"
+                    >
                       <div className="flex items-start gap-2">
                         <span
                           className={`mt-1.5 inline-block w-2 h-2 rounded-full ${
                             n.type === "warning"
                               ? "bg-amber-500"
                               : n.type === "success"
-                              ? "bg-green-500"
-                              : "bg-blue-500"
+                                ? "bg-green-500"
+                                : "bg-blue-500"
                           }`}
                         />
                         <div className="flex-1 min-w-0">
@@ -174,13 +263,15 @@ export function Header(_props?: { user?: unknown }) {
                           onClick={() =>
                             setNotifications((prev) =>
                               prev.map((item) =>
-                                item.id === n.id ? { ...item, read: true } : item
-                              )
+                                item.id === n.id
+                                  ? { ...item, read: true }
+                                  : item,
+                              ),
                             )
                           }
                           className="mt-2 text-xs text-slate-600 hover:text-slate-900 underline"
                         >
-                          Marchează ca citit
+                          {t("components.layout.headerMarkRead")}
                         </button>
                       )}
                     </div>
@@ -191,17 +282,19 @@ export function Header(_props?: { user?: unknown }) {
           )}
         </div>
 
-        {/* User menu */}
         <div className="relative ml-2">
           <button
+            type="button"
             onClick={() => setDropdownOpen(!dropdownOpen)}
             className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition-colors"
           >
             <UserCircle size={20} className="text-gray-400" />
             <span className="hidden sm:inline max-w-[120px] truncate">
-              {user?.email ? user.email.split("@")[0] : "—"}
+              {user?.email ? user.email.split("@")[0] : t("common.emDash")}
             </span>
-            <span className={`hidden sm:inline text-[11px] font-semibold px-2 py-0.5 rounded-full ${roleMeta.cls}`}>
+            <span
+              className={`hidden sm:inline text-[11px] font-semibold px-2 py-0.5 rounded-full ${roleMeta.cls}`}
+            >
               {roleMeta.label}
             </span>
             <ChevronDown
@@ -214,37 +307,36 @@ export function Header(_props?: { user?: unknown }) {
 
           {dropdownOpen && (
             <>
-              {/* Backdrop */}
               <div
                 className="fixed inset-0 z-10"
                 onClick={() => setDropdownOpen(false)}
               />
 
-              {/* Dropdown */}
               <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-xl border shadow-lg z-20 py-1">
-                {/* User info */}
                 <div className="px-4 py-3 border-b">
                   <p className="text-sm font-medium text-gray-900 truncate">
-                    {user?.email ?? "—"}
+                    {user?.email ?? t("common.emDash")}
                   </p>
                   <div className="flex items-center gap-1.5 mt-1">
                     <ShieldCheck size={12} className="text-amber-500" />
-                    <span className={`text-xs font-semibold tracking-wide px-2 py-0.5 rounded-full ${roleMeta.cls}`}>
+                    <span
+                      className={`text-xs font-semibold tracking-wide px-2 py-0.5 rounded-full ${roleMeta.cls}`}
+                    >
                       {roleMeta.label}
                     </span>
                   </div>
                 </div>
 
-                {/* Acțiuni */}
                 <button
+                  type="button"
                   onClick={() => {
                     setDropdownOpen(false);
-                    handleLogout();
+                    void handleLogout();
                   }}
                   className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 transition-colors"
                 >
                   <LogOut size={16} />
-                  <span>Deconectare</span>
+                  <span>{t("components.layout.headerLogout")}</span>
                 </button>
               </div>
             </>

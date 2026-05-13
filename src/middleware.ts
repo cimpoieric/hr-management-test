@@ -1,20 +1,35 @@
 /**
- * Middleware Next.js — protecție rutelor autentificate.
+ * Middleware Next.js — protecție rutelor autentificate + context tenant pentru RSC/API.
  *
- * Interceptează TOATE rutele protejate, verifică cookie `auth-token`,
- * și adaugă headere `x-user-id` și `x-user-role` pentru Server Components.
+ * - Pagini: cookie JWT; setează headere `x-user-id`, `x-user-role`, `x-organization-id` pentru RSC.
+ * - API (rute ne-publice): verifică JWT și propagă același set de headere.
  *
- * Excluse: API routes, assets statice, login page.
+ * Izolarea datelor pe `organizationId` la nivel de query Prisma NU se face aici — este aplicată
+ * de extensia din `src/lib/prisma.ts` (tenant scope) pentru modele marcate tenant-scoped.
  */
 
+import {
+  HEADER_ORGANIZATION_ID,
+  HEADER_USER_ID,
+  HEADER_USER_ROLE,
+  isPublicApiPath,
+} from "@/middleware/tenant";
+import {
+  ADMIN_PAGE_DENY_PATH,
+  resolveAdminApiAccess,
+  resolveAdminPageAccess,
+} from "@/middleware/adminAccess";
+import { verifyToken } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { verifyToken } from "@/lib/auth";
 
-// Rute publice — fără autentificare (prefixe; „/” doar egalitate exactă)
 const PUBLIC_PREFIXES = [
   "/login",
+  "/register",
   "/setup",
+  "/pricing",
+  "/privacy",
+  "/terms",
   "/api/auth/login",
   "/api/auth/register",
   "/api/setup",
@@ -23,29 +38,61 @@ const PUBLIC_PREFIXES = [
 function isPublicPath(pathname: string): boolean {
   if (pathname === "/") return true;
   return PUBLIC_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`)
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
   );
 }
 
-// Pattern pentru assete statice și API
-const EXCLUDED_PATTERN =
-  /^\/(?:api\/(?!auth(?:\/|$)).*|_next\/static|_next\/image|favicon\.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map))$/;
+const STATIC_PATTERN =
+  /^\/(?:_next\/static|_next\/image|favicon\.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js|map))$/;
+
+function jsonError(status: number, message: string) {
+  return NextResponse.json({ error: message }, { status });
+}
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 1. Exclude assete statice și API (except auth)
-  if (EXCLUDED_PATTERN.test(pathname)) {
+  // Rute API (inclusiv /api/auth/*)
+  if (pathname.startsWith("/api/")) {
+    if (STATIC_PATTERN.test(pathname)) {
+      return NextResponse.next();
+    }
+    if (isPublicApiPath(pathname)) {
+      return NextResponse.next();
+    }
+
+    const token = request.cookies.get("auth-token")?.value;
+    if (!token) {
+      return jsonError(401, "Unauthorized");
+    }
+    try {
+      const payload = await verifyToken(token);
+      if (resolveAdminApiAccess(pathname, payload.role) === "deny") {
+        return jsonError(403, "Forbidden");
+      }
+      const res = NextResponse.next();
+      res.headers.set(HEADER_USER_ID, String(payload.userId));
+      res.headers.set(HEADER_USER_ROLE, payload.role);
+      res.headers.set(HEADER_ORGANIZATION_ID, payload.organizationId);
+      return res;
+    } catch {
+      return jsonError(401, "Invalid or expired token");
+    }
+  }
+
+  if (STATIC_PATTERN.test(pathname)) {
     return NextResponse.next();
   }
 
-  // 0. Setup gate (fără Prisma în Edge middleware).
-  // Verifică needsSetup printr-un request către /api/setup (Node runtime).
-  // Dacă nu există niciun user -> forțează /setup pentru toate rutele (inclusiv "/").
+  // Setup gate (fără Prisma în Edge middleware).
   if (!pathname.startsWith("/_next")) {
     try {
-      const res = await fetch(new URL("/api/setup", request.url), { cache: "no-store" });
-      const json = (await res.json().catch(() => ({}))) as { needsSetup?: boolean };
+      const res = await fetch(new URL("/api/setup", request.url), {
+        cache: "no-store",
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        needsSetup?: boolean;
+      };
       const needsSetup = Boolean(json.needsSetup);
       if (needsSetup) {
         if (!pathname.startsWith("/setup")) {
@@ -54,7 +101,6 @@ export async function middleware(request: NextRequest) {
         return NextResponse.next();
       }
 
-      // Setup deja făcut: nu permite acces la /setup
       if (pathname.startsWith("/setup")) {
         return NextResponse.redirect(new URL("/login", request.url));
       }
@@ -63,12 +109,10 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // 2. Exclude rute explicit publice
   if (isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
-  // 3. Verifică cookie auth-token
   const token = request.cookies.get("auth-token")?.value;
 
   if (!token) {
@@ -80,19 +124,21 @@ export async function middleware(request: NextRequest) {
   try {
     const payload = await verifyToken(token);
 
-    // 4. Token valid — adaugă headere pentru Server Components
+    if (resolveAdminPageAccess(pathname, payload.role) === "deny") {
+      return NextResponse.redirect(new URL(ADMIN_PAGE_DENY_PATH, request.url));
+    }
+
     const response = NextResponse.next();
-    response.headers.set("x-user-id", String(payload.userId));
-    response.headers.set("x-user-role", payload.role);
+    response.headers.set(HEADER_USER_ID, String(payload.userId));
+    response.headers.set(HEADER_USER_ROLE, payload.role);
+    response.headers.set(HEADER_ORGANIZATION_ID, payload.organizationId);
 
     return response;
   } catch {
-    // Token invalid sau expirat — redirect la login
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("redirect", pathname);
     const response = NextResponse.redirect(loginUrl);
 
-    // Șterge cookie-ul invalid
     response.cookies.set("auth-token", "", {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -105,7 +151,6 @@ export async function middleware(request: NextRequest) {
   }
 }
 
-// Matcher — se aplică pe TOATE rutele (except cele statice din EXCLUDED_PATTERN)
 export const config = {
   matcher: "/((?!_next/static|_next/image|favicon.ico|.*\\..*).*)",
 };

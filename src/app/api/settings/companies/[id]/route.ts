@@ -2,10 +2,11 @@
  * PUT / DELETE — firmă (admin)
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 const updateSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -17,14 +18,17 @@ const updateSchema = z.object({
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
     const { id } = await params;
-    const companyId = parseInt(id, 10);
+    const companyId = Number.parseInt(id, 10);
     if (isNaN(companyId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
@@ -32,10 +36,15 @@ export async function PUT(
     const raw = await request.json();
     const parsed = updateSchema.safeParse(raw);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Date invalide", issues: parsed.error.issues }, { status: 400 });
+      return NextResponse.json(
+        { error: "Date invalide", issues: parsed.error.issues },
+        { status: 400 },
+      );
     }
 
-    const existing = await prisma.company.findUnique({ where: { id: companyId } });
+    const existing = await prisma.company.findUnique({
+      where: { id: companyId },
+    });
     if (!existing) {
       return NextResponse.json({ error: "Firmă negăsită" }, { status: 404 });
     }
@@ -45,8 +54,12 @@ export async function PUT(
       where: { id: companyId },
       data: {
         ...(d.name !== undefined ? { name: d.name.trim() } : {}),
-        ...(d.taxCode !== undefined ? { taxCode: d.taxCode?.trim() || null } : {}),
-        ...(d.address !== undefined ? { address: d.address?.trim() || null } : {}),
+        ...(d.taxCode !== undefined
+          ? { taxCode: d.taxCode?.trim() || null }
+          : {}),
+        ...(d.address !== undefined
+          ? { address: d.address?.trim() || null }
+          : {}),
         ...(d.status !== undefined ? { status: d.status } : {}),
         ...(d.countryId !== undefined
           ? d.countryId === null
@@ -62,9 +75,15 @@ export async function PUT(
 
     return NextResponse.json({ company }, { status: 200 });
   } catch (error: unknown) {
-    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : "";
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code?: string }).code)
+        : "";
     if (code.includes("Unique")) {
-      return NextResponse.json({ error: "Există deja o firmă cu acest nume" }, { status: 409 });
+      return NextResponse.json(
+        { error: "Există deja o firmă cu acest nume" },
+        { status: 409 },
+      );
     }
     console.error("[SETTINGS_COMPANY_PUT]", error);
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });
@@ -73,14 +92,17 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
     const { id } = await params;
-    const companyId = parseInt(id, 10);
+    const companyId = Number.parseInt(id, 10);
     if (isNaN(companyId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
@@ -94,8 +116,10 @@ export async function DELETE(
     }
     if (existing._count.employees > 0) {
       return NextResponse.json(
-        { error: "Nu se poate șterge: există angajați legați de această firmă" },
-        { status: 409 }
+        {
+          error: "Nu se poate șterge: există angajați legați de această firmă",
+        },
+        { status: 409 },
       );
     }
 

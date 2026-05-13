@@ -9,11 +9,11 @@ import "server-only";
  * Loghează în consolă și în fișier.
  */
 
-import { prisma } from "@/lib/prisma";
-import { fetchUnreadEmails } from "./imapClient";
-import { processEmail } from "./emailProcessor";
-import fs from "fs/promises";
 import path from "path";
+import { prisma } from "@/lib/prisma";
+import fs from "fs/promises";
+import { processEmail } from "./emailProcessor";
+import { fetchUnreadEmails } from "./imapClient";
 
 const LOG_DIR = "./data/logs";
 const LOG_FILE = path.join(LOG_DIR, "cron-import.log");
@@ -32,11 +32,9 @@ async function writeLog(level: string, message: string): Promise<void> {
   const timestamp = new Date().toISOString();
   const line = `[${timestamp}] [${level}] ${message}\n`;
 
-  // Console
+  // Console: doar erori (restul e în fișier)
   if (level === "ERROR") {
     console.error(line.trim());
-  } else {
-    console.log(line.trim());
   }
 
   // Fișier
@@ -57,7 +55,11 @@ async function runImportRound(): Promise<{
   errors: string[];
 }> {
   if (isRunning) {
-    return { processed: 0, created: 0, errors: ["Runda anterioară încă în desfășurare"] };
+    return {
+      processed: 0,
+      created: 0,
+      errors: ["Runda anterioară încă în desfășurare"],
+    };
   }
 
   isRunning = true;
@@ -70,7 +72,11 @@ async function runImportRound(): Promise<{
     await writeLog("INFO", "=== Runda de import email începută ===");
 
     // 1. Verifică config IMAP
-    if (!process.env.IMAP_HOST || !process.env.IMAP_USER || !process.env.IMAP_PASSWORD) {
+    if (
+      !process.env.IMAP_HOST ||
+      !process.env.IMAP_USER ||
+      !process.env.IMAP_PASSWORD
+    ) {
       const msg = "Config IMAP lipsă — sare peste rundă";
       await writeLog("WARN", msg);
       lastError = msg;
@@ -108,7 +114,7 @@ async function runImportRound(): Promise<{
 
         await writeLog(
           "INFO",
-          `Email "${message.subject}" — ${result.pendingImports} importuri create`
+          `Email "${message.subject}" — ${result.pendingImports} importuri create`,
         );
       } catch (processError) {
         const msg = `Eroare procesare "${message.subject}": ${
@@ -124,7 +130,7 @@ async function runImportRound(): Promise<{
 
     await writeLog(
       "INFO",
-      `=== Runda finalizată: ${processed} emailuri, ${created} importuri create ===`
+      `=== Runda finalizată: ${processed} emailuri, ${created} importuri create ===`,
     );
   } catch (error) {
     const msg = `Eroare critică în rundă: ${error instanceof Error ? error.message : "?"}`;
@@ -146,7 +152,7 @@ async function runImportRound(): Promise<{
  */
 export function startEmailImportCron(): void {
   if (intervalId) {
-    console.log("[CRON] Deja pornit");
+    void writeLog("WARN", "[CRON] Deja pornit");
     return;
   }
 
@@ -154,11 +160,14 @@ export function startEmailImportCron(): void {
   runImportRound().catch(console.error);
 
   // Apoi la fiecare 15 minute
-  intervalId = setInterval(() => {
-    runImportRound().catch(console.error);
-  }, 15 * 60 * 1000); // 15 minute
+  intervalId = setInterval(
+    () => {
+      runImportRound().catch(console.error);
+    },
+    15 * 60 * 1000,
+  ); // 15 minute
 
-  console.log("[CRON] Email import cron pornit — interval 15 minute");
+  void writeLog("INFO", "[CRON] Email import cron pornit — interval 15 minute");
 }
 
 /**
@@ -168,7 +177,7 @@ export function stopEmailImportCron(): void {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
-    console.log("[CRON] Email import cron oprit");
+    void writeLog("INFO", "[CRON] Email import cron oprit");
   }
 }
 

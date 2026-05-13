@@ -1,11 +1,21 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Save, X, ChevronDown, ChevronUp, AlertTriangle, Calculator } from "lucide-react";
-import { DuplicateWarning } from "./DuplicateWarning";
-import { validateCNP } from "@/lib/validation";
 import { SalaryCalculatorModal } from "@/components/salary/SalaryCalculatorModal";
+import { validateCNP } from "@/lib/validation";
+import {
+  AlertTriangle,
+  Calculator,
+  ChevronDown,
+  ChevronUp,
+  Save,
+  X,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import { useTranslation } from "@/hooks/useTranslation";
+import { DuplicateWarning } from "./DuplicateWarning";
+import { ROUTES } from "@/lib/routes";
 
 interface FormData {
   cnp: string;
@@ -82,6 +92,8 @@ export function EmployeeForm({
   onCancel,
 }: EmployeeFormProps) {
   const router = useRouter();
+  const { t, i18n } = useTranslation();
+  const numberLocale = i18n.language?.startsWith("ro") ? "ro-RO" : "en-US";
   const isEdit = !!employeeId;
   const infoOnly = variant === "infoOnly";
 
@@ -96,14 +108,52 @@ export function EmployeeForm({
   const [submitWarning, setSubmitWarning] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [salaryCalculatorOpen, setSalaryCalculatorOpen] = useState(false);
-  const [companyOptions, setCompanyOptions] = useState<{ value: string; label: string }[]>([]);
-  const [countryOptions, setCountryOptions] = useState<{ value: string; label: string }[]>([]);
+  const [companyOptions, setCompanyOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+  const [countryOptions, setCountryOptions] = useState<
+    { value: string; label: string }[]
+  >([]);
+
+  const statusSelectOptions = useMemo(
+    () => [
+      {
+        value: "ACTIVE",
+        label: t("components.employeeForm.field.statusActive"),
+      },
+      {
+        value: "TERMINATED",
+        label: t("components.employeeForm.field.statusTerminated"),
+      },
+    ],
+    [t],
+  );
+
+  const salaryTypeSelectOptions = useMemo(
+    () => [
+      { value: "", label: t("components.employeeForm.field.salaryTypeEmpty") },
+      { value: "ORA", label: t("components.employeeForm.field.salaryHourly") },
+      {
+        value: "SAPTAMANAL",
+        label: t("components.employeeForm.field.salaryWeekly"),
+      },
+      {
+        value: "LUNAR",
+        label: t("components.employeeForm.field.salaryMonthly"),
+      },
+    ],
+    [t],
+  );
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      fetch("/api/companies", { cache: "no-store" }).then((r) => r.json()),
-      fetch("/api/countries", { cache: "no-store" }).then((r) => r.json()),
+      fetch("/api/organization/companies", { cache: "no-store" }).then((r) =>
+        r.json(),
+      ),
+      fetch("/api/organization/countries", { cache: "no-store" }).then((r) =>
+        r.json(),
+      ),
     ])
       .then(([compRes, ctryRes]) => {
         if (cancelled) return;
@@ -113,10 +163,10 @@ export function EmployeeForm({
           comps.map((c: { id: number; name: string }) => ({
             value: String(c.id),
             label: c.name,
-          }))
+          })),
         );
         setCountryOptions([
-          { value: "", label: "— Fără selecție —" },
+          { value: "", label: t("components.employeeForm.countryNone") },
           ...ctr.map((c: { id: number; name: string; code: string }) => ({
             value: String(c.id),
             label: `${c.name} (${c.code})`,
@@ -135,7 +185,7 @@ export function EmployeeForm({
     return () => {
       cancelled = true;
     };
-  }, [employeeId]);
+  }, [employeeId, t]);
 
   // Încarcă date existente la edit
   useEffect(() => {
@@ -145,8 +195,12 @@ export function EmployeeForm({
       .then((res) => res.json())
       .then((data) => {
         if (data.error) {
-          alert(data.error);
-          router.push("/angajati");
+          toast.error(
+            typeof data.error === "string"
+              ? data.error
+              : t("components.employeeForm.loadDataError"),
+          );
+          router.push(ROUTES.employees);
           return;
         }
         setForm({
@@ -174,21 +228,27 @@ export function EmployeeForm({
           companyId: data.company?.id ?? 0,
           salaryType: data.salaryType ?? "",
           salaryAmount:
-            typeof data.salaryAmount === "number" ? String(data.salaryAmount) : "",
+            typeof data.salaryAmount === "number"
+              ? String(data.salaryAmount)
+              : "",
           salaryCurrency: data.salaryCurrency ?? "RON",
           salaryStartDate: data.salaryStartDate
             ? new Date(data.salaryStartDate).toISOString().slice(0, 10)
             : "",
         });
       })
-      .catch(() => alert("Eroare la încărcarea datelor"))
+      .catch(() => {
+        toast.error(t("components.employeeForm.loadDataError"));
+      })
       .finally(() => setLoading(false));
-  }, [employeeId, router]);
+  }, [employeeId, router, t]);
 
   useEffect(() => {
     if (employeeId) return;
     fetch("/api/settings", { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
+      .then((res) =>
+        res.ok ? res.json() : Promise.reject(new Error("Failed")),
+      )
       .then((data) => {
         setForm((prev) => ({
           ...prev,
@@ -201,67 +261,76 @@ export function EmployeeForm({
       });
   }, [employeeId]);
 
-  const updateField = useCallback(<K extends keyof FormData>(key: K, value: FormData[K]) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    // Clear error on change
-    setErrors((prev) => {
-      const next = { ...prev };
-      delete next[key];
-      return next;
-    });
-  }, []);
+  const updateField = useCallback(
+    <K extends keyof FormData>(key: K, value: FormData[K]) => {
+      setForm((prev) => ({ ...prev, [key]: value }));
+      // Clear error on change
+      setErrors((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    },
+    [],
+  );
 
-  function validateField(name: string, value: string): string | undefined {
-    switch (name) {
-      case "cnp":
-        {
+  const validateField = useCallback(
+    (name: string, value: string): string | undefined => {
+      switch (name) {
+        case "cnp": {
           const v = (value ?? "").trim();
-          if (!v) return "CNP este obligatoriu";
+          if (!v) return t("components.employeeForm.cnpRequired");
           if (v.startsWith("TEMP_")) {
-            if (v.length < 5) return "CNP temporar prea scurt";
+            if (v.length < 5)
+              return t("components.employeeForm.cnpTempTooShort");
             return undefined;
           }
           if (/^\d+$/.test(v)) {
-            if (v.length !== 13) return "CNP românesc trebuie să aibă 13 cifre";
-            if (!validateCNP(v)) return "CNP românesc invalid";
+            if (v.length !== 13)
+              return t("components.employeeForm.cnpRoLength");
+            if (!validateCNP(v))
+              return t("components.employeeForm.cnpRoInvalid");
             return undefined;
           }
-          if (v.length < 5) return "Identificator invalid (minim 5 caractere) sau CNP cu 13 cifre";
-          return undefined; // CNP străin / identificator
+          if (v.length < 5)
+            return t("components.employeeForm.cnpIdentifierInvalid");
+          return undefined;
         }
-        break;
-      case "firstName":
-        if (!value.trim()) return "Prenume obligatoriu";
-        break;
-      case "lastName":
-        if (!value.trim()) return "Nume obligatoriu";
-        break;
-      case "email":
-        if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
-          return "Email invalid";
-        break;
-      case "phone":
-        if (value) {
-          const clean = value.replace(/[\s\-\.]/g, "");
-          if (!/^07\d{8}$/.test(clean) && !/^\+\d{8,15}$/.test(clean))
-            return "Telefon invalid";
-        }
-        break;
-      case "iban":
-        if (value && value.length < 15) return "IBAN prea scurt";
-        break;
-      case "companyId":
-        if (!value || Number(value) <= 0) return "Selectează o firmă";
-        break;
-    }
-    return undefined;
-  }
+        case "firstName":
+          if (!value.trim())
+            return t("components.employeeForm.firstNameRequired");
+          break;
+        case "lastName":
+          if (!value.trim())
+            return t("components.employeeForm.lastNameRequired");
+          break;
+        case "email":
+          if (value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value))
+            return t("components.employeeForm.emailInvalid");
+          break;
+        case "phone":
+          if (value) {
+            const clean = value.replace(/[\s\-\.]/g, "");
+            if (!/^07\d{8}$/.test(clean) && !/^\+\d{8,15}$/.test(clean))
+              return t("components.employeeForm.phoneInvalid");
+          }
+          break;
+        case "iban":
+          if (value && value.length < 15)
+            return t("components.employeeForm.ibanTooShort");
+          break;
+        case "companyId":
+          if (!value || Number(value) <= 0)
+            return t("components.employeeForm.companyRequired");
+          break;
+      }
+      return undefined;
+    },
+    [t],
+  );
 
   function handleBlur(field: string) {
-    const error = validateField(
-      field,
-      form[field as keyof FormData] as string
-    );
+    const error = validateField(field, form[field as keyof FormData] as string);
     if (error) {
       setErrors((prev) => ({ ...prev, [field]: error }));
     }
@@ -272,7 +341,10 @@ export function EmployeeForm({
     const required = ["cnp", "firstName", "lastName", "companyId"];
 
     for (const field of required) {
-      const error = validateField(field, form[field as keyof FormData] as string);
+      const error = validateField(
+        field,
+        form[field as keyof FormData] as string,
+      );
       if (error) newErrors[field] = error;
     }
 
@@ -288,7 +360,9 @@ export function EmployeeForm({
       if (amtRaw) {
         const n = Number(amtRaw.replace(",", "."));
         if (!Number.isFinite(n) || n <= 0) {
-          newErrors.salaryAmount = "Sumă invalidă sau ≤ 0";
+          newErrors.salaryAmount = t(
+            "components.employeeForm.salaryAmountInvalid",
+          );
         }
       }
     }
@@ -296,15 +370,35 @@ export function EmployeeForm({
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) {
       const sectionFields: Record<string, string[]> = {
-        personal: ["cnp", "firstName", "lastName", "seriesCI", "numberCI", "phone", "email", "address", "city"],
+        personal: [
+          "cnp",
+          "firstName",
+          "lastName",
+          "seriesCI",
+          "numberCI",
+          "phone",
+          "email",
+          "address",
+          "city",
+        ],
         bank: ["iban", "bankName", "companyId"],
         contract: ["position", "status", "observations"],
-        ...(infoOnly ? {} : { salary: ["salaryType", "salaryAmount", "salaryCurrency", "salaryStartDate"] }),
+        ...(infoOnly
+          ? {}
+          : {
+              salary: [
+                "salaryType",
+                "salaryAmount",
+                "salaryCurrency",
+                "salaryStartDate",
+              ],
+            }),
       };
       const firstErrorField = Object.keys(newErrors)[0] ?? "";
       const targetSection =
-        Object.entries(sectionFields).find(([, fields]) => fields.includes(firstErrorField))?.[0] ??
-        "personal";
+        Object.entries(sectionFields).find(([, fields]) =>
+          fields.includes(firstErrorField),
+        )?.[0] ?? "personal";
       setOpenSection(targetSection);
     }
     return { fieldIssues: newErrors };
@@ -317,23 +411,44 @@ export function EmployeeForm({
     salaryAmountParsed <= 0;
 
   const salaryIncomplete =
-    !form.salaryType || !form.salaryAmount.trim() || !form.salaryCurrency.trim();
+    !form.salaryType ||
+    !form.salaryAmount.trim() ||
+    !form.salaryCurrency.trim();
 
   const salaryAmountNumber = Number(form.salaryAmount || 0);
-  const salaryPreview =
-    form.salaryType === "ORA"
-      ? `Ex: 160 ore/lună × ${salaryAmountNumber || 25} ${form.salaryCurrency || "RON"}/oră = ${(
-          (salaryAmountNumber || 25) * 160
-        ).toLocaleString("ro-RO")} ${form.salaryCurrency || "RON"}/lună`
-      : form.salaryType === "SAPTAMANAL"
-      ? `Ex: ${(salaryAmountNumber || 1000).toLocaleString("ro-RO")} ${
-          form.salaryCurrency || "RON"
-        }/săptămână ≈ ${((salaryAmountNumber || 1000) * 4).toLocaleString(
-          "ro-RO"
-        )} ${form.salaryCurrency || "RON"}/lună`
-      : `Ex: ${(salaryAmountNumber || 4000).toLocaleString("ro-RO")} ${
-          form.salaryCurrency || "RON"
-        }/lună`;
+  const salaryPreview = useMemo(() => {
+    const cur = form.salaryCurrency || "RON";
+    if (form.salaryType === "ORA") {
+      const rate = salaryAmountNumber || 25;
+      const total = (rate * 160).toLocaleString(numberLocale);
+      return t("components.employeeForm.salaryPreviewHourly", {
+        rate,
+        currency: cur,
+        total,
+      });
+    }
+    if (form.salaryType === "SAPTAMANAL") {
+      const weekly = (salaryAmountNumber || 1000).toLocaleString(numberLocale);
+      const monthly = ((salaryAmountNumber || 1000) * 4).toLocaleString(
+        numberLocale,
+      );
+      return t("components.employeeForm.salaryPreviewWeekly", {
+        weekly,
+        monthly,
+        currency: cur,
+      });
+    }
+    return t("components.employeeForm.salaryPreviewMonthly", {
+      amount: (salaryAmountNumber || 4000).toLocaleString(numberLocale),
+      currency: cur,
+    });
+  }, [
+    form.salaryType,
+    form.salaryCurrency,
+    salaryAmountNumber,
+    numberLocale,
+    t,
+  ]);
 
   async function handleSubmit(force = false) {
     setSubmitError("");
@@ -375,8 +490,7 @@ export function EmployeeForm({
         position: form.position.trim() || null,
         address: form.address.trim() || null,
         city: form.city.trim() || null,
-        countryId:
-          form.countryId === "" ? null : Number(form.countryId),
+        countryId: form.countryId === "" ? null : Number(form.countryId),
         status: form.status || "ACTIVE",
         observations: form.observations.trim() || null,
         companyId: Number(form.companyId),
@@ -394,9 +508,7 @@ export function EmployeeForm({
         });
       }
 
-      const url = isEdit
-        ? `/api/employees/${employeeId}`
-        : "/api/employees";
+      const url = isEdit ? `/api/employees/${employeeId}` : "/api/employees";
       const method = isEdit ? "PUT" : "POST";
 
       const res = await fetch(url, {
@@ -410,26 +522,32 @@ export function EmployeeForm({
       // Duplicat detectat
       if (res.status === 409 && data.error === "DUPLICATE_CNP") {
         setDuplicate(data.existing);
-        setSubmitError("Există deja un angajat cu acest CNP.");
+        setSubmitError(t("components.employeeForm.duplicateCnp"));
         setSaving(false);
         return;
       }
 
       if (!res.ok) {
         if (Array.isArray(data.issues) && data.issues.length > 0) {
-          setSubmitError(data.issues[0]?.message ?? "Date invalide");
+          setSubmitError(
+            data.issues[0]?.message ?? t("components.employeeForm.invalidData"),
+          );
         } else {
-          setSubmitError(data.error ?? "Eroare la salvare");
+          setSubmitError(data.error ?? t("components.employeeForm.saveError"));
         }
         setSaving(false);
         return;
       }
 
       setSubmitSuccess(
-        isEdit ? "Angajatul a fost actualizat cu succes." : "Angajatul a fost creat cu succes."
+        isEdit
+          ? t("components.employeeForm.updatedSuccess")
+          : t("components.employeeForm.createdSuccess"),
       );
       if (Array.isArray(data.warnings) && data.warnings.length > 0) {
-        setSubmitWarning(`Avertizări: ${data.warnings.join(" | ")}`);
+        setSubmitWarning(
+          `${t("components.employeeForm.warningsPrefix")} ${data.warnings.join(" | ")}`,
+        );
       }
       setSaving(false);
       if (onSaved) {
@@ -438,12 +556,12 @@ export function EmployeeForm({
         }, 500);
       } else {
         setTimeout(() => {
-          router.push("/angajati");
+          router.push(ROUTES.employees);
           router.refresh();
         }, 1200);
       }
     } catch {
-      setSubmitError("Eroare de rețea");
+      setSubmitError(t("components.employeeForm.networkError"));
       setSaving(false);
     }
   }
@@ -451,7 +569,7 @@ export function EmployeeForm({
   if (loading) {
     return (
       <div className="bg-white rounded-xl border p-12 text-center text-gray-400">
-        Se încarcă datele...
+        {t("components.employeeForm.loadingFormData")}
       </div>
     );
   }
@@ -488,7 +606,7 @@ export function EmployeeForm({
 
         {/* Secțiune 1: Date personale */}
         <FormSection
-          title="Date personale"
+          title={t("components.employeeForm.sectionPersonal")}
           isOpen={openSection === "personal"}
           onToggle={() =>
             setOpenSection(openSection === "personal" ? "" : "personal")
@@ -496,88 +614,88 @@ export function EmployeeForm({
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field
-              label="CNP *"
+              label={t("components.employeeForm.field.cnp")}
               name="cnp"
               value={form.cnp}
               onChange={(v) => updateField("cnp", v)}
               onBlur={() => handleBlur("cnp")}
               error={errors.cnp}
               maxLength={64}
-              placeholder='CNP (13 cifre) sau "TEMP_..."'
+              placeholder={t("components.employeeForm.field.cnpPh")}
               disabled={false}
             />
             <Field
-              label="Nume *"
+              label={t("components.employeeForm.field.lastName")}
               name="lastName"
               value={form.lastName}
               onChange={(v) => updateField("lastName", v)}
               onBlur={() => handleBlur("lastName")}
               error={errors.lastName}
-              placeholder="Popescu"
+              placeholder={t("components.employeeForm.field.lastNamePh")}
             />
             <Field
-              label="Prenume *"
+              label={t("components.employeeForm.field.firstName")}
               name="firstName"
               value={form.firstName}
               onChange={(v) => updateField("firstName", v)}
               onBlur={() => handleBlur("firstName")}
               error={errors.firstName}
-              placeholder="Ion"
+              placeholder={t("components.employeeForm.field.firstNamePh")}
             />
             <div className="grid grid-cols-2 gap-3">
               <Field
-                label="CI Serie"
+                label={t("components.employeeForm.field.seriesCI")}
                 name="seriesCI"
                 value={form.seriesCI}
                 onChange={(v) => updateField("seriesCI", v.toUpperCase())}
-                placeholder="RT"
+                placeholder={t("components.employeeForm.field.seriesCIPh")}
                 maxLength={4}
               />
               <Field
-                label="CI Număr"
+                label={t("components.employeeForm.field.numberCI")}
                 name="numberCI"
                 value={form.numberCI}
                 onChange={(v) => updateField("numberCI", v)}
-                placeholder="123456"
+                placeholder={t("components.employeeForm.field.numberCIPh")}
                 maxLength={10}
               />
             </div>
             <Field
-              label="Telefon"
+              label={t("components.employeeForm.field.phone")}
               name="phone"
               value={form.phone}
               onChange={(v) => updateField("phone", v)}
               onBlur={() => handleBlur("phone")}
               error={errors.phone}
-              placeholder="0722 123 456"
+              placeholder={t("components.employeeForm.field.phonePh")}
             />
             <Field
-              label="Email"
+              label={t("components.employeeForm.field.email")}
               name="email"
               value={form.email}
               onChange={(v) => updateField("email", v)}
               onBlur={() => handleBlur("email")}
               error={errors.email}
               type="email"
-              placeholder="ion.popescu@email.ro"
+              placeholder={t("components.employeeForm.field.emailPh")}
             />
             <Field
-              label="Adresă"
+              label={t("components.employeeForm.field.address")}
               name="address"
               value={form.address}
               onChange={(v) => updateField("address", v)}
-              placeholder="Str. Exemplu nr. 1"
+              placeholder={t("components.employeeForm.field.addressPh")}
               className="sm:col-span-2"
             />
             <Field
-              label="Oraș"
+              label={t("components.employeeForm.field.city")}
               name="city"
               value={form.city}
               onChange={(v) => updateField("city", v)}
-              placeholder="București"
+              placeholder={t("components.employeeForm.field.cityPh")}
             />
             <Field
-              label="Țară"
+              label={t("components.employeeForm.field.country")}
               name="countryId"
               value={form.countryId === "" ? "" : String(form.countryId)}
               onChange={(v) =>
@@ -591,30 +709,30 @@ export function EmployeeForm({
 
         {/* Secțiune 2: Date bancare */}
         <FormSection
-          title="Date bancare și firmă"
+          title={t("components.employeeForm.sectionBank")}
           isOpen={openSection === "bank"}
           onToggle={() => setOpenSection(openSection === "bank" ? "" : "bank")}
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field
-              label="IBAN"
+              label={t("components.employeeForm.field.iban")}
               name="iban"
               value={form.iban}
               onChange={(v) => updateField("iban", v.toUpperCase())}
               onBlur={() => handleBlur("iban")}
               error={errors.iban}
-              placeholder="RO49 AAAA BBBB CCCC DDDD EEEE"
+              placeholder={t("components.employeeForm.field.ibanPh")}
               maxLength={34}
             />
             <Field
-              label="Bancă"
+              label={t("components.employeeForm.field.bankName")}
               name="bankName"
               value={form.bankName}
               onChange={(v) => updateField("bankName", v)}
-              placeholder="Banca Transilvania"
+              placeholder={t("components.employeeForm.field.bankNamePh")}
             />
             <Field
-              label="Firmă angajatoare *"
+              label={t("components.employeeForm.field.employingCompany")}
               name="companyId"
               value={form.companyId > 0 ? String(form.companyId) : ""}
               onChange={(v) => updateField("companyId", Number(v))}
@@ -623,8 +741,21 @@ export function EmployeeForm({
               type="select"
               options={
                 companyOptions.length > 0
-                  ? [{ value: "", label: "— Selectează firma —" }, ...companyOptions]
-                  : [{ value: "", label: "Se încarcă firmele..." }]
+                  ? [
+                      {
+                        value: "",
+                        label: t(
+                          "components.employeeForm.companySelectPlaceholder",
+                        ),
+                      },
+                      ...companyOptions,
+                    ]
+                  : [
+                      {
+                        value: "",
+                        label: t("components.employeeForm.loadingCompanies"),
+                      },
+                    ]
               }
             />
           </div>
@@ -632,7 +763,7 @@ export function EmployeeForm({
 
         {/* Secțiune 3: Date contract */}
         <FormSection
-          title="Date contract"
+          title={t("components.employeeForm.sectionContract")}
           isOpen={openSection === "contract"}
           onToggle={() =>
             setOpenSection(openSection === "contract" ? "" : "contract")
@@ -640,30 +771,27 @@ export function EmployeeForm({
         >
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field
-              label="Funcție"
+              label={t("components.employeeForm.field.position")}
               name="position"
               value={form.position}
               onChange={(v) => updateField("position", v)}
-              placeholder="Muncitor necalificat"
+              placeholder={t("components.employeeForm.field.positionPh")}
             />
             <Field
-              label="Status"
+              label={t("components.employeeForm.field.status")}
               name="status"
               value={form.status}
               onChange={(v) => updateField("status", v)}
               type="select"
-              options={[
-                { value: "ACTIVE", label: "Activ" },
-                { value: "TERMINATED", label: "Terminat" },
-              ]}
+              options={statusSelectOptions}
             />
             <Field
-              label="Observații"
+              label={t("components.employeeForm.field.observations")}
               name="observations"
               value={form.observations}
               onChange={(v) => updateField("observations", v)}
               type="textarea"
-              placeholder="Note suplimentare..."
+              placeholder={t("components.employeeForm.field.observationsPh")}
               className="sm:col-span-2"
             />
           </div>
@@ -671,100 +799,97 @@ export function EmployeeForm({
 
         {/* Secțiune 4: Date salariale (doar formular complet) */}
         {!infoOnly && (
-        <FormSection
-          title="Date salariale"
-          isOpen={openSection === "salary"}
-          onToggle={() =>
-            setOpenSection(openSection === "salary" ? "" : "salary")
-          }
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field
-              label="Tip plată"
-              name="salaryType"
-              value={form.salaryType}
-              onChange={(v) =>
-                updateField(
-                  "salaryType",
-                  (v as "LUNAR" | "SAPTAMANAL" | "ORA" | "") ?? ""
-                )
-              }
-              type="select"
-              options={[
-                { value: "", label: "— Lăsați gol dacă nu se aplică —" },
-                { value: "ORA", label: "Pe oră (ORA)" },
-                { value: "SAPTAMANAL", label: "Săptămânal (SAPTAMANAL)" },
-                { value: "LUNAR", label: "Lunar (LUNAR)" },
-              ]}
-            />
-            <Field
-              label="Sumă brută"
-              name="salaryAmount"
-              value={form.salaryAmount}
-              onChange={(v) =>
-                updateField("salaryAmount", v.replace(/[^0-9.,]/g, ""))
-              }
-              type="number"
-              step="0.01"
-              placeholder="ex: 4500.50"
-              warning={
-                salaryAmountNonPositiveWarning
-                  ? "Valoare lipsă de sens pentru sumă (≤ 0). Puteți corecta sau salva oricum."
-                  : undefined
-              }
-            />
-            <Field
-              label="Monedă"
-              name="salaryCurrency"
-              value={form.salaryCurrency}
-              onChange={(v) => updateField("salaryCurrency", v)}
-              type="select"
-              options={[
-                { value: "RON", label: "RON" },
-                { value: "EUR", label: "EUR" },
-                { value: "USD", label: "USD" },
-                { value: "GBP", label: "GBP" },
-              ]}
-            />
-            <Field
-              label="Valabil de la (opțional)"
-              name="salaryStartDate"
-              value={form.salaryStartDate}
-              onChange={(v) => updateField("salaryStartDate", v)}
-              type="date"
-            />
-          </div>
-
-          {salaryIncomplete && (
-            <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              Date salariale incomplete — se poate completa ulterior.
+          <FormSection
+            title={t("components.employeeForm.sectionSalary")}
+            isOpen={openSection === "salary"}
+            onToggle={() =>
+              setOpenSection(openSection === "salary" ? "" : "salary")
+            }
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field
+                label={t("components.employeeForm.field.salaryType")}
+                name="salaryType"
+                value={form.salaryType}
+                onChange={(v) =>
+                  updateField(
+                    "salaryType",
+                    (v as "LUNAR" | "SAPTAMANAL" | "ORA" | "") ?? "",
+                  )
+                }
+                type="select"
+                options={salaryTypeSelectOptions}
+              />
+              <Field
+                label={t("components.employeeForm.field.grossAmount")}
+                name="salaryAmount"
+                value={form.salaryAmount}
+                onChange={(v) =>
+                  updateField("salaryAmount", v.replace(/[^0-9.,]/g, ""))
+                }
+                type="number"
+                step="0.01"
+                placeholder={t("components.employeeForm.field.grossAmountPh")}
+                warning={
+                  salaryAmountNonPositiveWarning
+                    ? t("components.employeeForm.field.grossAmountWarning")
+                    : undefined
+                }
+              />
+              <Field
+                label={t("components.employeeForm.field.currency")}
+                name="salaryCurrency"
+                value={form.salaryCurrency}
+                onChange={(v) => updateField("salaryCurrency", v)}
+                type="select"
+                options={[
+                  { value: "RON", label: "RON" },
+                  { value: "EUR", label: "EUR" },
+                  { value: "USD", label: "USD" },
+                  { value: "GBP", label: "GBP" },
+                ]}
+              />
+              <Field
+                label={t("components.employeeForm.field.salaryValidFrom")}
+                name="salaryStartDate"
+                value={form.salaryStartDate}
+                onChange={(v) => updateField("salaryStartDate", v)}
+                type="date"
+              />
             </div>
-          )}
 
-          <p className="mt-3 text-xs text-gray-500">{salaryPreview}</p>
+            {salaryIncomplete && (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                {t("components.employeeForm.sectionSalaryIncompleteNote")}
+              </div>
+            )}
 
-          <div className="mt-4">
-            <button
-              type="button"
-              onClick={() => setSalaryCalculatorOpen(true)}
-              className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
-            >
-              <Calculator size={14} />
-              Calculează plată
-            </button>
-          </div>
-        </FormSection>
+            <p className="mt-3 text-xs text-gray-500">{salaryPreview}</p>
+
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => setSalaryCalculatorOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <Calculator size={14} />
+                {t("components.employeeForm.field.calcPayButton")}
+              </button>
+            </div>
+          </FormSection>
         )}
 
         {/* Acțiuni */}
         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 border-t">
           <button
             type="button"
-            onClick={() => (onCancel ? onCancel() : router.push("/angajati"))}
+            onClick={() =>
+              onCancel ? onCancel() : router.push(ROUTES.employees)
+            }
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg border text-sm font-medium text-gray-700 hover:bg-white transition-colors"
           >
             <X size={16} />
-            Anulează
+            {t("components.employeeForm.cancel")}
           </button>
 
           <div className="flex items-center gap-2">
@@ -774,7 +899,11 @@ export function EmployeeForm({
               className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-50 transition-colors"
             >
               <Save size={16} />
-              {saving ? "Se salvează..." : isEdit ? "Salvează modificările" : "Salvează angajat"}
+              {saving
+                ? t("components.employeeForm.savingInProgress")
+                : isEdit
+                  ? t("components.employeeForm.saveEdit")
+                  : t("components.employeeForm.saveCreate")}
             </button>
           </div>
         </div>
@@ -806,17 +935,21 @@ export function EmployeeForm({
       )}
 
       {!infoOnly && (
-      <SalaryCalculatorModal
-        isOpen={salaryCalculatorOpen}
-        onClose={() => setSalaryCalculatorOpen(false)}
-        employeeId={employeeId}
-        employeeName={`${form.lastName} ${form.firstName}`.trim()}
-        iban={form.iban}
-        bankName={form.bankName}
-        salaryType={form.salaryType || null}
-        salaryAmount={form.salaryAmount ? Number(form.salaryAmount.replace(",", ".")) : null}
-        salaryCurrency={form.salaryCurrency || "RON"}
-      />
+        <SalaryCalculatorModal
+          isOpen={salaryCalculatorOpen}
+          onClose={() => setSalaryCalculatorOpen(false)}
+          employeeId={employeeId}
+          employeeName={`${form.lastName} ${form.firstName}`.trim()}
+          iban={form.iban}
+          bankName={form.bankName}
+          salaryType={form.salaryType || null}
+          salaryAmount={
+            form.salaryAmount
+              ? Number(form.salaryAmount.replace(",", "."))
+              : null
+          }
+          salaryCurrency={form.salaryCurrency || "RON"}
+        />
       )}
     </>
   );
@@ -890,9 +1023,7 @@ function Field({
 }: FieldProps) {
   const inputClass =
     "w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950 " +
-    (error
-      ? "border-amber-300 focus:ring-amber-500/80"
-      : "border-gray-200");
+    (error ? "border-amber-300 focus:ring-amber-500/80" : "border-gray-200");
 
   return (
     <div className={className}>
@@ -962,16 +1093,19 @@ function ConfirmSaveModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-lg rounded-xl border bg-white shadow-xl">
         <div className="px-6 py-5 border-b">
           <div className="flex items-center gap-2">
             <AlertTriangle size={18} className="text-amber-600" />
-            <h3 className="text-base font-semibold text-gray-900">Confirmare salvare</h3>
+            <h3 className="text-base font-semibold text-gray-900">
+              {t("components.employeeForm.confirmSaveTitle")}
+            </h3>
           </div>
           <p className="text-sm text-gray-700 mt-3">
-            Există câmpuri cu valori invalide. Poți salva totuși sau revizui formularul.
+            {t("components.employeeForm.confirmSaveDescription")}
           </p>
         </div>
         <div className="px-6 py-4 flex items-center justify-end gap-2 border-t bg-gray-50">
@@ -980,14 +1114,14 @@ function ConfirmSaveModal({
             onClick={onCancel}
             className="px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-white"
           >
-            Revizuiește
+            {t("components.employeeForm.confirmSaveReview")}
           </button>
           <button
             type="button"
             onClick={onConfirm}
             className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700"
           >
-            Salvează oricum
+            {t("components.employeeForm.confirmSaveAnyway")}
           </button>
         </div>
       </div>

@@ -1,46 +1,54 @@
 "use client";
 
+import { ROLES_EMPLOYEES_RW, ROLES_SETTINGS_ADMIN } from "@/lib/roles";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 import {
-  useState,
-  useEffect,
-  useLayoutEffect,
-  useCallback,
-  useMemo,
-  useRef,
-} from "react";
-import { useSearchParams, useRouter } from "next/navigation";
-import {
-  FileText,
-  FileImage,
-  Download,
-  Trash2,
-  AlertTriangle,
-  Filter,
-  Eye,
-  Search,
-  Upload,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
-import { DocumentStatusBadge } from "./DocumentStatusBadge";
-import {
-  DocumentPreviewModal,
-  type DocumentPreviewModalDocument,
-} from "./DocumentPreviewModal";
-import { DeleteDocumentDialog } from "./DeleteDocumentDialog";
+  DataEmptyState,
+  DataErrorState,
+  DataLoadingSpinner,
+} from "@/components/shared/DataFetchStates";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
   DOCUMENT_TYPE_OPTIONS,
   getDocumentTypeLabel,
 } from "@/lib/documentConstants";
-import { ro } from "@/messages";
 import { getDocumentExpiryBucket } from "@/lib/documentExpiryUi";
 import {
   HR_DOCUMENTS_CHANGED_EVENT,
   HR_DOCUMENTS_STORAGE_KEY,
   notifyDocumentsChanged,
 } from "@/lib/documentsSync";
-import { useAuth } from "@/hooks/useAuth";
-import { PermissionGuard } from "@/components/auth/PermissionGuard";
+import { ro } from "@/messages";
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Eye,
+  FileImage,
+  FileText,
+  Filter,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { DeleteDocumentDialog } from "./DeleteDocumentDialog";
+import {
+  DocumentPreviewModal,
+  type DocumentPreviewModalDocument,
+} from "./DocumentPreviewModal";
+import { DocumentStatusBadge } from "./DocumentStatusBadge";
 
 export type DocumentListFilteredStats = {
   total: number;
@@ -95,7 +103,8 @@ function mapApiDocument(raw: Record<string, unknown>): DocumentItem {
   const created =
     parseIsoField(raw.createdAt) ??
     parseIsoField(raw.created_at) ??
-    new Date().toISOString();
+    uploaded ??
+    "";
 
   const num =
     raw.number ??
@@ -125,11 +134,13 @@ function mapApiDocument(raw: Record<string, unknown>): DocumentItem {
     employeeHasActiveDeployment: Boolean(
       (raw as { employeeHasActiveDeployment?: unknown })
         .employeeHasActiveDeployment ??
-        (raw as { employee_has_active_deployment?: unknown })
-          .employee_has_active_deployment
+      (raw as { employee_has_active_deployment?: unknown })
+        .employee_has_active_deployment,
     ),
     downloadUrl: String(
-      raw.downloadUrl ?? raw.download_url ?? `/api/documents/${raw.id}/download`
+      raw.downloadUrl ??
+        raw.download_url ??
+        `/api/documents/${raw.id}/download`,
     ),
   };
 }
@@ -153,8 +164,10 @@ export function DocumentList({
   const searchParams = useSearchParams();
   const router = useRouter();
   const { role, can } = useAuth();
+  const { t } = useTranslation();
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState<ClientStatusFilter>("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -168,17 +181,18 @@ export function DocumentList({
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DocumentItem | null>(null);
 
-  const previewModalDocument = useMemo((): DocumentPreviewModalDocument | null => {
-    if (!previewDoc) return null;
-    return {
-      id: previewDoc.id,
-      fileName: previewDoc.fileName,
-      mimeType: previewDoc.mimeType,
-      url: `/api/documents/${previewDoc.id}/file`,
-      downloadUrl: previewDoc.downloadUrl,
-      employee: previewDoc.employee,
-    };
-  }, [previewDoc]);
+  const previewModalDocument =
+    useMemo((): DocumentPreviewModalDocument | null => {
+      if (!previewDoc) return null;
+      return {
+        id: previewDoc.id,
+        fileName: previewDoc.fileName,
+        mimeType: previewDoc.mimeType,
+        url: `/api/documents/${previewDoc.id}/file`,
+        downloadUrl: previewDoc.downloadUrl,
+        employee: previewDoc.employee,
+      };
+    }, [previewDoc]);
 
   const urlStatusSynced = useRef(false);
   useEffect(() => {
@@ -190,13 +204,17 @@ export function DocumentList({
     }
     const low = raw.toLowerCase();
     if (low === "expired") setStatusFilter("EXPIRED");
-    else if (low === "expiring" || low === "expiring_soon") setStatusFilter("EXPIRING");
+    else if (low === "expiring" || low === "expiring_soon")
+      setStatusFilter("EXPIRING");
     else if (raw.toUpperCase() === "VALID") setStatusFilter("VALID");
     urlStatusSynced.current = true;
   }, [searchParams]);
 
   useEffect(() => {
-    void fetch("/api/documents/stats", { credentials: "same-origin", cache: "no-store" })
+    void fetch("/api/documents/stats", {
+      credentials: "same-origin",
+      cache: "no-store",
+    })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (d != null && typeof d.documentAlertDays === "number") {
@@ -208,7 +226,10 @@ export function DocumentList({
   }, []);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedSearch(searchQuery.trim()), 400);
+    const t = window.setTimeout(
+      () => setDebouncedSearch(searchQuery.trim()),
+      400,
+    );
     return () => window.clearTimeout(t);
   }, [searchQuery]);
 
@@ -218,6 +239,7 @@ export function DocumentList({
 
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const params = new URLSearchParams();
       params.set("page", String(page));
@@ -251,6 +273,7 @@ export function DocumentList({
         expiringSoon: Number(st?.expiringSoon) || 0,
       });
     } catch {
+      setLoadError(true);
       setDocuments([]);
       setTotal(0);
       setTotalPages(0);
@@ -283,9 +306,7 @@ export function DocumentList({
   statsCallbackRef.current = onFilteredStatsChange;
 
   const hasActiveFilters =
-    Boolean(typeFilter) ||
-    Boolean(statusFilter) ||
-    debouncedSearch.length > 0;
+    Boolean(typeFilter) || Boolean(statusFilter) || debouncedSearch.length > 0;
 
   useEffect(() => {
     if (loading) return;
@@ -298,7 +319,14 @@ export function DocumentList({
       alertDays,
       hasActiveFilters,
     });
-  }, [loading, total, listStats.expired, listStats.expiringSoon, alertDays, hasActiveFilters]);
+  }, [
+    loading,
+    total,
+    listStats.expired,
+    listStats.expiringSoon,
+    alertDays,
+    hasActiveFilters,
+  ]);
 
   async function handleDownload(doc: DocumentItem) {
     try {
@@ -361,7 +389,9 @@ export function DocumentList({
   function renderActions(doc: DocumentItem, dense?: boolean) {
     const pad = dense ? "p-2" : "p-1.5";
     return (
-      <div className={`flex items-center ${dense ? "justify-start" : "justify-end"} gap-1`}>
+      <div
+        className={`flex items-center ${dense ? "justify-start" : "justify-end"} gap-1`}
+      >
         <button
           type="button"
           onClick={() => setPreviewDoc(doc)}
@@ -380,7 +410,7 @@ export function DocumentList({
         >
           <Download size={dense ? 18 : 16} />
         </button>
-        <PermissionGuard allowedRoles={["administrator"]}>
+        <PermissionGuard allowedRoles={ROLES_SETTINGS_ADMIN}>
           <button
             type="button"
             onClick={() => setDeleteTarget(doc)}
@@ -395,14 +425,30 @@ export function DocumentList({
     );
   }
 
-  if (loading && documents.length === 0 && total === 0) {
+  if (loading && documents.length === 0 && total === 0 && !loadError) {
     return (
-      <div className="text-center py-12 text-gray-400">Se încarcă...</div>
+      <div className="rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+        <DataLoadingSpinner label={t("common.loading")} />
+      </div>
     );
   }
 
-  const showFilteredEmpty = !loading && total === 0 && hasActiveFilters;
-  const showGlobalEmpty = !loading && total === 0 && !hasActiveFilters;
+  if (loadError && !loading && documents.length === 0 && total === 0) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+        <DataErrorState
+          message={t("components.dataFetchStates.loadFailed")}
+          retryLabel={t("common.retry")}
+          onRetry={() => void fetchDocuments()}
+        />
+      </div>
+    );
+  }
+
+  const showFilteredEmpty =
+    !loading && !loadError && total === 0 && hasActiveFilters;
+  const showGlobalEmpty =
+    !loading && !loadError && total === 0 && !hasActiveFilters;
 
   return (
     <div className="space-y-4">
@@ -437,11 +483,11 @@ export function DocumentList({
             className="min-w-0 flex-1 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm sm:flex-initial sm:min-w-[11rem]"
           >
             <option value="">{ro.documents.filterAllTypes}</option>
-          {DOCUMENT_TYPE_OPTIONS.map(({ code, label }) => (
-            <option key={code} value={code}>
-              {label}
-            </option>
-          ))}
+            {DOCUMENT_TYPE_OPTIONS.map(({ code, label }) => (
+              <option key={code} value={code}>
+                {label}
+              </option>
+            ))}
           </select>
           <label className="sr-only">Status</label>
           <select
@@ -473,7 +519,7 @@ export function DocumentList({
             type="search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Căutați după nume angajat sau nume fișier…"
+            placeholder={t("pages.documentList.searchPlaceholder")}
             className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-3 text-sm outline-none ring-blue-500 focus:ring-2"
           />
         </div>
@@ -488,38 +534,34 @@ export function DocumentList({
             }}
             className="text-sm text-gray-600 underline decoration-gray-400 underline-offset-2 hover:text-gray-900"
           >
-            Resetează filtrele
+            {t("pages.documentList.resetFilters")}
           </button>
         )}
       </div>
 
       {showGlobalEmpty ? (
-        <div className="rounded-xl border border-dashed border-gray-200 bg-white px-6 py-14 text-center shadow-sm">
-          <FileText size={52} className="mx-auto text-gray-300" aria-hidden />
-          <p className="mt-4 text-base font-medium text-gray-800">
-            Încă nu există documente
-          </p>
-          <p className="mt-2 max-w-md mx-auto text-sm text-gray-500">
-            Adăugați contracte, acte de identitate sau alte documente pentru a le
-            urmări aici — cu reminder la expirare.
-          </p>
+        <DataEmptyState
+          icon={FileText}
+          title={t("pages.documentList.emptyTitle")}
+          description={t("pages.documentList.emptyDescription")}
+        >
           {onRequestUpload ? (
-            <PermissionGuard allowedRoles={["operator", "administrator"]}>
-              <button
+            <PermissionGuard allowedRoles={ROLES_EMPLOYEES_RW}>
+              <Button
                 type="button"
                 onClick={onRequestUpload}
-                className="mt-6 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
+                className="bg-slate-900 text-white hover:bg-slate-800"
               >
-                <Upload size={16} aria-hidden />
-                Încărcați primul document
-              </button>
+                <Upload size={16} aria-hidden className="mr-2" />
+                {t("pages.documentList.uploadFirst")}
+              </Button>
             </PermissionGuard>
           ) : null}
-        </div>
+        </DataEmptyState>
       ) : showFilteredEmpty ? (
-        <div className="rounded-xl border bg-white px-6 py-12 text-center text-gray-500">
+        <div className="rounded-xl border bg-white px-6 py-12 text-center text-gray-500 shadow-sm">
           <p className="text-sm font-medium text-gray-700">
-            Niciun document nu corespunde filtrelor curente.
+            {t("pages.documentList.filteredEmpty")}
           </p>
           <button
             type="button"
@@ -531,7 +573,7 @@ export function DocumentList({
             }}
             className="mt-4 text-sm font-medium text-blue-600 hover:text-blue-800"
           >
-            Resetează filtrele
+            {t("pages.documentList.resetFilters")}
           </button>
         </div>
       ) : (
@@ -618,7 +660,7 @@ export function DocumentList({
                                 getDocumentExpiryBucket(
                                   doc.status,
                                   doc.expiryDate,
-                                  alertDays
+                                  alertDays,
                                 ) === "expired"
                                   ? "font-medium text-red-600"
                                   : "text-gray-600"
@@ -669,7 +711,8 @@ export function DocumentList({
                         {doc.fileName}
                       </p>
                       <p className="mt-1 text-xs text-gray-500">
-                        {getDocumentTypeLabel(doc.type)} · {formatBytes(doc.fileSize)}
+                        {getDocumentTypeLabel(doc.type)} ·{" "}
+                        {formatBytes(doc.fileSize)}
                       </p>
                     </div>
                   </div>
@@ -682,11 +725,15 @@ export function DocumentList({
                   <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs sm:grid-cols-3">
                     <div>
                       <dt className="text-gray-400">Nr.</dt>
-                      <dd className="font-medium text-gray-800">{doc.number ?? "—"}</dd>
+                      <dd className="font-medium text-gray-800">
+                        {doc.number ?? "—"}
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-gray-400">Emitere</dt>
-                      <dd className="font-medium text-gray-800">{displayIssueDate(doc)}</dd>
+                      <dd className="font-medium text-gray-800">
+                        {displayIssueDate(doc)}
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-gray-400">Expirare</dt>
@@ -710,8 +757,8 @@ export function DocumentList({
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-600">
             <span>
-              <span className="font-medium text-gray-800">{total}</span> documente care
-              corespund filtrelor
+              <span className="font-medium text-gray-800">{total}</span>{" "}
+              documente care corespund filtrelor
               {totalPages > 1 ? (
                 <>
                   {" "}

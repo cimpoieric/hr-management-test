@@ -4,9 +4,9 @@
  * Șterge cookie-ul de autentificare și loghează deconectarea.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { getClientIp, logAuditFF } from "@/lib/audit";
 import { clearAuthCookie, verifyAuth } from "@/lib/auth";
-import { logAuditFF, getClientIp } from "@/lib/audit";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,8 +16,9 @@ export async function POST(request: NextRequest) {
       logAuditFF({
         action: "LOGOUT",
         entity: "User",
-        entityId: auth.userId,
+        entityId: null,
         userId: auth.userId,
+        userName: auth.email,
         userRole: auth.role,
         ipAddress: getClientIp(request),
         details: "Deconectare utilizator",
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
 
   const response = NextResponse.json(
     { success: true, message: "Deconectat cu succes" },
-    { status: 200 }
+    { status: 200 },
   );
 
   clearAuthCookie(response);

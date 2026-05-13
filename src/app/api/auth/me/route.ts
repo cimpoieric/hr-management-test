@@ -6,24 +6,20 @@
  * NU returnează passwordHash.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
 import { verifyAuth } from "@/lib/auth";
-
-const prisma = new PrismaClient();
+import { runApi } from "@/lib/apiErrorResponse";
+import { Errors } from "@/lib/errors";
+import { prismaTyped as prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
-  try {
+  return runApi(request, async () => {
     const user = await verifyAuth(request);
 
     if (!user) {
-      return NextResponse.json(
-        { error: "Neautentificat" },
-        { status: 401 }
-      );
+      throw Errors.UNAUTHORIZED;
     }
 
-    // Re-fetch din DB pentru datele cele mai recente
     const dbUser = await prisma.user.findUnique({
       where: { id: user.userId },
       select: {
@@ -31,16 +27,14 @@ export async function GET(request: NextRequest) {
         name: true,
         email: true,
         role: true,
+        organizationId: true,
         isActive: true,
         mustChangePassword: true,
       },
     });
 
     if (!dbUser || !dbUser.isActive) {
-      return NextResponse.json(
-        { error: "Cont dezactivat sau șters" },
-        { status: 403 }
-      );
+      throw Errors.ACCOUNT_INACTIVE;
     }
 
     return NextResponse.json(
@@ -50,16 +44,11 @@ export async function GET(request: NextRequest) {
           name: dbUser.name,
           email: dbUser.email,
           role: dbUser.role,
+          organizationId: dbUser.organizationId,
           mustChangePassword: dbUser.mustChangePassword,
         },
       },
-      { status: 200 }
+      { status: 200 },
     );
-  } catch (error) {
-    console.error("[AUTH_ME]", error);
-    return NextResponse.json(
-      { error: "Eroare server intern" },
-      { status: 500 }
-    );
-  }
+  });
 }

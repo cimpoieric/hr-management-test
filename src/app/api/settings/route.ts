@@ -1,7 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
 import { join } from "path";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { DEFAULT_APP_SETTINGS, getAppSettings, saveAppSettings, type AppSettings } from "@/lib/appSettings";
+import {
+  type AppSettings,
+  DEFAULT_APP_SETTINGS,
+  getAppSettings,
+  saveAppSettings,
+} from "@/lib/appSettings";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
+import { type NextRequest, NextResponse } from "next/server";
 
 function normalizeIncoming(body: Partial<AppSettings>): AppSettings {
   return {
@@ -13,28 +19,53 @@ function normalizeIncoming(body: Partial<AppSettings>): AppSettings {
     companyIban: (body.companyIban ?? "").trim(),
     companyBank: (body.companyBank ?? "").trim(),
     salaryDefaultCurrency:
-      body.salaryDefaultCurrency === "EUR" || body.salaryDefaultCurrency === "USD" ? body.salaryDefaultCurrency : "RON",
+      body.salaryDefaultCurrency === "EUR" ||
+      body.salaryDefaultCurrency === "USD"
+        ? body.salaryDefaultCurrency
+        : "RON",
     salaryDefaultType:
-      body.salaryDefaultType === "SAPTAMANAL" || body.salaryDefaultType === "ORA" ? body.salaryDefaultType : "LUNAR",
-    standardMonthlyHours: Number(body.standardMonthlyHours ?? DEFAULT_APP_SETTINGS.standardMonthlyHours) || 168,
-    standardWeeklyHours: Number(body.standardWeeklyHours ?? DEFAULT_APP_SETTINGS.standardWeeklyHours) || 40,
+      body.salaryDefaultType === "SAPTAMANAL" ||
+      body.salaryDefaultType === "ORA"
+        ? body.salaryDefaultType
+        : "LUNAR",
+    standardMonthlyHours:
+      Number(
+        body.standardMonthlyHours ?? DEFAULT_APP_SETTINGS.standardMonthlyHours,
+      ) || 168,
+    standardWeeklyHours:
+      Number(
+        body.standardWeeklyHours ?? DEFAULT_APP_SETTINGS.standardWeeklyHours,
+      ) || 40,
     dateFormat: body.dateFormat === "YYYY-MM-DD" ? "YYYY-MM-DD" : "DD.MM.YYYY",
     language: body.language === "en" ? "en" : "ro",
-    timezone: (body.timezone ?? "Europe/Bucharest").trim() || "Europe/Bucharest",
+    timezone:
+      (body.timezone ?? "Europe/Bucharest").trim() || "Europe/Bucharest",
     alertExpiredDocumentsDays:
-      Number(body.alertExpiredDocumentsDays ?? DEFAULT_APP_SETTINGS.alertExpiredDocumentsDays) || 30,
+      Number(
+        body.alertExpiredDocumentsDays ??
+          DEFAULT_APP_SETTINGS.alertExpiredDocumentsDays,
+      ) || 30,
     alertExpiringDeploymentsDays:
-      Number(body.alertExpiringDeploymentsDays ?? DEFAULT_APP_SETTINGS.alertExpiringDeploymentsDays) || 7,
+      Number(
+        body.alertExpiringDeploymentsDays ??
+          DEFAULT_APP_SETTINGS.alertExpiringDeploymentsDays,
+      ) || 7,
     inAppNotificationsEnabled: body.inAppNotificationsEnabled !== false,
   };
 }
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
-  const settings = await getAppSettings();
+  const settings = await getAppSettings(user.organizationId);
   return NextResponse.json({
     ...settings,
     dbPath: join(process.cwd(), "prisma", "dev.db"),
@@ -42,11 +73,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   const body = (await request.json()) as Partial<AppSettings>;
   const normalized = normalizeIncoming(body);
-  await saveAppSettings(normalized);
+  await saveAppSettings(normalized, user.organizationId);
   return NextResponse.json({ success: true });
 }

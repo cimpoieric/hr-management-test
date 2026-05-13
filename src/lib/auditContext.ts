@@ -15,7 +15,7 @@ import { AsyncLocalStorage } from "async_hooks";
 import type { NextRequest } from "next/server";
 
 export interface AuditContextData {
-  userId: number;
+  userId: string;
   userName: string;
   userRole: string;
   ipAddress: string;
@@ -43,9 +43,9 @@ export function getClientIp(request: NextRequest | Headers): string {
 /** Setează contextul audit pentru request-ul curent */
 export function setAuditContext(
   request: NextRequest,
-  userId: number,
+  userId: string,
   userName: string,
-  userRole: string
+  userRole: string,
 ): void {
   auditStorage.enterWith({
     userId,

@@ -9,26 +9,27 @@
  * Protejat: orice rol autentificat pentru GET; ADMIN/OPERATOR pentru POST.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
-import { prisma, prismaTyped } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee, canViewIban } from "@/lib/permissions";
-import {
-  validateCNP,
-  validateIBAN,
-  validateEmail,
-  validatePhone,
-  maskCNP,
-  maskIBAN,
-} from "@/lib/validation";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
+import { documentsWhereVisible } from "@/lib/documentVisibility";
 import { encrypt, hashSha256 } from "@/lib/encryption";
+import { canEditEmployee, canViewIban } from "@/lib/permissions";
+import { prisma, prismaTyped } from "@/lib/prisma";
 import {
   parseSalaryAmountDecimal,
   parseSalaryTypeInput,
   salaryAmountToJson,
 } from "@/lib/salaryFields";
-import { documentsWhereVisible } from "@/lib/documentVisibility";
+import {
+  maskCNP,
+  maskIBAN,
+  validateCNP,
+  validateEmail,
+  validateIBAN,
+  validatePhone,
+} from "@/lib/validation";
+import type { Prisma } from "@prisma/client";
+import { type NextRequest, NextResponse } from "next/server";
 
 /** Body JSON la POST /api/employees — câmpuri opționale, tipuri ca la `JSON.parse`. */
 export interface EmployeeFormData {
@@ -64,14 +65,17 @@ function parseRequiredString(
   value: unknown,
   field: string,
   minLen: number,
-  maxLen: number
+  maxLen: number,
 ): { ok: true; value: string } | { ok: false; issues: ValidationIssue[] } {
   if (typeof value !== "string") {
     return { ok: false, issues: [issue(field, "Obligatoriu (text)")] };
   }
   const t = value.trim();
   if (t.length < minLen) {
-    return { ok: false, issues: [issue(field, minLen === 1 ? "Obligatoriu" : "Prea scurt")] };
+    return {
+      ok: false,
+      issues: [issue(field, minLen === 1 ? "Obligatoriu" : "Prea scurt")],
+    };
   }
   if (t.length > maxLen) {
     return { ok: false, issues: [issue(field, `Maxim ${maxLen} caractere`)] };
@@ -82,12 +86,17 @@ function parseRequiredString(
 function parseOptionalString(
   value: unknown,
   field: string,
-  maxLen: number
-): { ok: true; value: string | null | undefined } | { ok: false; issues: ValidationIssue[] } {
+  maxLen: number,
+):
+  | { ok: true; value: string | null | undefined }
+  | { ok: false; issues: ValidationIssue[] } {
   if (value === undefined) return { ok: true, value: undefined };
   if (value === null) return { ok: true, value: null };
   if (typeof value !== "string") {
-    return { ok: false, issues: [issue(field, "Trebuie să fie text sau null")] };
+    return {
+      ok: false,
+      issues: [issue(field, "Trebuie să fie text sau null")],
+    };
   }
   const t = value.trim();
   if (t.length > maxLen) {
@@ -120,8 +129,10 @@ interface ValidatedEmployeeCreate {
 }
 
 function parseEmployeeCreateBody(
-  raw: unknown
-): { ok: true; data: ValidatedEmployeeCreate } | { ok: false; issues: ValidationIssue[] } {
+  raw: unknown,
+):
+  | { ok: true; data: ValidatedEmployeeCreate }
+  | { ok: false; issues: ValidationIssue[] } {
   if (raw === null || typeof raw !== "object") {
     return { ok: false, issues: [issue("body", "Obiect JSON așteptat")] };
   }
@@ -153,12 +164,20 @@ function parseEmployeeCreateBody(
   if (!address.ok) issues.push(...address.issues);
   const city = parseOptionalString(b.city, "city", 100);
   if (!city.ok) issues.push(...city.issues);
-  const observations = parseOptionalString(b.observations, "observations", 1000);
+  const observations = parseOptionalString(
+    b.observations,
+    "observations",
+    1000,
+  );
   if (!observations.ok) issues.push(...observations.issues);
 
   let countryId: number | null = null;
   if (b.countryId !== undefined && b.countryId !== null) {
-    if (typeof b.countryId !== "number" || !Number.isInteger(b.countryId) || b.countryId <= 0) {
+    if (
+      typeof b.countryId !== "number" ||
+      !Number.isInteger(b.countryId) ||
+      b.countryId <= 0
+    ) {
       issues.push(issue("countryId", "ID țară invalid"));
     } else {
       countryId = b.countryId;
@@ -176,13 +195,19 @@ function parseEmployeeCreateBody(
     }
   }
 
-  if (typeof b.companyId !== "number" || !Number.isInteger(b.companyId) || b.companyId <= 0) {
+  if (
+    typeof b.companyId !== "number" ||
+    !Number.isInteger(b.companyId) ||
+    b.companyId <= 0
+  ) {
     issues.push(issue("companyId", "ID firmă invalid (număr întreg pozitiv)"));
   }
 
   if (b.salaryStartDate !== undefined && b.salaryStartDate !== null) {
     if (typeof b.salaryStartDate !== "string") {
-      issues.push(issue("salaryStartDate", "Trebuie să fie text (dată) sau gol"));
+      issues.push(
+        issue("salaryStartDate", "Trebuie să fie text (dată) sau gol"),
+      );
     }
   }
 
@@ -233,7 +258,7 @@ async function logAudit(
   entity: string,
   entityId: number | null,
   newValues: unknown,
-  ipAddress?: string
+  ipAddress?: string,
 ) {
   try {
     await prisma.auditLog.create({
@@ -292,7 +317,14 @@ const employeeListSelect = {
     where: {
       status: { not: "CANCELLED" },
     },
-    select: { id: true, country: true, city: true, startDate: true, endDate: true, status: true },
+    select: {
+      id: true,
+      country: true,
+      city: true,
+      startDate: true,
+      endDate: true,
+      status: true,
+    },
     orderBy: { startDate: "desc" },
     take: 3,
   },
@@ -334,7 +366,12 @@ interface EmployeeListQueryRow {
   salaryStartDate: Date | null;
   createdAt: Date;
   company: { id: number; name: string };
-  documents: Array<{ id: number; type: string; status: string; expiryDate: Date | null }>;
+  documents: Array<{
+    id: number;
+    type: string;
+    status: string;
+    expiryDate: Date | null;
+  }>;
   deployments: Array<{
     id: number;
     country: string;
@@ -351,14 +388,23 @@ interface EmployeeListQueryRow {
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
     const { searchParams } = request.nextUrl;
 
-    const page   = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
-    const limit  = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") ?? "15", 10)));
+    const page = Math.max(
+      1,
+      Number.parseInt(searchParams.get("page") ?? "1", 10),
+    );
+    const limit = Math.min(
+      100,
+      Math.max(1, Number.parseInt(searchParams.get("limit") ?? "15", 10)),
+    );
     const search = searchParams.get("search")?.trim();
     const statusFilter = searchParams.get("status"); // "ACTIVE,TERMINATED"
     const companyFilter = searchParams.get("company"); // "1,2,3"
@@ -412,10 +458,12 @@ export async function GET(request: NextRequest) {
     if (employeeCountryFilter) {
       const cids = employeeCountryFilter
         .split(",")
-        .map((s) => parseInt(s.trim(), 10))
+        .map((s) => Number.parseInt(s.trim(), 10))
         .filter((n) => !Number.isNaN(n) && n > 0);
       if (cids.length > 0) {
-        andConditions.push({ countryId: { in: cids } } as Prisma.EmployeeWhereInput);
+        andConditions.push({
+          countryId: { in: cids },
+        } as Prisma.EmployeeWhereInput);
       }
     }
 
@@ -498,10 +546,17 @@ export async function GET(request: NextRequest) {
       andConditions.length > 0 ? { AND: andConditions } : {};
 
     // Sortare validă
-    const validSortFields = ["firstName", "lastName", "createdAt", "hiredAt", "status"];
-    const orderBy: Prisma.EmployeeOrderByWithRelationInput = validSortFields.includes(sortBy)
-      ? { [sortBy]: sortOrder }
-      : { createdAt: sortOrder as "asc" | "desc" };
+    const validSortFields = [
+      "firstName",
+      "lastName",
+      "createdAt",
+      "hiredAt",
+      "status",
+    ];
+    const orderBy: Prisma.EmployeeOrderByWithRelationInput =
+      validSortFields.includes(sortBy)
+        ? { [sortBy]: sortOrder }
+        : { createdAt: sortOrder as "asc" | "desc" };
 
     // ─── Query ────────────────────────────────────────────────
     const [employeesRaw, total] = await Promise.all([
@@ -549,8 +604,8 @@ export async function GET(request: NextRequest) {
           deploymentCount: e._count.deployments,
           createdAt: e.createdAt,
         },
-        canSeeIban
-      )
+        canSeeIban,
+      ),
     );
 
     return NextResponse.json({
@@ -574,7 +629,10 @@ function parseSalaryStartDate(value: string | null | undefined): Date | null {
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -587,7 +645,7 @@ export async function POST(request: NextRequest) {
     if (!parsed.ok) {
       return NextResponse.json(
         { error: "Date invalide", issues: parsed.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -599,7 +657,13 @@ export async function POST(request: NextRequest) {
     const cnpHash = hashSha256(normalizedCnp);
     const existing = await prismaTyped.employee.findFirst({
       where: { cnpHash },
-      select: { id: true, firstName: true, lastName: true, cnp: true, status: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        cnp: true,
+        status: true,
+      },
     });
 
     if (existing) {
@@ -614,18 +678,24 @@ export async function POST(request: NextRequest) {
             status: existing.status,
           },
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
     if (!validateCNP(normalizedCnp)) {
-      warnings.push("CNP are format invalid, dar a fost salvat ca valoare brută.");
+      warnings.push(
+        "CNP are format invalid, dar a fost salvat ca valoare brută.",
+      );
     }
 
     const normalizedEmail =
-      typeof data.email === "string" && data.email.trim().length > 0 ? data.email.trim() : null;
+      typeof data.email === "string" && data.email.trim().length > 0
+        ? data.email.trim()
+        : null;
     const normalizedPhone =
-      typeof data.phone === "string" && data.phone.trim().length > 0 ? data.phone.trim() : null;
+      typeof data.phone === "string" && data.phone.trim().length > 0
+        ? data.phone.trim()
+        : null;
     const normalizedIban =
       typeof data.iban === "string" && data.iban.trim().length > 0
         ? data.iban.trim().toUpperCase()
@@ -644,9 +714,12 @@ export async function POST(request: NextRequest) {
         ? (warnings.push("IBAN invalid ignorat."), null)
         : normalizedIban;
     const normalizedSalaryType = parseSalaryTypeInput(data.salaryTypeRaw);
-    const normalizedSalaryAmount = parseSalaryAmountDecimal(data.salaryAmountRaw);
+    const normalizedSalaryAmount = parseSalaryAmountDecimal(
+      data.salaryAmountRaw,
+    );
     const normalizedSalaryCurrency =
-      typeof data.salaryCurrencyRaw === "string" && data.salaryCurrencyRaw.trim().length > 0
+      typeof data.salaryCurrencyRaw === "string" &&
+      data.salaryCurrencyRaw.trim().length > 0
         ? data.salaryCurrencyRaw.trim().toUpperCase()
         : "RON";
     const salaryStartDate =
@@ -659,9 +732,25 @@ export async function POST(request: NextRequest) {
     const ibanHash = safeIban ? hashSha256(safeIban) : null;
 
     const salaryAmountForCreate: string | undefined =
-      normalizedSalaryAmount !== null ? normalizedSalaryAmount.toString() : undefined;
+      normalizedSalaryAmount !== null
+        ? normalizedSalaryAmount.toString()
+        : undefined;
+
+    const company = await prismaTyped.company.findUnique({
+      where: { id: data.companyId },
+      select: { id: true, organizationId: true },
+    });
+    if (!company) {
+      return NextResponse.json(
+        { error: "Companie invalidă sau inexistentă" },
+        { status: 400 },
+      );
+    }
+
+    const organizationId = String(company.organizationId);
 
     const createData = {
+      organizationId,
       cnp: normalizedCnp,
       cnpEncrypted,
       cnpHash,
@@ -680,7 +769,8 @@ export async function POST(request: NextRequest) {
       countryId: data.countryId ?? null,
       status: data.status,
       salaryType: normalizedSalaryType,
-      salaryAmount: salaryAmountForCreate as Prisma.EmployeeUncheckedCreateInput["salaryAmount"],
+      salaryAmount:
+        salaryAmountForCreate as Prisma.EmployeeUncheckedCreateInput["salaryAmount"],
       salaryCurrency: normalizedSalaryCurrency,
       salaryStartDate,
       observations: data.observations,
@@ -697,16 +787,32 @@ export async function POST(request: NextRequest) {
       include: employeeCreateInclude,
     });
 
-    await logAudit("CREATE", "Employee", employee.id, data, getClientIp(request));
+    await logAudit(
+      "CREATE",
+      "Employee",
+      employee.id,
+      data,
+      getClientIp(request),
+    );
 
     return NextResponse.json(
-      { id: employee.id, firstName: employee.firstName, lastName: employee.lastName,
+      {
+        id: employee.id,
+        firstName: employee.firstName,
+        lastName: employee.lastName,
         warnings,
-        cnp: maskCNP(employee.cnp), company: employee.company, status: employee.status, createdAt: employee.createdAt },
-      { status: 201 }
+        cnp: maskCNP(employee.cnp),
+        company: employee.company,
+        status: employee.status,
+        createdAt: employee.createdAt,
+      },
+      { status: 201 },
     );
   } catch (error) {
     console.error("[EMPLOYEES_POST]", error);
-    return NextResponse.json({ error: "Eroare server intern" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Eroare server intern" },
+      { status: 500 },
+    );
   }
 }

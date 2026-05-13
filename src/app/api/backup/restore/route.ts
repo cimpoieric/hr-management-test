@@ -11,18 +11,22 @@
  * ATENȚIE: Operațiune distructivă — toate datele noi vor fi pierdute.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir, rm } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
-import { requireAuth } from "@/lib/auth";
+import { getClientIp, logAuditFF } from "@/lib/audit";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { restoreFromBackup } from "@/lib/backup";
-import { logAuditFF, getClientIp } from "@/lib/audit";
+import { mkdir, rm, writeFile } from "fs/promises";
+import { type NextRequest, NextResponse } from "next/server";
 
 const TEMP_DIR = join(process.cwd(), "data", "temp");
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   let tempFile: string | null = null;
@@ -35,7 +39,7 @@ export async function POST(request: NextRequest) {
     if (!file || !file.name.endsWith(".zip")) {
       return NextResponse.json(
         { error: "Fișier ZIP necesar" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -43,7 +47,7 @@ export async function POST(request: NextRequest) {
     if (file.size > 2 * 1024 * 1024 * 1024) {
       return NextResponse.json(
         { error: "Fișier prea mare (max 2GB)" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -60,7 +64,11 @@ export async function POST(request: NextRequest) {
     const result = await restoreFromBackup(tempFile);
 
     // Șterge fișierul temporar
-    try { if (tempFile) await rm(tempFile); } catch { /* ignore */ }
+    try {
+      if (tempFile) await rm(tempFile);
+    } catch {
+      /* ignore */
+    }
 
     // Audit log
     logAuditFF({
@@ -83,19 +91,27 @@ export async function POST(request: NextRequest) {
       message: "Restaurare completă",
       safetyBackup: result.safetyBackup,
       restored: result.restored,
-      warning: "Aplicația trebuie repornită pentru reconectarea la baza de date.",
+      warning:
+        "Aplicația trebuie repornită pentru reconectarea la baza de date.",
     });
-
   } catch (error) {
     // Curăță fișierul temporar
     if (tempFile) {
-      try { await rm(tempFile); } catch { /* ignore */ }
+      try {
+        await rm(tempFile);
+      } catch {
+        /* ignore */
+      }
     }
 
     console.error("[BACKUP_RESTORE]", error);
     return NextResponse.json(
-      { error: "Eroare la restaurare: " + (error instanceof Error ? error.message : "unknown") },
-      { status: 500 }
+      {
+        error:
+          "Eroare la restaurare: " +
+          (error instanceof Error ? error.message : "unknown"),
+      },
+      { status: 500 },
     );
   }
 }

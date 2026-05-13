@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import bcrypt from "bcryptjs";
-import { prismaTyped as prisma } from "@/lib/prisma";
 import { encrypt } from "@/lib/encryption";
+import { createDefaultOrganizationSettingsInTx } from "@/lib/organizationSettings";
+import { prismaBase } from "@/lib/prisma";
+import bcrypt from "bcryptjs";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 function getCountryName(code: string): string {
   const countries: Record<string, string> = {
@@ -16,6 +17,17 @@ function getCountryName(code: string): string {
     US: "Statele Unite",
   };
   return countries[code] || code;
+}
+
+function slugifyOrg(input: string): string {
+  const base = input
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return base.length > 0 ? base : "organization";
 }
 
 const setupSchema = z.object({
@@ -53,15 +65,18 @@ const SYS_KEYS = {
 } as const;
 
 export async function GET() {
-  const userCount = await prisma.user.count();
+  const userCount = await prismaBase.user.count();
   return NextResponse.json({ needsSetup: userCount === 0 });
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const userCount = await prisma.user.count();
+    const userCount = await prismaBase.user.count();
     if (userCount > 0) {
-      return NextResponse.json({ error: "Setup-ul a fost deja completat" }, { status: 403 });
+      return NextResponse.json(
+        { error: "Setup-ul a fost deja completat" },
+        { status: 403 },
+      );
     }
 
     const body = await req.json().catch(() => null);
@@ -69,52 +84,73 @@ export async function POST(req: NextRequest) {
 
     const companyCountryCode = data.companyCountry.toUpperCase();
 
-    const result = await prisma.$transaction(async (tx) => {
-      // 1) Country (create if missing)
+    const result = await prismaBase.$transaction(async (tx) => {
       let country = await tx.country.findFirst({
         where: { code: companyCountryCode },
         select: { id: true, code: true, name: true },
       });
       if (!country) {
         country = await tx.country.create({
-          data: { code: companyCountryCode, name: getCountryName(companyCountryCode) },
+          data: {
+            code: companyCountryCode,
+            name: getCountryName(companyCountryCode),
+          },
           select: { id: true, code: true, name: true },
         });
       }
 
-      // 2) Company
+      let slug = slugifyOrg(data.companyName);
+      const slugTaken = await tx.organization.findUnique({ where: { slug } });
+      if (slugTaken) {
+        slug = `${slug}-${Date.now().toString(36)}`;
+      }
+
+      const organization = await tx.organization.create({
+        data: {
+          name: data.companyName,
+          slug,
+          defaultLanguage: "ro",
+        },
+        select: { id: true, name: true, slug: true },
+      });
+
+      await createDefaultOrganizationSettingsInTx(tx, organization.id);
+
       const company = await tx.company.create({
         data: {
           name: data.companyName,
           taxCode: data.companyTaxCode?.trim() || null,
           address: data.companyAddress?.trim() || null,
           countryId: country.id,
+          organizationId: organization.id,
         },
         select: { id: true, name: true },
       });
 
-      // 3) Admin user
       const hashedPassword = await bcrypt.hash(data.adminPassword, 10);
       const admin = await tx.user.create({
         data: {
           name: data.adminName,
           email: data.adminEmail.toLowerCase(),
           password: hashedPassword,
-          role: "administrator",
+          role: "ORG_ADMIN",
+          organizationId: organization.id,
           isActive: true,
           mustChangePassword: false,
         },
         select: { id: true, email: true },
       });
 
-      // 4) SMTP config (SystemConfig)
       const sysEntries: Array<{ key: string; value: string }> = [
         { key: SYS_KEYS.smtpHost, value: data.smtpHost },
         { key: SYS_KEYS.smtpPort, value: String(data.smtpPort) },
         { key: SYS_KEYS.smtpUser, value: data.smtpUser },
         { key: SYS_KEYS.smtpPass, value: encrypt(data.smtpPass) },
         { key: SYS_KEYS.smtpFromEmail, value: data.smtpFromEmail },
-        { key: SYS_KEYS.smtpFromName, value: data.smtpFromName || "HR Management" },
+        {
+          key: SYS_KEYS.smtpFromName,
+          value: data.smtpFromName || "HR Management",
+        },
         { key: SYS_KEYS.smtpSecure, value: String(Boolean(data.smtpSecure)) },
         { key: SYS_KEYS.setupCompleted, value: "true" },
         { key: SYS_KEYS.setupCompletedAt, value: new Date().toISOString() },
@@ -128,7 +164,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      return { admin, company };
+      return { admin, company, organization };
     });
 
     return NextResponse.json({
@@ -136,19 +172,23 @@ export async function POST(req: NextRequest) {
       message: "Setup complet cu succes",
       admin: result.admin,
       company: result.company,
+      organization: result.organization,
     });
   } catch (error) {
     console.error("[SETUP_POST]", error);
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: error.issues.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ") },
-        { status: 400 }
+        {
+          error: error.issues
+            .map((e) => `${e.path.join(".")}: ${e.message}`)
+            .join(", "),
+        },
+        { status: 400 },
       );
     }
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Eroare la setup" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
-

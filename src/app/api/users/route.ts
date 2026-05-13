@@ -1,42 +1,46 @@
 /**
- * GET  /api/users — Lista utilizatori (ADMIN, fără passwordHash)
- * POST /api/users — Creează utilizator nou (ADMIN)
+ * GET  /api/users — Lista utilizatori (admin organizație / super)
+ * POST /api/users — Creează utilizator nou
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import { hashPassword } from "@/lib/auth";
-import { logAuditFF, getClientIp } from "@/lib/audit";
+import { getClientIp, logAuditFF } from "@/lib/audit";
+import { hashPassword, requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN, UserRole } from "@/lib/roles";
 import { generateTempPassword } from "@/lib/backup";
-
-// ══════════════════════════════════════════════════════════════════════════════
-// GET — Lista utilizatori
-// ══════════════════════════════════════════════════════════════════════════════
+import { prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
     const { searchParams } = request.nextUrl;
     const includeInactive = searchParams.get("all") === "true";
 
+    const orgWhere =
+      user.role === UserRole.SUPER_ADMIN
+        ? {}
+        : { organizationId: user.organizationId };
+
     const users = await prisma.user.findMany({
-      where: includeInactive ? undefined : { isActive: true },
+      where: includeInactive ? orgWhere : { ...orgWhere, isActive: true },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
         name: true,
         email: true,
         role: true,
+        organizationId: true,
         isActive: true,
         mustChangePassword: true,
         lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
-        // NU include password — niciodată
       },
     });
 
@@ -47,18 +51,17 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// POST — Creează utilizator nou
-// ══════════════════════════════════════════════════════════════════════════════
-
 const createSchema = z.object({
   email: z.string().email("Email invalid"),
   name: z.string().min(1, "Numele e obligatoriu").max(100),
-  role: z.enum(["administrator", "operator", "doar_vizualizare"]),
+  role: z.nativeEnum(UserRole),
 });
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
@@ -68,24 +71,26 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Date invalide", issues: parsed.error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const { email, name, role } = parsed.data;
 
-    // Verifică unicitate email
+    if (role === UserRole.SUPER_ADMIN && user.role !== UserRole.SUPER_ADMIN) {
+      return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
+    }
+
     const existing = await prisma.user.findUnique({
       where: { email: email.toLowerCase().trim() },
     });
     if (existing) {
       return NextResponse.json(
         { error: "Există deja un utilizator cu acest email" },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
-    // Generează parolă temporară
     const tempPassword = generateTempPassword();
     const passwordHash = await hashPassword(tempPassword);
 
@@ -95,6 +100,7 @@ export async function POST(request: NextRequest) {
         name: name.trim(),
         password: passwordHash,
         role,
+        organizationId: user.organizationId,
         isActive: true,
         mustChangePassword: true,
       },
@@ -103,20 +109,20 @@ export async function POST(request: NextRequest) {
         name: true,
         email: true,
         role: true,
+        organizationId: true,
         isActive: true,
         mustChangePassword: true,
         createdAt: true,
       },
     });
 
-    // Audit log
     logAuditFF({
       action: "CREATE",
       entity: "User",
-      entityId: newUser.id,
-      userId: user!.userId,
-      userName: user!.email,
-      userRole: user!.role,
+      entityId: null,
+      userId: user.userId,
+      userName: user.email,
+      userRole: user.role,
       ipAddress: getClientIp(request),
       newValues: { name, email, role },
     });
@@ -127,9 +133,8 @@ export async function POST(request: NextRequest) {
         tempPassword,
         message: "Utilizator creat. Parola temporară e afișată o singură dată.",
       },
-      { status: 201 }
+      { status: 201 },
     );
-
   } catch (error) {
     console.error("[USERS_CREATE]", error);
     return NextResponse.json({ error: "Eroare la creare" }, { status: 500 });

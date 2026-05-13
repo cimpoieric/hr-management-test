@@ -1,5 +1,5 @@
 /**
- * Layout protejat pentru rutele din grupul (dashboard) — URL-uri la rădăcină (/angajati, …).
+ * Layout protejat pentru grupul (dashboard) — shell cu sidebar.
  */
 
 import { AuthenticatedDashboardShell } from "@/components/layout/AuthenticatedDashboardShell";

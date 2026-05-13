@@ -3,10 +3,11 @@
  * POST — creare țară (admin)
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 const createSchema = z.object({
   name: z.string().min(1).max(120),
@@ -15,7 +16,10 @@ const createSchema = z.object({
 });
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
@@ -33,14 +37,20 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
     const raw = await request.json();
     const parsed = createSchema.safeParse(raw);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Date invalide", issues: parsed.error.issues }, { status: 400 });
+      return NextResponse.json(
+        { error: "Date invalide", issues: parsed.error.issues },
+        { status: 400 },
+      );
     }
     const d = parsed.data;
     const country = await prisma.country.create({
@@ -52,9 +62,15 @@ export async function POST(request: NextRequest) {
     });
     return NextResponse.json({ country }, { status: 201 });
   } catch (error: unknown) {
-    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : "";
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code?: string }).code)
+        : "";
     if (code.includes("Unique")) {
-      return NextResponse.json({ error: "Denumire sau cod duplicat" }, { status: 409 });
+      return NextResponse.json(
+        { error: "Denumire sau cod duplicat" },
+        { status: 409 },
+      );
     }
     console.error("[SETTINGS_COUNTRIES_POST]", error);
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });

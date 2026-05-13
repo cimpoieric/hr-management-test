@@ -1,12 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
-import { readFile } from "fs/promises";
 import { join } from "path";
-import { requireAuth } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
+import { readFile } from "fs/promises";
+import { type NextRequest, NextResponse } from "next/server";
 
 const DB_PATH = join(process.cwd(), "prisma", "dev.db");
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
@@ -20,6 +24,9 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch {
-    return NextResponse.json({ error: "Nu am putut citi baza de date." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Nu am putut citi baza de date." },
+      { status: 500 },
+    );
   }
 }

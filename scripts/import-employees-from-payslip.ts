@@ -107,13 +107,11 @@ const rows: PayslipRow[] = [
 ];
 
 function splitName(fullName: string): { firstName: string; lastName: string } {
-  const parts = fullName
-    .trim()
-    .split(/\s+/g)
-    .filter(Boolean);
+  const parts = fullName.trim().split(/\s+/g).filter(Boolean);
 
   if (parts.length === 0) return { firstName: "", lastName: "" };
-  if (parts.length === 1) return { firstName: parts[0] ?? "", lastName: parts[0] ?? "" };
+  if (parts.length === 1)
+    return { firstName: parts[0] ?? "", lastName: parts[0] ?? "" };
 
   // În dataset-ul tău: primul cuvânt e de regulă numele de familie (ex: Caraman, Jeler, Lewandowski)
   const lastName = parts[0] ?? "";
@@ -140,8 +138,8 @@ async function main() {
   let existed = 0;
 
   try {
-    console.log(
-      `Bulk import employees from payslips — Week ${WEEK}/${YEAR} (${PERIOD}) — rows=${rows.length}`
+    console.info(
+      `Bulk import employees from payslips — Week ${WEEK}/${YEAR} (${PERIOD}) — rows=${rows.length}`,
     );
 
     // Country: Romania (RO)
@@ -151,10 +149,23 @@ async function main() {
       update: { name: COUNTRY_NAME },
     });
 
+    const organization = await prisma.organization.findFirst({
+      orderBy: { createdAt: "asc" },
+    });
+    if (!organization) {
+      throw new Error("No Organization row — run seed or setup first.");
+    }
+
     // Company: Cedol Autocraft SRL
     const company = await prisma.company.upsert({
-      where: { name: COMPANY_NAME },
+      where: {
+        organizationId_name: {
+          organizationId: organization.id,
+          name: COMPANY_NAME,
+        },
+      },
       create: {
+        organizationId: organization.id,
         name: COMPANY_NAME,
         status: "Activ",
         countryId: country.id,
@@ -164,15 +175,15 @@ async function main() {
       },
     });
 
-    console.log(`Using companyId=${company.id}, countryId=${country.id}`);
+    console.info(`Using companyId=${company.id}, countryId=${country.id}`);
 
     for (let idx = 0; idx < rows.length; idx++) {
       const row = rows[idx]!;
       const observation = `Empl.ID: ${row.emplId}`;
       const rate = hourlyRate(row.net, row.hours);
 
-      console.log(
-        `[${idx + 1}/${rows.length}] ${row.fullName} (${observation}) hours=${row.hours} net=${row.net} rate=${rate.toString()}`
+      console.info(
+        `[${idx + 1}/${rows.length}] ${row.fullName} (${observation}) hours=${row.hours} net=${row.net} rate=${rate.toString()}`,
       );
 
       const existing = await prisma.employee.findFirst({
@@ -182,13 +193,18 @@ async function main() {
             { observations: { contains: observation } },
           ],
         },
-        select: { id: true, firstName: true, lastName: true, observations: true },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          observations: true,
+        },
       });
 
       if (existing) {
         existed++;
-        console.log(
-          `  - exists: employeeId=${existing.id} (${existing.lastName} ${existing.firstName})`
+        console.info(
+          `  - exists: employeeId=${existing.id} (${existing.lastName} ${existing.firstName})`,
         );
         continue;
       }
@@ -200,6 +216,7 @@ async function main() {
 
       await prisma.employee.create({
         data: {
+          organizationId: organization.id,
           cnp,
           cnpEncrypted,
           cnpHash,
@@ -217,7 +234,7 @@ async function main() {
       });
 
       imported++;
-      console.log(`  - created`);
+      console.info(`  - created`);
     }
 
     await prisma.auditLog.create({
@@ -239,8 +256,10 @@ async function main() {
       },
     });
 
-    console.log("----");
-    console.log(`Done. Imported=${imported}, Already existed=${existed}, Total=${rows.length}`);
+    console.info("----");
+    console.info(
+      `Done. Imported=${imported}, Already existed=${existed}, Total=${rows.length}`,
+    );
   } catch (err) {
     console.error("[IMPORT_EMPLOYEES_FROM_PAYSLIP_ERROR]", err);
     process.exitCode = 1;
@@ -250,4 +269,3 @@ async function main() {
 }
 
 void main();
-

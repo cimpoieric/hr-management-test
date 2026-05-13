@@ -4,13 +4,17 @@
  * Verifică path traversal, servește fișierul ca attachment.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
+import { deleteBackup, getBackupPath } from "@/lib/backup";
 import { readFile } from "fs/promises";
-import { requireAuth } from "@/lib/auth";
-import { getBackupPath, deleteBackup } from "@/lib/backup";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
@@ -30,7 +34,6 @@ export async function GET(request: NextRequest) {
         "Content-Length": String(buffer.length),
       },
     });
-
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Eroare";
     return NextResponse.json({ error: msg }, { status: 404 });
@@ -41,7 +44,10 @@ export async function GET(request: NextRequest) {
  * DELETE /api/backup/download?filename=... — Șterge un backup (ADMIN only)
  */
 export async function DELETE(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
@@ -52,7 +58,6 @@ export async function DELETE(request: NextRequest) {
 
     await deleteBackup(filename);
     return NextResponse.json({ success: true });
-
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Eroare";
     return NextResponse.json({ error: msg }, { status: 500 });

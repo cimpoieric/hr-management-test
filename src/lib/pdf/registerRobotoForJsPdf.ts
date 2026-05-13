@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import type { jsPDF } from "jspdf";
 
-/** Roboto TTF în `assets/fonts/` (Apache 2.0) — suport complet pentru diacritice românești. */
+/** Roboto TTF subset (latin + Latin Extended-A) în `assets/fonts/` — pentru jsPDF; regenerare: `npm run subset-pdf-fonts`. */
 const FONT_SPECS = [
   { vfsName: "Roboto-Regular.ttf", family: "Roboto", style: "normal" as const },
   { vfsName: "Roboto-Bold.ttf", family: "Roboto", style: "bold" as const },

@@ -14,31 +14,35 @@
  * AuditLog: cine a generat ce raport, câți angajați inclusi
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { mkdir, writeFile, stat } from "fs/promises";
+import { randomUUID } from "crypto";
 import { existsSync } from "fs";
 import { join } from "path";
-import { randomUUID } from "crypto";
-import { Prisma } from "@prisma/client";
-import { prismaTyped } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
+import { logAuditFF } from "@/lib/audit";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
+import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
+import { calculateStatus } from "@/lib/documentStatus";
+import { documentsWhereVisible } from "@/lib/documentVisibility";
 import { decrypt } from "@/lib/encryption";
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 import {
+  addSettingsLogo,
+  registerPdfFontWithFallback,
+} from "@/lib/pdf/jsPdfBranding";
+import {
+  type ColumnDef,
+  type EmployeeListItem,
   generateA1ReportPDF,
   generateCountryReportPDF,
   generateEmployeeSheetPDF,
-  type ColumnDef,
-  type EmployeeListItem,
 } from "@/lib/pdfGenerator";
-import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
-import { documentsWhereVisible } from "@/lib/documentVisibility";
-import { calculateStatus } from "@/lib/documentStatus";
+import { prismaTyped } from "@/lib/prisma";
 import { salaryAmountToJson } from "@/lib/salaryFields";
-import { addSettingsLogo, registerPdfFontWithFallback } from "@/lib/pdf/jsPdfBranding";
+import { Prisma } from "@prisma/client";
+import { mkdir, stat, writeFile } from "fs/promises";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
+import { type NextRequest, NextResponse } from "next/server";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -61,7 +65,11 @@ function a1DocumentsWhere(employeeIds: number[]): Prisma.DocumentWhereInput {
   ];
   return documentsWhereVisible({
     employeeId: { in: employeeIds },
-    OR: [{ type: "A1" }, { type: "a1" }, ...hints.map((h) => ({ fileName: { contains: h } }))],
+    OR: [
+      { type: "A1" },
+      { type: "a1" },
+      ...hints.map((h) => ({ fileName: { contains: h } })),
+    ],
   });
 }
 
@@ -203,10 +211,12 @@ function getLogoPath(): string | null {
 }
 
 async function fetchCountriesByIds(
-  ids: number[]
+  ids: number[],
 ): Promise<Map<number, { name: string; code: string }>> {
   if (ids.length === 0) return new Map();
-  const rows = await prismaTyped.$queryRaw<Array<{ id: number; name: string; code: string }>>`
+  const rows = await prismaTyped.$queryRaw<
+    Array<{ id: number; name: string; code: string }>
+  >`
     SELECT id, name, code FROM Country WHERE id IN (${Prisma.join(ids)})
   `;
   return new Map(rows.map((r) => [r.id, r]));
@@ -257,7 +267,18 @@ async function generateAccountingListPdf(params: {
 }): Promise<Uint8Array> {
   const { employees, companyName, companyRef, title } = params;
   const generatedAt = new Date().toLocaleString("ro-RO");
-  const headers = ["Nr.", "Nume", "Prenume", "CNP", "IBAN", "Banca", "Tip plata", "Suma bruta", "Moneda", "Status"];
+  const headers = [
+    "Nr.",
+    "Nume",
+    "Prenume",
+    "CNP",
+    "IBAN",
+    "Banca",
+    "Tip plata",
+    "Suma bruta",
+    "Moneda",
+    "Status",
+  ];
   const widths = [28, 78, 78, 92, 128, 78, 64, 66, 44, 58];
   const rows = employees.map((e, idx) => [
     String(idx + 1),
@@ -289,15 +310,31 @@ async function generateAccountingListPdf(params: {
     startY: 64,
     head: [headers],
     body: rows,
-    styles: { font: pdfFont, fontSize: 8, cellPadding: 3, overflow: "linebreak" },
-    headStyles: { font: pdfFont, fontStyle: "bold", fillColor: [235, 240, 248], textColor: [25, 25, 25] },
-    columnStyles: Object.fromEntries(widths.map((w, i) => [i, { cellWidth: w }])),
+    styles: {
+      font: pdfFont,
+      fontSize: 8,
+      cellPadding: 3,
+      overflow: "linebreak",
+    },
+    headStyles: {
+      font: pdfFont,
+      fontStyle: "bold",
+      fillColor: [235, 240, 248],
+      textColor: [25, 25, 25],
+    },
+    columnStyles: Object.fromEntries(
+      widths.map((w, i) => [i, { cellWidth: w }]),
+    ),
     margin: { left: 24, right: 24 },
     didDrawPage: () => {
       const pageHeight = doc.internal.pageSize.getHeight();
       doc.setFont(pdfFont, "normal");
       doc.setFontSize(9);
-      doc.text(`Generat la ${generatedAt} - Total angajati: ${rows.length}`, ml, pageHeight - 12);
+      doc.text(
+        `Generat la ${generatedAt} - Total angajati: ${rows.length}`,
+        ml,
+        pageHeight - 12,
+      );
     },
   });
   const ab = doc.output("arraybuffer");
@@ -307,9 +344,15 @@ async function generateAccountingListPdf(params: {
 // ─── POST handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
@@ -317,14 +360,17 @@ export async function POST(request: NextRequest) {
     const reportType = body.type;
 
     if (!["lista", "a1", "tara", "fisa"].includes(reportType)) {
-      return NextResponse.json({ error: "Tip raport invalid" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Tip raport invalid" },
+        { status: 400 },
+      );
     }
 
     await ensureReportsDir();
     await cleanupOldReports();
 
     const logoPath = getLogoPath();
-    const appSettings = await getAppSettings();
+    const appSettings = await getAppSettings(user.organizationId);
     const generatedBy = user.email;
     let pdfBytes: Uint8Array;
     let reportTitle: string;
@@ -336,13 +382,17 @@ export async function POST(request: NextRequest) {
       // ─── Raport Listă ───────────────────────────────────────────────────
       const employeeIds = body.employeeIds ?? [];
       if (employeeIds.length === 0) {
-        return NextResponse.json({ error: "Niciun angajat selectat" }, { status: 400 });
+        return NextResponse.json(
+          { error: "Niciun angajat selectat" },
+          { status: 400 },
+        );
       }
       if (employeeIds.length > 5000) {
-        return NextResponse.json({ error: "Maxim 5000 angajati" }, { status: 400 });
+        return NextResponse.json(
+          { error: "Maxim 5000 angajati" },
+          { status: 400 },
+        );
       }
-
-      const columns = body.columns && body.columns.length > 0 ? body.columns : DEFAULT_LIST_COLUMNS;
 
       const employees = (await prismaTyped.employee.findMany({
         where: { id: { in: employeeIds } },
@@ -370,15 +420,17 @@ export async function POST(request: NextRequest) {
         } as unknown as Prisma.EmployeeSelect,
       })) as unknown as ListaReportEmployee[];
       const countryIds = [
-        ...new Set(employees.map((e) => e.countryId).filter((id): id is number => id != null)),
+        ...new Set(
+          employees
+            .map((e) => e.countryId)
+            .filter((id): id is number => id != null),
+        ),
       ];
       const countryById = await fetchCountriesByIds(countryIds);
 
-      console.log("[PDF DATA]", employees);
-      console.log("[PDF DATA] employees length:", employees?.length);
-
       const items: EmployeeListItem[] = employees.map((e) => {
-        const cr = e.countryId != null ? countryById.get(e.countryId) : undefined;
+        const cr =
+          e.countryId != null ? countryById.get(e.countryId) : undefined;
         return {
           id: e.id,
           lastName: e.lastName,
@@ -404,9 +456,6 @@ export async function POST(request: NextRequest) {
       reportTitle = body.title ?? "Raport salarial - confidential";
       employeeCount = items.length;
 
-      void columns;
-      void logoPath;
-      void generatedBy;
       pdfBytes = await generateAccountingListPdf({
         employees: employees.map((e) => ({
           firstName: e.firstName,
@@ -423,7 +472,6 @@ export async function POST(request: NextRequest) {
         companyRef: appSettings.companyCuiReg || "",
         title: reportTitle,
       });
-
     } else if (reportType === "a1") {
       // ─── Raport A1 ──────────────────────────────────────────────────────
       const today = new Date();
@@ -440,7 +488,10 @@ export async function POST(request: NextRequest) {
 
       const employeeIds = activeDeployments.map((d) => d.employeeId);
       if (employeeIds.length === 0) {
-        return NextResponse.json({ error: "Niciun angajat cu detasare activa" }, { status: 404 });
+        return NextResponse.json(
+          { error: "Niciun angajat cu detasare activa" },
+          { status: 404 },
+        );
       }
 
       const a1DocsAll = await prismaTyped.document.findMany({
@@ -457,16 +508,13 @@ export async function POST(request: NextRequest) {
         orderBy: { uploadedAt: "desc" },
       });
 
-      const docsByEmployee = new Map<number, typeof a1DocsAll>();
-      for (const d of a1DocsAll) {
-        const list = docsByEmployee.get(d.employeeId) ?? [];
-        list.push(d);
-        docsByEmployee.set(d.employeeId, list);
-      }
-
       const a1ByEmployee = new Map<
         number,
-        { status: A1ReportBucket; expiryDate: Date | null; doc: (typeof a1DocsAll)[0] }
+        {
+          status: A1ReportBucket;
+          expiryDate: Date | null;
+          doc: (typeof a1DocsAll)[0];
+        }
       >();
       for (const doc of a1DocsAll) {
         if (a1ByEmployee.has(doc.employeeId)) continue;
@@ -486,7 +534,10 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      const deploymentMap = new Map<number, { country: string; city: string | null }>();
+      const deploymentMap = new Map<
+        number,
+        { country: string; city: string | null }
+      >();
       for (const d of activeDeployments) {
         deploymentMap.set(d.employeeId, { country: d.country, city: d.city });
       }
@@ -494,21 +545,7 @@ export async function POST(request: NextRequest) {
       const items: EmployeeListItem[] = employees.map((e) => {
         const dep = deploymentMap.get(e.id);
         const a1 = a1ByEmployee.get(e.id);
-        const docsForLog = docsByEmployee.get(e.id) ?? [];
         const calculatedStatus = a1?.status ?? "PENDING";
-        console.log(
-          "Angajat:",
-          `${e.lastName} ${e.firstName}`,
-          "Documente:",
-          docsForLog.map((d) => ({
-            id: d.id,
-            type: d.type,
-            fileName: d.fileName,
-            status: d.status,
-            expiryDate: d.expiryDate,
-          }))
-        );
-        console.log("Status calculat:", calculatedStatus);
 
         return {
           id: e.id,
@@ -532,16 +569,20 @@ export async function POST(request: NextRequest) {
         generatedBy,
         logoPath,
       });
-
     } else if (reportType === "tara") {
       // ─── Raport Țară ────────────────────────────────────────────────────
       const countryCodeRaw = body.params?.countryCode;
       if (!countryCodeRaw || String(countryCodeRaw).trim() === "") {
-        return NextResponse.json({ error: "Cod tara necesar" }, { status: 400 });
+        return NextResponse.json(
+          { error: "Cod tara necesar" },
+          { status: 400 },
+        );
       }
 
       const countryCode = String(countryCodeRaw).trim().toUpperCase();
-      const displayFromClient = String(body.params?.countryDisplayName ?? "").trim();
+      const displayFromClient = String(
+        body.params?.countryDisplayName ?? "",
+      ).trim();
       const countryName =
         displayFromClient ||
         DEPLOYMENT_COUNTRIES.find((c) => c.code === countryCode)?.name ||
@@ -549,10 +590,7 @@ export async function POST(request: NextRequest) {
 
       const countryRow = await prismaTyped.country.findFirst({
         where: {
-          OR: [
-            { code: countryCode },
-            { code: String(countryCodeRaw).trim() },
-          ],
+          OR: [{ code: countryCode }, { code: String(countryCodeRaw).trim() }],
         },
         select: { id: true, name: true, code: true },
       });
@@ -562,26 +600,22 @@ export async function POST(request: NextRequest) {
         const s = v != null ? String(v).trim() : "";
         if (s === "") return;
         deploymentCountryOr.push({ country: s });
-        if (s.length <= 4) deploymentCountryOr.push({ country: s.toUpperCase() });
-        if (s.length <= 4) deploymentCountryOr.push({ country: s.toLowerCase() });
+        if (s.length <= 4)
+          deploymentCountryOr.push({ country: s.toUpperCase() });
+        if (s.length <= 4)
+          deploymentCountryOr.push({ country: s.toLowerCase() });
       };
       addCountryVariant(countryCode);
       addCountryVariant(String(countryCodeRaw).trim());
       addCountryVariant(displayFromClient);
-      const depStatic = DEPLOYMENT_COUNTRIES.find((c) => c.code === countryCode);
+      const depStatic = DEPLOYMENT_COUNTRIES.find(
+        (c) => c.code === countryCode,
+      );
       if (depStatic?.name) addCountryVariant(depStatic.name);
       if (countryRow) {
         addCountryVariant(countryRow.code);
         addCountryVariant(countryRow.name);
       }
-
-      const countryParam = {
-        countryCode,
-        countryCodeRaw: String(countryCodeRaw).trim(),
-        countryDisplayName: displayFromClient || null,
-        countryIdFromDb: countryRow?.id ?? null,
-        countryNameFromDb: countryRow?.name ?? null,
-      };
 
       const today = new Date();
       const deploymentWhere: Prisma.DeploymentWhereInput = {
@@ -591,14 +625,6 @@ export async function POST(request: NextRequest) {
           { OR: [{ endDate: null }, { endDate: { gte: today } }] },
         ],
       };
-
-      const whereClause = {
-        deploymentWhere,
-        employeeByCountryId: countryRow ? { countryId: countryRow.id } : null,
-      };
-
-      console.log("Țară primită:", countryParam);
-      console.log("Query where:", JSON.stringify(whereClause));
 
       const deployments = await prismaTyped.deployment.findMany({
         where: deploymentWhere,
@@ -624,8 +650,10 @@ export async function POST(request: NextRequest) {
 
       const mergedEmployeeIds = [...employeeIdSet];
       if (mergedEmployeeIds.length === 0) {
-        console.log("Angajați găsiți:", 0);
-        return NextResponse.json({ error: "Niciun angajat in aceasta tara" }, { status: 404 });
+        return NextResponse.json(
+          { error: "Niciun angajat in aceasta tara" },
+          { status: 404 },
+        );
       }
 
       const employees = await prismaTyped.employee.findMany({
@@ -637,9 +665,15 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      console.log("Angajați găsiți:", employees.length);
-
-      const depMap = new Map<number, { city: string | null; startDate: Date; endDate: Date | null; status: string }>();
+      const depMap = new Map<
+        number,
+        {
+          city: string | null;
+          startDate: Date;
+          endDate: Date | null;
+          status: string;
+        }
+      >();
       for (const d of deployments) {
         depMap.set(d.employeeId, d);
       }
@@ -665,18 +699,6 @@ export async function POST(request: NextRequest) {
       reportTitle = body.title ?? `Raport detasari — ${countryName}`;
       employeeCount = items.length;
 
-      console.log("Primul angajat:", employees?.[0]);
-
-      const pdfInput = {
-        employees: items,
-        countryName,
-        countryCode,
-        title: reportTitle,
-        generatedBy,
-        logoPath: logoPath ?? null,
-      };
-      console.log("Date trimise la PDF:", JSON.stringify(pdfInput, null, 2));
-
       pdfBytes = generateCountryReportPDF({
         employees: items,
         countryName,
@@ -685,19 +707,14 @@ export async function POST(request: NextRequest) {
         generatedBy,
         logoPath,
       });
-
-      console.log(
-        "[RAPORT_TARA_PDF] bytes:",
-        pdfBytes?.length,
-        "header:",
-        Buffer.from(pdfBytes.slice(0, 8)).toString("utf8")
-      );
-
     } else {
       // ─── Raport Fișă Angajat ────────────────────────────────────────────
-      const employeeId = body.params?.employeeId ?? (body.employeeIds?.[0]);
+      const employeeId = body.params?.employeeId ?? body.employeeIds?.[0];
       if (!employeeId) {
-        return NextResponse.json({ error: "ID angajat necesar" }, { status: 400 });
+        return NextResponse.json(
+          { error: "ID angajat necesar" },
+          { status: 400 },
+        );
       }
 
       const employee = (await prismaTyped.employee.findUnique({
@@ -755,14 +772,18 @@ export async function POST(request: NextRequest) {
 
       let countryDisplay = "—";
       if (employee.countryId != null) {
-        const rows = await prismaTyped.$queryRaw<Array<{ name: string; code: string }>>`
+        const rows = await prismaTyped.$queryRaw<
+          Array<{ name: string; code: string }>
+        >`
           SELECT name, code FROM Country WHERE id = ${employee.countryId} LIMIT 1
         `;
         const cr = rows[0];
         if (cr) countryDisplay = `${cr.name} (${cr.code})`;
       }
 
-      reportTitle = body.title ?? `Fisa angajat — ${employee.lastName} ${employee.firstName}`;
+      reportTitle =
+        body.title ??
+        `Fisa angajat — ${employee.lastName} ${employee.firstName}`;
       employeeCount = 1;
 
       pdfBytes = generateEmployeeSheetPDF({
@@ -830,10 +851,11 @@ export async function POST(request: NextRequest) {
       title: reportTitle,
       employeeCount,
     });
-
   } catch (error) {
-    console.log("[PDF ERROR]", error);
     console.error("[REPORTS_GENERATE]", error);
-    return NextResponse.json({ error: "Eroare la generare raport" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Eroare la generare raport" },
+      { status: 500 },
+    );
   }
 }

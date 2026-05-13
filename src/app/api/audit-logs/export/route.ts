@@ -7,23 +7,39 @@
  * Doar ADMIN poate exporta.
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { type NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 
 const VALID_ACTIONS = [
-  "LOGIN", "LOGOUT", "LOGIN_FAILED",
-  "CREATE", "UPDATE", "DELETE",
-  "VIEW", "EXPORT_EXCEL", "EXPORT_PDF", "REPORT_GENERATE",
-  "IMPORT_APPROVE", "IMPORT_REJECT",
-  "BACKUP", "PASSWORD_CHANGE", "SETTINGS_CHANGE",
+  "LOGIN",
+  "LOGOUT",
+  "LOGIN_FAILED",
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+  "VIEW",
+  "EXPORT_EXCEL",
+  "EXPORT_PDF",
+  "REPORT_GENERATE",
+  "IMPORT_APPROVE",
+  "IMPORT_REJECT",
+  "BACKUP",
+  "PASSWORD_CHANGE",
+  "SETTINGS_CHANGE",
 ];
 
 const VALID_ENTITIES = [
-  "Employee", "Document", "Deployment",
-  "User", "Report", "System",
-  "PendingImport", "Company",
+  "Employee",
+  "Document",
+  "Deployment",
+  "User",
+  "Report",
+  "System",
+  "PendingImport",
+  "Company",
 ];
 
 function parseDate(dateStr: string): Date | null {
@@ -32,7 +48,10 @@ function parseDate(dateStr: string): Date | null {
 }
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, ["administrator"]);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) return authError!;
 
   try {
@@ -49,7 +68,7 @@ export async function GET(request: NextRequest) {
     const where: Record<string, unknown> = {};
 
     if (filterUserId) {
-      where.userId = parseInt(filterUserId, 10);
+      where.userId = Number.parseInt(filterUserId, 10);
     }
     if (entityType && VALID_ENTITIES.includes(entityType)) {
       where.entity = entityType;
@@ -99,8 +118,16 @@ export async function GET(request: NextRequest) {
 
     // ── Build Excel ──
     const headers = [
-      "ID", "Data", "Utilizator", "Rol", "Actiune", "Entitate",
-      "Entity ID", "IP", "Old Values", "New Values",
+      "ID",
+      "Data",
+      "Utilizator",
+      "Rol",
+      "Actiune",
+      "Entitate",
+      "Entity ID",
+      "IP",
+      "Old Values",
+      "New Values",
     ];
 
     const rows = logs.map((log) => [
@@ -118,9 +145,16 @@ export async function GET(request: NextRequest) {
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     ws["!cols"] = [
-      { wch: 8 }, { wch: 20 }, { wch: 20 }, { wch: 10 },
-      { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 14 },
-      { wch: 40 }, { wch: 40 },
+      { wch: 8 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 10 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 10 },
+      { wch: 14 },
+      { wch: 40 },
+      { wch: 40 },
     ];
 
     const wb = XLSX.utils.book_new();
@@ -137,12 +171,14 @@ export async function GET(request: NextRequest) {
           userId: user.userId,
           userName: user.email,
           userRole: user.role,
-          newValues: JSON.stringify({ count: logs.length, type: "audit_logs_export" }),
-          ipAddress: (
+          newValues: JSON.stringify({
+            count: logs.length,
+            type: "audit_logs_export",
+          }),
+          ipAddress:
             request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
             request.headers.get("x-real-ip") ??
-            "unknown"
-          ),
+            "unknown",
         },
       });
     } catch {
@@ -152,12 +188,12 @@ export async function GET(request: NextRequest) {
     return new NextResponse(buf, {
       status: 200,
       headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="audit-logs-${new Date().toISOString().slice(0, 10)}.xlsx"`,
         "Content-Length": String(buf.byteLength),
       },
     });
-
   } catch (error) {
     console.error("[AUDIT_LOGS_EXPORT]", error);
     return NextResponse.json({ error: "Eroare la export" }, { status: 500 });

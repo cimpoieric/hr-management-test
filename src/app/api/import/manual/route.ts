@@ -5,20 +5,21 @@
  * creează un PendingImport în DB pentru review uman.
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import path from "path";
-import fs from "fs/promises";
-import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee } from "@/lib/permissions";
-import { extractTextFromPDF } from "@/lib/parsers/pdfParser";
-import { extractTextFromImage } from "@/lib/parsers/ocrParser";
-import { extractFields } from "@/lib/parsers/fieldExtractor";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import {
-  MAX_FILE_SIZE,
   ALLOWED_EXTENSIONS,
+  MAX_FILE_SIZE,
   getMimeType,
 } from "@/lib/documentConstants";
+import { extractFields } from "@/lib/parsers/fieldExtractor";
+import { extractTextFromImage } from "@/lib/parsers/ocrParser";
+import { extractTextFromPDF } from "@/lib/parsers/pdfParser";
+import { canEditEmployee } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import fs from "fs/promises";
+import { type NextRequest, NextResponse } from "next/server";
 
 const IMPORT_DIR = "./data/import/pending";
 const REJECTED_DIR = "./data/import/rejected";
@@ -32,7 +33,7 @@ async function ensureDir(dir: string) {
  */
 async function extractText(
   file: File,
-  buffer: Buffer
+  buffer: Buffer,
 ): Promise<{ text: string; ocrConfidence?: number }> {
   const mimeType = file.type || getMimeType(file.name);
 
@@ -52,7 +53,10 @@ async function extractText(
 // ─── POST ────────────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -73,7 +77,7 @@ export async function POST(request: NextRequest) {
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
         { error: `Fișier prea mare. Max: ${MAX_FILE_SIZE / 1024 / 1024}MB` },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -81,7 +85,7 @@ export async function POST(request: NextRequest) {
     if (!ALLOWED_EXTENSIONS.includes(ext)) {
       return NextResponse.json(
         { error: "Extensie neacceptată. Folosește PDF, JPG sau PNG." },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -105,7 +109,10 @@ export async function POST(request: NextRequest) {
       ocrConfidence = result.ocrConfidence;
     } catch (extractError) {
       // Dacă extragerea eșuează, salvăm eroarea dar continuăm
-      rawText = extractError instanceof Error ? extractError.message : "Eroare extragere";
+      rawText =
+        extractError instanceof Error
+          ? extractError.message
+          : "Eroare extragere";
     }
 
     // ─── Extrage câmpuri ─────────────────────────────────────────
@@ -119,6 +126,7 @@ export async function POST(request: NextRequest) {
     // ─── Creează PendingImport ───────────────────────────────────
     const pending = await prisma.pendingImport.create({
       data: {
+        organizationId: String(user.organizationId),
         sourceType: "MANUAL_UPLOAD",
         fileName: file.name,
         filePath: filePath, // cale absolută pentru acces intern
@@ -142,13 +150,10 @@ export async function POST(request: NextRequest) {
         fields,
         rawTextLength: rawText.length,
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     console.error("[IMPORT_MANUAL]", error);
-    return NextResponse.json(
-      { error: "Eroare la procesare" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Eroare la procesare" }, { status: 500 });
   }
 }

@@ -51,7 +51,7 @@ npm install -D tsx@4.19.2 --save-exact
 echo "[7/7] Creating folder structure..."
 mkdir -p src/app/api/auth
 mkdir -p src/app/api/employees
-mkdir -p src/app/api/companies
+mkdir -p src/app/api/organization/companies
 mkdir -p src/app/dashboard
 mkdir -p src/app/login
 mkdir -p src/components/ui

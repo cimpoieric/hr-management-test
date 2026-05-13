@@ -5,18 +5,22 @@
  * Doar ADMIN și OPERATOR.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee } from "@/lib/permissions";
-import { fileExists, softDeleteFile } from "@/lib/storage";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { employeeHasActiveDeployment } from "@/lib/deploymentGuards";
+import { canDeleteEmployee, canEditEmployee } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import { fileExists, softDeleteFile } from "@/lib/storage";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -24,7 +28,7 @@ export async function DELETE(
 
   try {
     const { id } = await params;
-    const documentId = parseInt(id, 10);
+    const documentId = Number.parseInt(id, 10);
     if (isNaN(documentId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
@@ -45,14 +49,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Document negăsit" }, { status: 404 });
     }
 
-    if (user.role !== "administrator") {
+    if (!canDeleteEmployee(user.role)) {
       if (document.status === "EXPIRED") {
         return NextResponse.json(
           {
-            error:
-              "Documentele expirate pot fi șterse doar de administrator.",
+            error: "Documentele expirate pot fi șterse doar de administrator.",
           },
-          { status: 403 }
+          { status: 403 },
         );
       }
       const hasActive = await employeeHasActiveDeployment(document.employeeId);
@@ -62,7 +65,7 @@ export async function DELETE(
             error:
               "Documentele angajaților cu detașare activă pot fi șterse doar de administrator.",
           },
-          { status: 403 }
+          { status: 403 },
         );
       }
     }
@@ -94,7 +97,7 @@ export async function DELETE(
 
     return NextResponse.json(
       { message: "Document șters", id: documentId },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (error) {
     console.error("[DOCUMENT_DELETE]", error);
