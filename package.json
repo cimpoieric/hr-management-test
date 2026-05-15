@@ -12,7 +12,7 @@
     "setup": "node scripts/setup.js",
     "final-cleanup": "node scripts/final-cleanup.js",
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "start:script": "node scripts/start.js",
     "start:dev": "node scripts/start.js --dev",
@@ -23,6 +23,8 @@
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
+    "import:w18": "tsx scripts/import-w18-detachering.ts",
+    "backfill:deployments": "tsx scripts/backfill-detached-deployments.ts",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
@@ -38,6 +40,10 @@
     "electron:desktop-shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/update-desktop-shortcut.ps1"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1047.0",
+    "@aws-sdk/s3-request-presigner": "^3.1047.0",
+    "@neondatabase/serverless": "^1.1.0",
+    "@prisma/adapter-neon": "^7.8.0",
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-slot": "^1.2.4",
@@ -72,6 +78,7 @@
     "tailwindcss-animate": "^1.0.7",
     "tesseract.js": "^7.0.0",
     "winston": "^3.17.0",
+    "ws": "^8.20.1",
     "xlsx": "^0.18.5",
     "zod": "^3.24.0"
   },
@@ -85,6 +92,7 @@
     "@types/pdf-parse": "^1.1.5",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.0",
     "electron": "^41.5.0",
     "electron-builder": "^26.8.1",
@@ -167,5 +175,8 @@
     "romania",
     "local"
   ],
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
 }

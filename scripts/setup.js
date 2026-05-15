@@ -34,7 +34,9 @@ function log(msg, color = "reset") {
 }
 
 function logStep(n, msg) {
-  console.log(`\n${COLORS.cyan}${COLORS.bold}[${n}/6]${COLORS.reset} ${COLORS.bold}${msg}${COLORS.reset}`);
+  console.log(
+    `\n${COLORS.cyan}${COLORS.bold}[${n}/6]${COLORS.reset} ${COLORS.bold}${msg}${COLORS.reset}`,
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -136,7 +138,10 @@ if (modified) {
   fs.writeFileSync(envPath, envContent, "utf8");
   log("  .env actualizat cu chei noi", "green");
   log("\n  ⚠️  IMPORTANT: Salvează .env într-un loc sigur!", "yellow");
-  log("  Dacă pierzi ENCRYPTION_KEY, datele criptate (CNP, IBAN) sunt pierdute definitiv.", "yellow");
+  log(
+    "  Dacă pierzi ENCRYPTION_KEY, datele criptate (CNP, IBAN) sunt pierdute definitiv.",
+    "yellow",
+  );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -175,7 +180,10 @@ try {
   execSync("npx prisma generate", { stdio: "inherit", cwd: CWD });
 
   log("  prisma db push...", "dim");
-  execSync("npx prisma db push --accept-data-loss", { stdio: "inherit", cwd: CWD });
+  execSync("npx prisma db push --accept-data-loss", {
+    stdio: "inherit",
+    cwd: CWD,
+  });
 
   log("  Bază de date sincronizată ✓", "green");
 } catch (error) {
@@ -208,12 +216,12 @@ if (!fs.existsSync(dbPath) || fs.statSync(dbPath).size === 0) {
     if (preset.length >= 8) {
       log(
         "  Admin: admin@firma.local — folosit SEED_ADMIN_PASSWORD din mediu (parola nu e afișată).",
-        "dim"
+        "dim",
       );
     } else {
       log(
         "  Salvează parola admin (nu va mai fi afișată): admin@firma.local",
-        "yellow"
+        "yellow",
       );
       log(`  → ${seedAdminPassword}`, "yellow");
     }
@@ -239,6 +247,6 @@ log("\nCont admin (după seed):", "bold");
 log("  Email: admin@firma.local");
 log(
   "  Parola: cea afișată la pasul seed, sau setează SEED_ADMIN_PASSWORD înainte de npm run setup",
-  "dim"
+  "dim",
 );
 log("\n", "reset");

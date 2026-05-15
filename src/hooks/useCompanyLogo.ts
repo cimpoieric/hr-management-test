@@ -1,15 +1,19 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
 import { COMPANY_LOGO_CHANGED_EVENT } from "@/lib/companyLogoEvents";
+import { useCallback, useEffect, useState } from "react";
 
-/** Company logo from GET /api/settings/logo (data URL). undefined = loading; null = none. */
+/** Company logo from GET /api/settings/logo (R2 HTTPS or data URL). undefined = loading; null = none. */
 export function useCompanyLogo() {
-  const [companyLogoUrl, setCompanyLogoUrl] = useState<string | null | undefined>(undefined);
+  const [companyLogoUrl, setCompanyLogoUrl] = useState<
+    string | null | undefined
+  >(undefined);
 
   const loadCompanyLogo = useCallback(async () => {
     try {
-      const res = await fetch("/api/settings/logo", { credentials: "same-origin" });
+      const res = await fetch("/api/settings/logo", {
+        credentials: "same-origin",
+      });
       if (!res.ok) {
         setCompanyLogoUrl(null);
         return;
@@ -27,7 +31,8 @@ export function useCompanyLogo() {
       void loadCompanyLogo();
     };
     window.addEventListener(COMPANY_LOGO_CHANGED_EVENT, onLogoChanged);
-    return () => window.removeEventListener(COMPANY_LOGO_CHANGED_EVENT, onLogoChanged);
+    return () =>
+      window.removeEventListener(COMPANY_LOGO_CHANGED_EVENT, onLogoChanged);
   }, [loadCompanyLogo]);
 
   return { companyLogoUrl, refetchCompanyLogo: loadCompanyLogo };

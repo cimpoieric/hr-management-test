@@ -1,4 +1,5 @@
 import { requireAuth } from "@/lib/auth";
+import { createTimesheetRecord } from "@/lib/timesheetCreate";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
@@ -40,6 +41,9 @@ const querySchema = z.object({
   employeeId: z.number().int().positive().optional(),
   year: z.number().int().optional(),
   weekNumber: z.number().int().positive().optional(),
+  type: z.enum(["weekly", "monthly"]).optional(),
+  month: z.number().int().min(1).max(12).optional(),
+  monthYear: z.number().int().optional(),
   status: z.string().trim().optional(),
 });
 
@@ -69,12 +73,15 @@ function normalizeYear(y: number): { value?: number; error?: string } {
 const createSchema = z
   .object({
     employeeId: z.coerce.number().int().positive(),
-    weekNumber: z.coerce.number().int().min(1).max(52),
-    year: z.coerce.number().int().min(2024).max(2030),
-    startDate: z.coerce.date(),
-    endDate: z.coerce.date(),
-    hoursWorked: z.coerce.number().min(0.5).max(80),
-    standardHours: z.coerce.number().min(0).max(80).optional().default(40),
+    type: z.enum(["weekly", "monthly"]).optional(),
+    weekNumber: z.coerce.number().int().min(0).max(52).optional(),
+    year: z.coerce.number().int().min(2024).max(2030).optional(),
+    month: z.coerce.number().int().min(1).max(12).optional(),
+    monthYear: z.coerce.number().int().min(2024).max(2030).optional(),
+    startDate: z.coerce.date().optional(),
+    endDate: z.coerce.date().optional(),
+    hoursWorked: z.coerce.number().min(0.5).max(250),
+    standardHours: z.coerce.number().min(0).max(250).optional(),
     travelAllowance: z.coerce
       .number()
       .min(0)
@@ -84,10 +91,16 @@ const createSchema = z
     dailyBreakdown: z.string().optional(),
     notes: z.string().optional(),
   })
-  .refine((v) => v.startDate < v.endDate, {
-    message: "startDate trebuie să fie înainte de endDate",
-    path: ["endDate"],
-  });
+  .refine(
+    (v) =>
+      !v.startDate ||
+      !v.endDate ||
+      v.startDate < v.endDate,
+    {
+      message: "startDate trebuie să fie înainte de endDate",
+      path: ["endDate"],
+    },
+  );
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
@@ -139,6 +152,22 @@ export async function GET(request: NextRequest) {
     if (yearParsedInt.error)
       return NextResponse.json({ error: yearParsedInt.error }, { status: 400 });
 
+    const typeRaw = searchParams.get("type");
+    const type =
+      typeRaw === "weekly" || typeRaw === "monthly" ? typeRaw : undefined;
+    const monthParsed = parseOptionalInt(searchParams.get("month"), "Luna");
+    if (monthParsed.error)
+      return NextResponse.json({ error: monthParsed.error }, { status: 400 });
+    const monthYearParsed = parseOptionalInt(
+      searchParams.get("monthYear"),
+      "Anul lunii",
+    );
+    if (monthYearParsed.error)
+      return NextResponse.json(
+        { error: monthYearParsed.error },
+        { status: 400 },
+      );
+
     const statusRaw = searchParams.get("status");
     const status = statusRaw?.trim() ? statusRaw.trim() : undefined;
 
@@ -166,6 +195,9 @@ export async function GET(request: NextRequest) {
       employeeId,
       year,
       weekNumber,
+      type,
+      month: monthParsed.value,
+      monthYear: monthYearParsed.value,
       status,
     });
     if (!parsed.success) {
@@ -174,10 +206,15 @@ export async function GET(request: NextRequest) {
     }
 
     const where: Prisma.TimesheetWhereInput = {
-      employeeId,
-      year,
-      weekNumber,
-      status: status ? { equals: status } : undefined,
+      ...(employeeId != null ? { employeeId } : {}),
+      ...(year != null ? { year } : {}),
+      ...(weekNumber != null ? { weekNumber } : {}),
+      ...(type ? { type } : {}),
+      ...(monthParsed.value != null ? { month: monthParsed.value } : {}),
+      ...(monthYearParsed.value != null
+        ? { monthYear: monthYearParsed.value }
+        : {}),
+      ...(status ? { status: { equals: status } } : {}),
     };
 
     const skip = (page - 1) * pageSize;
@@ -198,6 +235,7 @@ export async function GET(request: NextRequest) {
               salaryType: true,
               salaryAmount: true,
               salaryCurrency: true,
+              paymentFrequency: true,
             },
           },
         },
@@ -207,8 +245,27 @@ export async function GET(request: NextRequest) {
 
     const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+    const serialized = items.map((row) => ({
+      ...row,
+      type: row.type || "weekly",
+      periodKey: row.periodKey,
+      hoursWorked: String(row.hoursWorked),
+      standardHours: String(row.standardHours),
+      travelAllowance: String(row.travelAllowance ?? 0),
+      employee: row.employee
+        ? {
+            ...row.employee,
+            paymentFrequency: row.employee.paymentFrequency || "weekly",
+            salaryAmount:
+              row.employee.salaryAmount != null
+                ? String(row.employee.salaryAmount)
+                : null,
+          }
+        : row.employee,
+    }));
+
     return NextResponse.json({
-      items,
+      items: serialized,
       pagination: { page, pageSize, total, totalPages },
     });
   } catch (error) {
@@ -239,69 +296,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const {
-      employeeId,
-      weekNumber,
-      year,
-      startDate,
-      endDate,
-      hoursWorked,
-      standardHours,
-      travelAllowance,
-      dailyBreakdown,
-      notes,
-    } = parsed.data;
-
-    const emp = await prisma.employee.findUnique({
-      where: { id: employeeId },
-      select: { organizationId: true },
-    });
-    if (!emp) {
-      return NextResponse.json({ error: "Angajat negasit" }, { status: 404 });
+    const result = await createTimesheetRecord(parsed.data);
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
-    const existing = await prisma.timesheet.findUnique({
-      where: {
-        employeeId_year_weekNumber: { employeeId, year, weekNumber },
-      },
-      select: { id: true },
-    });
-
-    if (existing) {
-      return NextResponse.json(
-        {
-          error:
-            "Există deja un pontaj pentru acest angajat în săptămâna/anul selectat",
-        },
-        { status: 400 },
-      );
-    }
-
-    const created = await prisma.timesheet.create({
-      data: {
-        organizationId: emp.organizationId,
-        employeeId,
-        weekNumber,
-        year,
-        startDate,
-        endDate,
-        hoursWorked,
-        standardHours,
-        travelAllowance,
-        dailyBreakdown,
-        notes,
-        status: "DRAFT",
-      },
-      include: {
-        employee: {
-          select: { id: true, firstName: true, lastName: true, position: true },
-        },
-      },
-    });
-
-    await logAudit("CREATE", created.id, created, request);
-
-    return NextResponse.json(created, { status: 201 });
+    await logAudit("CREATE", result.timesheet.id, result.timesheet, request);
+    return NextResponse.json(result.timesheet, { status: result.status });
   } catch (error) {
     console.error("[TIMESHEETS_POST]", error);
     return NextResponse.json(

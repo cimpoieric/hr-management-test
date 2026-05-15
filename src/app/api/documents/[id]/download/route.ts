@@ -6,26 +6,29 @@
  * Niciodată nu expune calea absolută.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import { fileExists, resolveAbsolutePath, getMimeType } from "@/lib/storage";
 import { createReadStream } from "fs";
-import { stat } from "fs/promises";
 import path from "path";
+import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { fileExists, getMimeType, resolveAbsolutePath } from "@/lib/storage";
+import { stat } from "fs/promises";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
     const { id } = await params;
-    const documentId = parseInt(id, 10);
+    const documentId = Number.parseInt(id, 10);
     if (isNaN(documentId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
@@ -50,7 +53,7 @@ export async function GET(
     if (!exists) {
       return NextResponse.json(
         { error: "Fișier negăsit pe disk" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 

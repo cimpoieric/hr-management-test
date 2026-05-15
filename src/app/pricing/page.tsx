@@ -1,4 +1,5 @@
-import { PricingCards, PricingNav } from "@/components/pricing/PricingCards";
+import { PricingComparison } from "@/components/pricing/PricingComparison";
+import { PricingNav } from "@/components/pricing/PricingCards";
 import type { StripePriceIds } from "@/lib/pricingPlans";
 import { isStripeCheckoutEnabled } from "@/lib/stripePlanEnv";
 import type { Metadata } from "next";
@@ -6,7 +7,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Preturi | HR Management",
   description:
-    "Planuri Starter, Business, Enterprise si Custom - trial 14 zile, plata Stripe.",
+    "Comparatie planuri Starter, Business, Enterprise si Custom - trial 14 zile.",
 };
 
 export default function PricingPage() {
@@ -29,22 +30,24 @@ export default function PricingPage() {
   const stripeCheckoutEnabled = isStripeCheckoutEnabled();
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
       <PricingNav />
       <main className="mx-auto max-w-7xl px-4 py-12 sm:py-16">
         <div className="mx-auto max-w-3xl text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Planuri si preturi
+          <p className="text-sm font-semibold uppercase tracking-wider text-orange-600">
+            Planuri flexibile
+          </p>
+          <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl lg:text-5xl">
+            Alege planul potrivit pentru firma ta
           </h1>
-          <p className="mt-3 text-base text-slate-600 sm:text-lg">
-            {stripeCheckoutEnabled
-              ? "Alege planul potrivit. Toate planurile cu trial de 14 zile. Plata securizata prin Stripe pentru abonamente online."
-              : "Alege planul potrivit. Inregistrarea este gratuita, fara plata online."}
+          <p className="mt-4 text-base text-slate-600 sm:text-lg">
+            Comparatie clara a functionalitatilor. Trial gratuit, apoi plata
+            lunara sau anuala cu 2 luni gratuite.
           </p>
         </div>
 
-        <div className="mx-auto mt-12 max-w-6xl">
-          <PricingCards
+        <div className="mx-auto mt-12 max-w-[1400px]">
+          <PricingComparison
             stripePriceIds={stripePriceIds}
             salesEmail={salesEmail}
             trialDays={trialDays}
@@ -53,20 +56,13 @@ export default function PricingPage() {
         </div>
 
         {stripeCheckoutEnabled ? (
-          <p className="mx-auto mt-10 max-w-2xl text-center text-xs text-slate-500">
-            Pentru checkout Stripe trebuie sa fii autentificat ca{" "}
-            <strong className="text-slate-700">ORG_ADMIN</strong> sau{" "}
-            <strong className="text-slate-700">SUPER_ADMIN</strong>. Seteaza in
-            .env.local cheiile{" "}
+          <p className="mx-auto mt-8 max-w-2xl text-center text-xs text-slate-500">
+            Checkout Stripe disponibil pentru administratorii organizatiei.
+            Configureaza{" "}
             <code className="rounded bg-slate-100 px-1">
               NEXT_PUBLIC_STRIPE_PRICE_*
             </code>{" "}
-            (fiecare Price ID din Dashboard). Pentru Enterprise / Custom fara
-            pret Stripe, foloseste{" "}
-            <code className="rounded bg-slate-100 px-1">
-              NEXT_PUBLIC_SALES_EMAIL
-            </code>
-            .
+            in .env.local.
           </p>
         ) : null}
       </main>

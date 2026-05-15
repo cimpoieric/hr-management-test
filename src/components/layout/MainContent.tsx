@@ -1,5 +1,7 @@
 "use client";
 
+import { EmployeeLimitAlert } from "@/components/plan/EmployeeLimitAlert";
+
 interface MainContentProps {
   children: React.ReactNode;
 }
@@ -11,7 +13,10 @@ interface MainContentProps {
 export function MainContent({ children }: MainContentProps) {
   return (
     <main className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-6">
-      <div className="max-w-7xl mx-auto">{children}</div>
+      <div className="max-w-7xl mx-auto">
+        <EmployeeLimitAlert />
+        {children}
+      </div>
     </main>
   );
 }

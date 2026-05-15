@@ -1,4 +1,5 @@
 import { requireOrgAdmin } from "@/lib/auth";
+import { getOrganizationPlanKey } from "@/lib/organizationPlan";
 import { prisma } from "@/lib/prisma";
 import { assertJwtOrganizationId } from "@/lib/stripeOrganization";
 import { getStripe, getSubscriptionPeriodEndUnix } from "@/lib/stripe";
@@ -30,7 +31,8 @@ export async function GET(request: NextRequest) {
     where: { id: user.organizationId },
     select: {
       id: true,
-      plan: true,
+      plan: { select: { name: true } },
+      subscriptionStatus: true,
       status: true,
       trialEndsAt: true,
       subscriptionGraceEndsAt: true,
@@ -80,7 +82,8 @@ export async function GET(request: NextRequest) {
 
   return NextResponse.json({
     organizationId: org.id,
-    plan: org.plan,
+    plan: getOrganizationPlanKey(org),
+    subscriptionStatus: org.subscriptionStatus,
     status: org.status,
     trialEndsAt: org.trialEndsAt?.toISOString() ?? null,
     subscriptionGraceEndsAt: org.subscriptionGraceEndsAt?.toISOString() ?? null,

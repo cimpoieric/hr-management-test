@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { preventWheelOnFocusedNumberInput } from "@/lib/numericInput";
 import { Calculator, Download, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 type SalaryType = "LUNAR" | "SAPTAMANAL" | "ORA";
 
@@ -107,9 +108,15 @@ export function SalaryCalculatorModal({
     return 0;
   }, [salaryType, amount, inputValue]);
 
-  function parsedInputForSave(): { inputLabel: string; inputValue: number | null } {
+  function parsedInputForSave(): {
+    inputLabel: string;
+    inputValue: number | null;
+  } {
     if (salaryType === "ORA") {
-      return { inputLabel: "Ore lucrate", inputValue: Number(inputValue.replace(",", ".") || "0") };
+      return {
+        inputLabel: "Ore lucrate",
+        inputValue: Number(inputValue.replace(",", ".") || "0"),
+      };
     }
     if (salaryType === "SAPTAMANAL") {
       return {
@@ -136,7 +143,9 @@ export function SalaryCalculatorModal({
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     });
-    const header = ["Nume", "IBAN", "Bancă", "Suma de plată", "Monedă"].join(";");
+    const header = ["Nume", "IBAN", "Bancă", "Suma de plată", "Monedă"].join(
+      ";",
+    );
     const ibanCell = ibanPlain ? `="${ibanPlain.replace(/"/g, '""')}"` : "";
     const row = [
       csvEscape(name),
@@ -167,18 +176,21 @@ export function SalaryCalculatorModal({
     setSaving(true);
     setSaveMessage("");
     try {
-      const res = await fetch(`/api/employees/${employeeId}/salary-calculations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          salaryType,
-          salaryAmount: amount,
-          salaryCurrency: currency,
-          inputValue: iv,
-          inputLabel,
-          calculatedTotal: calculated,
-        }),
-      });
+      const res = await fetch(
+        `/api/employees/${employeeId}/salary-calculations`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            salaryType,
+            salaryAmount: amount,
+            salaryCurrency: currency,
+            inputValue: iv,
+            inputLabel,
+            calculatedTotal: calculated,
+          }),
+        },
+      );
       if (!res.ok) {
         const data = await res.json();
         setSaveMessage(data.error ?? "Eroare la salvare");
@@ -202,7 +214,9 @@ export function SalaryCalculatorModal({
       <div className="w-full max-w-xl rounded-xl border bg-white shadow-xl">
         <div className="flex items-center justify-between border-b px-6 py-4">
           <div>
-            <h3 className="text-base font-semibold text-gray-900">Calcul salarial</h3>
+            <h3 className="text-base font-semibold text-gray-900">
+              Calcul salarial
+            </h3>
             <p className="text-xs text-gray-500 mt-1">
               {employeeName ? `${employeeName} · ` : ""}
               Tip plată: {salaryType ?? "—"}
@@ -225,22 +239,30 @@ export function SalaryCalculatorModal({
               </span>
               <div className="flex items-center gap-2">
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   min="0"
-                  step="0.01"
+                  autoComplete="off"
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
-                  placeholder={salaryType === "LUNAR" ? "ex: 21 sau lasă gol" : undefined}
+                  onWheel={preventWheelOnFocusedNumberInput}
+                  placeholder={
+                    salaryType === "LUNAR" ? "ex: 21 sau lasă gol" : undefined
+                  }
                   className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
                 />
-                <span className="shrink-0 text-xs text-gray-500">{inputMeta.suffix}</span>
+                <span className="shrink-0 text-xs text-gray-500">
+                  {inputMeta.suffix}
+                </span>
               </div>
-              <span className="mt-1 block text-xs text-gray-400">{inputMeta.hint}</span>
+              <span className="mt-1 block text-xs text-gray-400">
+                {inputMeta.hint}
+              </span>
             </label>
           ) : (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-              Selectează tipul de plată (ORA / SAPTAMANAL / LUNAR) și suma brută pentru acest
-              angajat.
+              Selectează tipul de plată (ORA / SAPTAMANAL / LUNAR) și suma brută
+              pentru acest angajat.
             </div>
           )}
 
@@ -252,7 +274,9 @@ export function SalaryCalculatorModal({
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
               <div className="flex items-center gap-2 text-emerald-800">
                 <Calculator size={16} />
-                <span className="text-sm font-medium">Total de plată (live)</span>
+                <span className="text-sm font-medium">
+                  Total de plată (live)
+                </span>
               </div>
               <p className="mt-1 text-2xl font-bold text-emerald-900 tabular-nums">
                 {formatMoney(calculated, currency)}

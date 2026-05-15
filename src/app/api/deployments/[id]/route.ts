@@ -3,19 +3,24 @@
  * DELETE /api/deployments/[id]  — Soft delete (status → CANCELLED)
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
+import {
+  getCountryName,
+  isValidCountryCode,
+  isValidDeploymentStatus,
+} from "@/lib/countries";
+import { canDeleteEmployee, canEditEmployee } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee, canDeleteEmployee } from "@/lib/permissions";
-import { isValidCountryCode, isValidDeploymentStatus, getCountryName } from "@/lib/countries";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 async function logAudit(
   action: string,
   entityId: number,
   oldValues?: unknown,
   newValues?: unknown,
-  ipAddress?: string
+  ipAddress?: string,
 ) {
   try {
     await prisma.auditLog.create({
@@ -46,7 +51,7 @@ async function checkOverlap(
   startDate: Date,
   endDate: Date | null,
   status: string,
-  excludeId?: number
+  excludeId?: number,
 ): Promise<string | null> {
   if (status !== "ACTIVE") return null;
 
@@ -69,9 +74,11 @@ async function checkOverlap(
 
     if (startDate <= depEnd && dep.startDate <= newEnd) {
       return `Angajatul are deja o detașare ACTIVE în ${getCountryName(dep.country)} (${new Date(
-        dep.startDate
+        dep.startDate,
       ).toLocaleDateString("ro-RO")} – ${
-        dep.endDate ? new Date(dep.endDate).toLocaleDateString("ro-RO") : "prezent"
+        dep.endDate
+          ? new Date(dep.endDate).toLocaleDateString("ro-RO")
+          : "prezent"
       })`;
     }
   }
@@ -84,7 +91,10 @@ const updateSchema = z.object({
   country: z.string().length(2).optional(),
   city: z.string().max(100).nullable().optional(),
   externalCompany: z.string().max(200).nullable().optional(),
-  startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
   endDate: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -96,9 +106,12 @@ const updateSchema = z.object({
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -106,14 +119,20 @@ export async function PUT(
 
   try {
     const { id } = await params;
-    const deploymentId = parseInt(id, 10);
+    const deploymentId = Number.parseInt(id, 10);
     if (isNaN(deploymentId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
 
     const existing = await prisma.deployment.findUnique({
       where: { id: deploymentId },
-      select: { id: true, employeeId: true, startDate: true, endDate: true, status: true },
+      select: {
+        id: true,
+        employeeId: true,
+        startDate: true,
+        endDate: true,
+        status: true,
+      },
     });
 
     if (!existing) {
@@ -125,42 +144,41 @@ export async function PUT(
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Date invalide", issues: parsed.error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     const data = parsed.data;
 
     // Parse date
-    const startDate = data.startDate ? new Date(data.startDate) : existing.startDate;
+    const startDate = data.startDate
+      ? new Date(data.startDate)
+      : existing.startDate;
     const endDate =
       data.endDate === null
         ? null
         : data.endDate
-        ? new Date(data.endDate)
-        : existing.endDate;
+          ? new Date(data.endDate)
+          : existing.endDate;
     const status = data.status ?? existing.status;
 
     // Validări
     if (endDate && startDate >= endDate) {
       return NextResponse.json(
-        { error: "DATE_INVALID", message: "Data început trebuie să fie înainte de sfârșit" },
-        { status: 400 }
+        {
+          error: "DATE_INVALID",
+          message: "Data început trebuie să fie înainte de sfârșit",
+        },
+        { status: 400 },
       );
     }
 
     if (data.country && !isValidCountryCode(data.country)) {
-      return NextResponse.json(
-        { error: "COUNTRY_INVALID" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "COUNTRY_INVALID" }, { status: 400 });
     }
 
     if (data.status && !isValidDeploymentStatus(data.status)) {
-      return NextResponse.json(
-        { error: "STATUS_INVALID" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "STATUS_INVALID" }, { status: 400 });
     }
 
     // Overlap check
@@ -169,10 +187,13 @@ export async function PUT(
       startDate,
       endDate,
       status,
-      deploymentId
+      deploymentId,
     );
     if (overlapError) {
-      return NextResponse.json({ error: "OVERLAP", message: overlapError }, { status: 409 });
+      return NextResponse.json(
+        { error: "OVERLAP", message: overlapError },
+        { status: 409 },
+      );
     }
 
     // Build update
@@ -199,7 +220,7 @@ export async function PUT(
       deploymentId,
       existing,
       updateData,
-      getClientIp(request)
+      getClientIp(request),
     );
 
     return NextResponse.json({ deployment: updated }, { status: 200 });
@@ -213,9 +234,12 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canDeleteEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -223,7 +247,7 @@ export async function DELETE(
 
   try {
     const { id } = await params;
-    const deploymentId = parseInt(id, 10);
+    const deploymentId = Number.parseInt(id, 10);
     if (isNaN(deploymentId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
@@ -246,12 +270,12 @@ export async function DELETE(
       deploymentId,
       { status: existing.status },
       { status: "CANCELLED" },
-      getClientIp(request)
+      getClientIp(request),
     );
 
     return NextResponse.json(
       { message: "Detașare anulată", id: updated.id, status: updated.status },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (error) {
     console.error("[DEPLOYMENTS_DELETE]", error);

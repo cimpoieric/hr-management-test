@@ -4,6 +4,7 @@ import Stripe from "stripe";
 
 import { prismaBase } from "@/lib/prisma";
 import { getStripe, getSubscriptionPeriodEndUnix } from "@/lib/stripe";
+import { resolvePlanIdByKey } from "@/lib/organizationPlan";
 import { normalizePlanKey } from "@/lib/stripeOrganization";
 
 function gracePeriodMs(): number {
@@ -53,7 +54,8 @@ async function handleCheckoutSessionCompleted(
   const stripe = getStripe();
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
 
-  const plan = normalizePlanKey(session.metadata?.plan);
+  const planKey = normalizePlanKey(session.metadata?.plan);
+  const planId = await resolvePlanIdByKey(prismaBase, planKey);
   const trialEnd =
     subscription.trial_end != null
       ? new Date(subscription.trial_end * 1000)
@@ -67,8 +69,9 @@ async function handleCheckoutSessionCompleted(
     data: {
       ...(customerId ? { stripeCustomerId: customerId } : {}),
       stripeSubscriptionId: subscriptionId,
-      plan,
+      planId,
       status: "active",
+      subscriptionStatus: "active",
       trialEndsAt: trialEnd,
       subscriptionCurrentPeriodEnd: periodEnd,
       subscriptionGraceEndsAt: null,
@@ -129,6 +132,7 @@ async function handleInvoicePaymentSucceeded(
     data: {
       ...(periodEnd ? { subscriptionCurrentPeriodEnd: periodEnd } : {}),
       status: "active",
+      subscriptionStatus: "active",
       subscriptionGraceEndsAt: null,
     },
   });

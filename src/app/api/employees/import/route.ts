@@ -6,11 +6,12 @@
  * Moduri: preview (simulare) sau commit (scriere în DB).
  */
 
-import { requireAuth, requireRole } from "@/lib/auth";
 import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { dedupeEmployee } from "@/lib/dedupe";
 import { encrypt, hashSha256 } from "@/lib/encryption";
 import { canApproveImport } from "@/lib/permissions";
+import { checkCanAddEmployees, checkPlan } from "@/lib/middleware/plan-check";
+import { incrementOrganizationEmployeeCount } from "@/lib/organizationPlan";
 import { prismaTyped } from "@/lib/prisma";
 import { validateCNP, validateIBAN } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
@@ -56,23 +57,6 @@ export type ImportRowResult =
     };
 
 export async function POST(request: NextRequest) {
-  // ─── Auth + Permissions ──────────────────────────────────────────────
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_EMPLOYEES_RW,
-  );
-
-  if (authError || !user) {
-    return (
-      authError ??
-      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
-    );
-  }
-
-  if (!canApproveImport(user.role)) {
-    return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
-  }
-
   try {
     const body = await request.json();
     const parsed = importSchema.safeParse(body);
@@ -85,6 +69,15 @@ export async function POST(request: NextRequest) {
     }
 
     const { mode, items } = parsed.data;
+
+    const authCheck = await checkPlan(request, { roles: ROLES_EMPLOYEES_RW });
+    if (!authCheck.allowed) return authCheck.response;
+    const { user } = authCheck;
+
+    if (!canApproveImport(user.role)) {
+      return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
+    }
+
     const results: ImportRowResult[] = [];
 
     const allCnps = items.map((i) => i.cnp);
@@ -93,6 +86,30 @@ export async function POST(request: NextRequest) {
     });
 
     const existingByCnp = new Map(existingEmployees.map((e) => [e.cnp, e]));
+
+    if (mode === "commit") {
+      let newEmployeeCount = 0;
+      for (const item of items) {
+        const existing = existingByCnp.get(item.cnp) ?? null;
+        const dedupe = dedupeEmployee(existing, {
+          firstName: item.firstName,
+          lastName: item.lastName,
+          email: item.email,
+          phone: item.phone,
+          iban: item.iban,
+          bankName: item.bankName,
+          address: item.address,
+          city: item.city,
+        });
+        if (dedupe.action === "CREATE") newEmployeeCount += 1;
+      }
+      if (newEmployeeCount > 0) {
+        const limitCheck = await checkCanAddEmployees(request, newEmployeeCount, {
+          roles: ROLES_EMPLOYEES_RW,
+        });
+        if (!limitCheck.allowed) return limitCheck.response;
+      }
+    }
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -165,6 +182,10 @@ export async function POST(request: NextRequest) {
                   : {}),
               } as unknown as Prisma.EmployeeUncheckedCreateInput,
             });
+            await incrementOrganizationEmployeeCount(
+              prismaTyped,
+              user.organizationId,
+            );
             results.push({
               index: i,
               cnp: item.cnp,

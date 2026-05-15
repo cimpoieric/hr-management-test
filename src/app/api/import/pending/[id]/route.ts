@@ -4,15 +4,21 @@
  * DELETE /api/import/pending/[id]  — Respingere: șterge record + mută fișier
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { createSafeAuditLog } from "@/lib/audit";
+import { readImportFile } from "@/lib/importStorage";
+import { checkCanAddEmployees, checkPlan } from "@/lib/middleware/plan-check";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { deletePendingImportRecord } from "@/lib/deletePendingImport";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee } from "@/lib/permissions";
 import { encrypt, hashSha256 } from "@/lib/encryption";
-import { validateCNP, maskCNP } from "@/lib/validation";
 import { isExtractionPlaceholder } from "@/lib/parsers/fieldExtractor";
+import { canEditEmployee } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
 import { salaryAmountToJson } from "@/lib/salaryFields";
+import { sanitizeFilename, saveFile } from "@/lib/storage";
+import { maskCNP, validateCNP } from "@/lib/validation";
+import fs from "fs/promises";
+import { type NextRequest, NextResponse } from "next/server";
 
 function importedOptional(value: string | undefined): string | null {
   const t = value?.trim() ?? "";
@@ -42,7 +48,7 @@ function readExtractedValue(entry: unknown): string {
  */
 function mergeExtractedWithEdited(
   previousJson: string,
-  edited: Record<string, string>
+  edited: Record<string, string>,
 ): string {
   let raw: Record<string, unknown> = {};
   try {
@@ -56,7 +62,10 @@ function mergeExtractedWithEdited(
     if (edited[key] !== undefined) {
       const prev = raw[key];
       const conf =
-        prev && typeof prev === "object" && prev !== null && "confidence" in prev
+        prev &&
+        typeof prev === "object" &&
+        prev !== null &&
+        "confidence" in prev
           ? Number((prev as { confidence: number }).confidence) || 1
           : 1;
       out[key] = { value: edited[key] ?? "", confidence: conf };
@@ -64,7 +73,11 @@ function mergeExtractedWithEdited(
       const prev = raw[key];
       if (typeof prev === "string") {
         out[key] = { value: prev, confidence: 1 };
-      } else if (prev && typeof prev === "object" && "value" in (prev as object)) {
+      } else if (
+        prev &&
+        typeof prev === "object" &&
+        "value" in (prev as object)
+      ) {
         out[key] = {
           value: String((prev as { value: string }).value ?? ""),
           confidence: Number((prev as { confidence: number }).confidence) || 0,
@@ -78,7 +91,7 @@ function mergeExtractedWithEdited(
 function resolveEditedOrStored(
   key: string,
   edited: Record<string, string>,
-  storedExtracted: Record<string, unknown>
+  storedExtracted: Record<string, unknown>,
 ): string {
   const direct = edited[key]?.trim() ?? "";
   if (direct) return direct;
@@ -89,16 +102,19 @@ function resolveEditedOrStored(
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
     const { id } = await params;
-    const importId = parseInt(id, 10);
+    const importId = Number.parseInt(id, 10);
     if (isNaN(importId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
@@ -112,7 +128,10 @@ export async function GET(
     }
 
     // Verifică duplicat CNP + date pentru comparație (actualizare din CIM)
-    const extractedFields = JSON.parse(pending.extractedFields) as Record<string, { value: string; confidence: number }>;
+    const extractedFields = JSON.parse(pending.extractedFields) as Record<
+      string,
+      { value: string; confidence: number }
+    >;
     const cnp = extractedFields.cnp?.value ?? "";
     let duplicateEmployee = null;
 
@@ -128,8 +147,14 @@ export async function GET(
     }
 
     const [companies, countries] = await Promise.all([
-      prisma.company.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
-      prisma.country.findMany({ select: { id: true, name: true, code: true }, orderBy: { name: "asc" } }),
+      prisma.company.findMany({
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.country.findMany({
+        select: { id: true, name: true, code: true },
+        orderBy: { name: "asc" },
+      }),
     ]);
 
     return NextResponse.json({
@@ -157,7 +182,8 @@ export async function GET(
             workNorm: duplicateEmployee.workNorm,
             salaryAmount: salaryAmountToJson(duplicateEmployee.salaryAmount),
             salaryCurrency: duplicateEmployee.salaryCurrency,
-            salaryStartDate: duplicateEmployee.salaryStartDate?.toISOString() ?? null,
+            salaryStartDate:
+              duplicateEmployee.salaryStartDate?.toISOString() ?? null,
             hiredAt: duplicateEmployee.hiredAt.toISOString(),
             phone: duplicateEmployee.phone,
             email: duplicateEmployee.email,
@@ -177,17 +203,18 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
-  if (authError || !user) return authError!;
+  const planCheck = await checkPlan(request, { roles: ROLES_EMPLOYEES_RW });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
   }
 
   try {
     const { id } = await params;
-    const importId = parseInt(id, 10);
+    const importId = Number.parseInt(id, 10);
     if (isNaN(importId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }
@@ -206,8 +233,18 @@ export async function POST(
       action: "APPROVE" | "DRAFT";
     };
 
+    if (action === "APPROVE") {
+      const limitCheck = await checkCanAddEmployees(request, 1, {
+        roles: ROLES_EMPLOYEES_RW,
+      });
+      if (!limitCheck.allowed) return limitCheck.response;
+    }
+
     if (action === "DRAFT") {
-      const mergedJson = mergeExtractedWithEdited(pending.extractedFields, editedFields);
+      const mergedJson = mergeExtractedWithEdited(
+        pending.extractedFields,
+        editedFields,
+      );
       await prisma.pendingImport.update({
         where: { id: importId },
         data: { status: "DRAFT", extractedFields: mergedJson },
@@ -220,7 +257,7 @@ export async function POST(
     if (!cnp || !validateCNP(cnp)) {
       return NextResponse.json(
         { error: "CNP_INVALID", message: "CNP invalid sau lipsă" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -238,22 +275,23 @@ export async function POST(
           existingEmployeeId: existing.id,
           message: "CNP deja existent în sistem",
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
     // ─── Criptare date sensibile ─────────────────────────────────
     const cnpEncrypted = encrypt(cnp);
     const ibanRaw = editedFields.iban?.trim() ?? "";
-    const iban =
-      ibanRaw && !isExtractionPlaceholder(ibanRaw) ? ibanRaw : "";
+    const iban = ibanRaw && !isExtractionPlaceholder(ibanRaw) ? ibanRaw : "";
     const ibanEncrypted = iban ? encrypt(iban) : null;
     const ibanHash = iban ? hashSha256(iban) : null;
 
     // ─── Creează Employee ────────────────────────────────────────
-    const companyId = parseInt(editedFields.companyId ?? "1", 10);
+    const companyId = Number.parseInt(editedFields.companyId ?? "1", 10);
     const countryIdRaw = editedFields.countryId?.trim();
-    const countryIdParsed = countryIdRaw ? parseInt(countryIdRaw, 10) : NaN;
+    const countryIdParsed = countryIdRaw
+      ? Number.parseInt(countryIdRaw, 10)
+      : Number.NaN;
     const roDefault = await prisma.country.findFirst({
       where: { code: "RO" },
       select: { id: true },
@@ -261,52 +299,108 @@ export async function POST(
     const countryId =
       !Number.isNaN(countryIdParsed) && countryIdParsed > 0
         ? countryIdParsed
-        : roDefault?.id ?? null;
+        : (roDefault?.id ?? null);
 
     let storedExtracted: Record<string, unknown> = {};
     try {
-      storedExtracted = JSON.parse(pending.extractedFields || "{}") as Record<string, unknown>;
+      storedExtracted = JSON.parse(pending.extractedFields || "{}") as Record<
+        string,
+        unknown
+      >;
     } catch {
       storedExtracted = {};
     }
 
-    const employee = await prisma.employee.create({
-      data: {
-        cnp,
-        cnpEncrypted,
-        cnpHash,
-        firstName: importedOptionalName(resolveEditedOrStored("firstName", editedFields, storedExtracted)),
-        lastName: importedOptionalName(resolveEditedOrStored("lastName", editedFields, storedExtracted)),
-        seriesCI: importedOptional(editedFields.seriesCI),
-        numberCI: importedOptional(editedFields.numberCI),
-        email: importedOptional(editedFields.email),
-        phone: importedOptional(editedFields.phone),
-        iban: ibanEncrypted,
-        ibanHash,
-        bankName: importedOptional(editedFields.bankName),
-        position: importedOptional(editedFields.position),
-        address: importedOptional(editedFields.address),
-        city: importedOptional(editedFields.city),
-        ...(countryId != null ? { countryId } : {}),
-        status: "ACTIVE",
-        companyId,
-      },
+    let fileBuffer: Buffer;
+    try {
+      fileBuffer = await readImportFile(pending.filePath);
+    } catch {
+      return NextResponse.json(
+        {
+          error: "FILE_MISSING",
+          message: "Fișierul sursă al importului nu mai este disponibil",
+        },
+        { status: 400 },
+      );
+    }
+
+    const safeOriginal = sanitizeFilename(pending.fileName);
+
+    const employee = await prisma.$transaction(async (tx) => {
+      const created = await tx.employee.create({
+        data: {
+          organizationId: pending.organizationId,
+          cnp,
+          cnpEncrypted,
+          cnpHash,
+          firstName: importedOptionalName(
+            resolveEditedOrStored("firstName", editedFields, storedExtracted),
+          ),
+          lastName: importedOptionalName(
+            resolveEditedOrStored("lastName", editedFields, storedExtracted),
+          ),
+          seriesCI: importedOptional(editedFields.seriesCI),
+          numberCI: importedOptional(editedFields.numberCI),
+          email: importedOptional(editedFields.email),
+          phone: importedOptional(editedFields.phone),
+          iban: ibanEncrypted,
+          ibanHash,
+          bankName: importedOptional(editedFields.bankName),
+          position: importedOptional(editedFields.position),
+          address: importedOptional(editedFields.address),
+          city: importedOptional(editedFields.city),
+          ...(countryId != null ? { countryId } : {}),
+          status: "ACTIVE",
+          companyId,
+        },
+      });
+
+      const { relativePath } = await saveFile(
+        created.id,
+        "CONTRACT",
+        safeOriginal,
+        fileBuffer,
+      );
+
+      await tx.document.create({
+        data: {
+          organizationId: pending.organizationId,
+          employeeId: created.id,
+          type: "CONTRACT",
+          number: null,
+          fileName: safeOriginal,
+          storagePath: relativePath,
+          fileSize: fileBuffer.length,
+          mimeType: pending.mimeType,
+          status: "PENDING",
+        },
+      });
+
+      await tx.pendingImport.update({
+        where: { id: importId },
+        data: { status: "APPROVED", employeeId: created.id },
+      });
+
+      await tx.organization.update({
+        where: { id: pending.organizationId },
+        data: { employeeCount: { increment: 1 } },
+      });
+
+      return created;
     });
 
-    // ─── Marchează importul ca aprobat ──────────────────────────
-    await prisma.pendingImport.update({
-      where: { id: importId },
-      data: { status: "APPROVED", employeeId: employee.id },
-    });
-
-    // Audit log
-    await prisma.auditLog.create({
-      data: {
-        action: "CREATE",
-        entity: "Employee",
-        entityId: employee.id,
-        newValues: JSON.stringify({ source: "MANUAL_IMPORT", importId }),
-      },
+    void createSafeAuditLog({
+      action: "IMPORT_APPROVE",
+      entity: "Employee",
+      entityId: employee.id,
+      userId: user.userId,
+      userName: user.email,
+      userRole: user.role,
+      newValues: JSON.stringify({
+        source: "MANUAL_IMPORT",
+        importId,
+        documentStored: true,
+      }),
     });
 
     return NextResponse.json(
@@ -315,7 +409,7 @@ export async function POST(
         employeeId: employee.id,
         importId,
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     console.error("[IMPORT_APPROVE]", error);
@@ -327,14 +421,17 @@ export async function POST(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
 
   try {
     const { id } = await params;
-    const importId = parseInt(id, 10);
+    const importId = Number.parseInt(id, 10);
     if (isNaN(importId)) {
       return NextResponse.json({ error: "ID invalid" }, { status: 400 });
     }

@@ -3,20 +3,12 @@
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ROUTES } from "@/lib/routes";
+import { parseToIsoDateInput } from "@/lib/paymentPeriod";
 import { broadcastTimesheetHoursForPayrollSync } from "@/lib/timesheetPayrollSync";
 import type { EditTimesheet, EmployeeOption } from "@/types";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-
-function isoDateOnly(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
 
 export function TimesheetEditClient({
   timesheet,
@@ -34,10 +26,10 @@ export function TimesheetEditClient({
   const [weekNumber, setWeekNumber] = useState<number>(timesheet.weekNumber);
   const [year, setYear] = useState<number>(timesheet.year);
   const [startDate, setStartDate] = useState<string>(
-    isoDateOnly(timesheet.startDate),
+    parseToIsoDateInput(timesheet.startDate),
   );
   const [endDate, setEndDate] = useState<string>(
-    isoDateOnly(timesheet.endDate),
+    parseToIsoDateInput(timesheet.endDate),
   );
   const [hoursWorked, setHoursWorked] = useState<string>(
     String(timesheet.hoursWorked ?? ""),

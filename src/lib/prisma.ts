@@ -10,9 +10,11 @@ import "server-only";
  * `prismaBase` — client fără extensii (login, setup, migrări) unde tenant-ul nu e încă disponibil.
  */
 
+import { prisma as prismaBase } from "@/prisma/client";
 import { PrismaClient } from "@prisma/client";
 import { createSafeAuditLog, resolveAuditEntityId } from "./auditInsert";
 import { auditStorage } from "./auditContext";
+import { isPublicTenantBypassPath } from "@/middleware/tenant";
 import {
   applyTenantToArgs,
   isTenantScopedModel,
@@ -26,7 +28,6 @@ import {
 type ExtendedPrismaClient = ReturnType<typeof createPrismaClient>;
 
 const globalForPrisma = global as unknown as {
-  prismaBase: PrismaClient | undefined;
   prisma: ExtendedPrismaClient | undefined;
 };
 
@@ -89,6 +90,28 @@ const MODEL_TO_FINDER: Record<string, string> = {
   PendingImport: "pendingImport",
 };
 
+async function resolveRequestPathname(): Promise<string | null> {
+  try {
+    const { headers } = await import("next/headers");
+    const headerList = await headers();
+    const explicit = headerList.get("x-pathname");
+    if (explicit) {
+      return explicit;
+    }
+    const urlHeader = headerList.get("x-url") ?? headerList.get("x-invoke-path");
+    if (!urlHeader) {
+      return null;
+    }
+    try {
+      return new URL(urlHeader, "http://localhost").pathname;
+    } catch {
+      return urlHeader.startsWith("/") ? urlHeader : null;
+    }
+  } catch {
+    return null;
+  }
+}
+
 async function resolveTenantOrganizationIdForQuery(): Promise<string | null> {
   if (isTenantBypassActive()) {
     return null;
@@ -111,20 +134,7 @@ async function resolveTenantOrganizationIdForQuery(): Promise<string | null> {
   }
 }
 
-function createPrismaBase(): PrismaClient {
-  return new PrismaClient({
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
-        : ["error"],
-  });
-}
-
-export const prismaBase = globalForPrisma.prismaBase ?? createPrismaBase();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prismaBase = prismaBase;
-}
+export { prismaBase };
 
 function createPrismaClient() {
   const tenantExtension = {
@@ -144,6 +154,10 @@ function createPrismaClient() {
           const orgId = await resolveTenantOrganizationIdForQuery();
           if (orgId === null) {
             if (isTenantBypassActive()) {
+              return query(args);
+            }
+            const path = await resolveRequestPathname();
+            if (path && isPublicTenantBypassPath(path)) {
               return query(args);
             }
             if (isTenantScopedModel(model)) {
@@ -288,8 +302,6 @@ function createPrismaClient() {
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
+globalForPrisma.prisma = prisma;
 
-export const prismaTyped = prisma as unknown as PrismaClient;
+export const prismaTyped = prisma as unknown as typeof prismaBase;

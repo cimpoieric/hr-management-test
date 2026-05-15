@@ -1,4 +1,4 @@
-import { Employee } from "@prisma/client";
+import type { Employee } from "@prisma/client";
 
 export type DedupeAction = "CREATE" | "UPDATE" | "REVIEW";
 
@@ -12,14 +12,38 @@ export type DedupeResult =
     }
   | {
       action: "UPDATE";
-      existing: Pick<Employee, "id" | "firstName" | "lastName" | "email" | "phone" | "cnp" | "iban" | "bankName" | "address" | "city">;
+      existing: Pick<
+        Employee,
+        | "id"
+        | "firstName"
+        | "lastName"
+        | "email"
+        | "phone"
+        | "cnp"
+        | "iban"
+        | "bankName"
+        | "address"
+        | "city"
+      >;
       confidence: number;
       diff: FieldDiff[];
       message: "Datele se potrivesc peste 80% — propus UPDATE";
     }
   | {
       action: "REVIEW";
-      existing: Pick<Employee, "id" | "firstName" | "lastName" | "email" | "phone" | "cnp" | "iban" | "bankName" | "address" | "city">;
+      existing: Pick<
+        Employee,
+        | "id"
+        | "firstName"
+        | "lastName"
+        | "email"
+        | "phone"
+        | "cnp"
+        | "iban"
+        | "bankName"
+        | "address"
+        | "city"
+      >;
       confidence: number;
       diff: FieldDiff[];
       message: "CNP existent dar datele diferă semnificativ — verificare manuală necesară";
@@ -45,7 +69,7 @@ function levenshtein(a: string, b: string): number {
           Math.min(
             matrix[i - 1]![j - 1]!,
             matrix[i]![j - 1]!,
-            matrix[i - 1]![j]!
+            matrix[i - 1]![j]!,
           ) + 1;
       }
     }
@@ -63,14 +87,22 @@ function similarity(a: string, b: string): number {
 
 function computeMatchScore(
   existing: Pick<Employee, "firstName" | "lastName" | "email" | "phone">,
-  incoming: { firstName: string; lastName: string; email?: string | null; phone?: string | null }
+  incoming: {
+    firstName: string;
+    lastName: string;
+    email?: string | null;
+    phone?: string | null;
+  },
 ): number {
   const firstNameSim = similarity(existing.firstName, incoming.firstName);
   const lastNameSim = similarity(existing.lastName, incoming.lastName);
 
   const phoneSim =
     existing.phone && incoming.phone
-      ? similarity(existing.phone.replace(/\s/g, ""), incoming.phone.replace(/\s/g, ""))
+      ? similarity(
+          existing.phone.replace(/\s/g, ""),
+          incoming.phone.replace(/\s/g, ""),
+        )
       : 0.5;
 
   const emailSim =
@@ -78,12 +110,33 @@ function computeMatchScore(
       ? similarity(existing.email, incoming.email)
       : 0.5;
 
-  return firstNameSim * 0.3 + lastNameSim * 0.3 + phoneSim * 0.2 + emailSim * 0.2;
+  return (
+    firstNameSim * 0.3 + lastNameSim * 0.3 + phoneSim * 0.2 + emailSim * 0.2
+  );
 }
 
 function buildDiff(
-  existing: Pick<Employee, "firstName" | "lastName" | "email" | "phone" | "iban" | "bankName" | "address" | "city">,
-  incoming: { firstName: string; lastName: string; email?: string | null; phone?: string | null; iban?: string | null; bankName?: string | null; address?: string | null; city?: string | null }
+  existing: Pick<
+    Employee,
+    | "firstName"
+    | "lastName"
+    | "email"
+    | "phone"
+    | "iban"
+    | "bankName"
+    | "address"
+    | "city"
+  >,
+  incoming: {
+    firstName: string;
+    lastName: string;
+    email?: string | null;
+    phone?: string | null;
+    iban?: string | null;
+    bankName?: string | null;
+    address?: string | null;
+    city?: string | null;
+  },
 ): FieldDiff[] {
   const fields: { key: keyof typeof existing; label: string }[] = [
     { key: "firstName", label: "prenume" },
@@ -99,7 +152,9 @@ function buildDiff(
   return fields
     .map(({ key, label }) => {
       const oldVal = existing[key] ?? null;
-      const newVal = (incoming[key as keyof typeof incoming] as string | null | undefined) ?? null;
+      const newVal =
+        (incoming[key as keyof typeof incoming] as string | null | undefined) ??
+        null;
       if (oldVal !== newVal) {
         return { field: label, old: oldVal, new: newVal };
       }
@@ -119,7 +174,7 @@ export function dedupeEmployee(
     bankName?: string | null;
     address?: string | null;
     city?: string | null;
-  }
+  },
 ): DedupeResult {
   if (!existing) {
     return {
@@ -162,6 +217,7 @@ export function dedupeEmployee(
     existing: publicFields,
     confidence: Math.round(score * 100) / 100,
     diff,
-    message: "CNP existent dar datele diferă semnificativ — verificare manuală necesară",
+    message:
+      "CNP existent dar datele diferă semnificativ — verificare manuală necesară",
   };
 }

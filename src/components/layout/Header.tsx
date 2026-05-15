@@ -1,5 +1,6 @@
 "use client";
 
+import { PlanBadge } from "@/components/plan/PlanBadge";
 import { LanguageSelector } from "@/components/shared/LanguageSelector";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompanyLogo } from "@/hooks/useCompanyLogo";
@@ -194,6 +195,7 @@ export function Header(_props?: { user?: unknown }) {
       </div>
 
       <div className="flex items-center gap-2">
+        <PlanBadge className="hidden sm:flex" />
         <LanguageSelector />
         <button
           type="button"

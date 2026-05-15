@@ -1,28 +1,29 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
-  Filter,
-  X,
-  Search,
-  Calendar,
-  FileText,
-  Globe,
   Building2,
-  MapPin,
+  Calendar,
   ChevronDown,
   ChevronUp,
+  FileText,
+  Filter,
+  Globe,
+  MapPin,
   RotateCcw,
+  Search,
+  X,
 } from "lucide-react";
-import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
+import { useCallback, useMemo, useState } from "react";
 
 export interface FilterState {
   search: string;
   status: string[];
   company: string[];
-  /** Detașare: coduri țară (ex. NL, DE) */
+  /** Deployment: country codes (e.g. NL, DE) */
   country: string[];
-  /** Domiciliu: id-uri din tabelul Country */
+  /** Residence: Country table ids */
   employeeCountry: string[];
   expiredDocumentType: string;
   expiringSoon: boolean;
@@ -39,19 +40,6 @@ interface AdvancedFilterProps {
   companies: { id: number; name: string }[];
   countries: { id: number; name: string; code: string }[];
 }
-
-const STATUS_OPTIONS = [
-  { value: "ACTIVE", label: "Activ", color: "bg-green-500" },
-  { value: "TERMINATED", label: "Terminat", color: "bg-red-500" },
-];
-
-const DOC_TYPE_OPTIONS = [
-  { value: "", label: "— Toate documentele —" },
-  { value: "CONTRACT", label: "Contract expirat" },
-  { value: "A1", label: "A1 expirat" },
-  { value: "MEDICAL", label: "Medical expirat" },
-  { value: "ANY", label: "Orice document expirat" },
-];
 
 export const defaultFilters: FilterState = {
   search: "",
@@ -74,17 +62,53 @@ export function AdvancedFilter({
   companies,
   countries,
 }: AdvancedFilterProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
-  const update = useCallback(<K extends keyof FilterState>(key: K, value: FilterState[K]) => {
-    onChange({ ...filters, [key]: value });
-  }, [filters, onChange]);
+  const statusOptions = useMemo(
+    () => [
+      {
+        value: "ACTIVE",
+        label: t("components.advancedFilter.statusActive"),
+        color: "bg-green-500",
+      },
+      {
+        value: "TERMINATED",
+        label: t("components.advancedFilter.statusTerminated"),
+        color: "bg-red-500",
+      },
+    ],
+    [t],
+  );
+
+  const docTypeOptions = useMemo(
+    () => [
+      { value: "", label: t("components.advancedFilter.docAll") },
+      {
+        value: "CONTRACT",
+        label: t("components.advancedFilter.docContractExpired"),
+      },
+      { value: "A1", label: t("components.advancedFilter.docA1Expired") },
+      {
+        value: "MEDICAL",
+        label: t("components.advancedFilter.docMedicalExpired"),
+      },
+      { value: "ANY", label: t("components.advancedFilter.docAnyExpired") },
+    ],
+    [t],
+  );
+
+  const update = useCallback(
+    <K extends keyof FilterState>(key: K, value: FilterState[K]) => {
+      onChange({ ...filters, [key]: value });
+    },
+    [filters, onChange],
+  );
 
   function toggleArrayItem(arr: string[], item: string): string[] {
     return arr.includes(item) ? arr.filter((i) => i !== item) : [...arr, item];
   }
 
-  // Număr filtre active
   const activeCount = [
     filters.search,
     filters.status.length > 0,
@@ -100,14 +124,15 @@ export function AdvancedFilter({
 
   return (
     <div className="bg-white rounded-xl border shadow-sm">
-      {/* Header — compact */}
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
       >
         <div className="flex items-center gap-2">
           <Filter size={16} className="text-gray-500" />
-          <span className="text-sm font-medium text-gray-700">Filtre avansate</span>
+          <span className="text-sm font-medium text-gray-700">
+            {t("components.advancedFilter.title")}
+          </span>
           {activeCount > 0 && (
             <span className="text-xs bg-slate-900 text-white px-2 py-0.5 rounded-full font-medium">
               {activeCount}
@@ -133,7 +158,7 @@ export function AdvancedFilter({
               className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-600 transition-colors cursor-pointer select-none"
             >
               <RotateCcw size={12} />
-              Reset
+              {t("common.reset")}
             </span>
           )}
           {expanded ? (
@@ -144,24 +169,25 @@ export function AdvancedFilter({
         </div>
       </button>
 
-      {/* Expanded panel */}
       {expanded && (
         <div className="px-4 pb-4 border-t">
-          {/* Search */}
           <div className="mt-4">
             <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
               <Search size={12} className="inline mr-1" />
-              Căutare
+              {t("components.advancedFilter.search")}
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={filters.search}
                 onChange={(e) => update("search", e.target.value)}
-                placeholder="Nume, CNP, email, telefon..."
+                placeholder={t("components.advancedFilter.searchPlaceholder")}
                 className="w-full pl-9 pr-4 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
               />
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+              />
               {filters.search && (
                 <button
                   onClick={() => update("search", "")}
@@ -173,20 +199,26 @@ export function AdvancedFilter({
             </div>
           </div>
 
-          {/* Grid 3 coloane */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
-            {/* Status */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
-                Status
+                {t("components.advancedFilter.status")}
               </label>
               <div className="space-y-1.5">
-                {STATUS_OPTIONS.map((s) => (
-                  <label key={s.value} className="flex items-center gap-2 cursor-pointer">
+                {statusOptions.map((s) => (
+                  <label
+                    key={s.value}
+                    className="flex items-center gap-2 cursor-pointer"
+                  >
                     <input
                       type="checkbox"
                       checked={filters.status.includes(s.value)}
-                      onChange={() => update("status", toggleArrayItem(filters.status, s.value))}
+                      onChange={() =>
+                        update(
+                          "status",
+                          toggleArrayItem(filters.status, s.value),
+                        )
+                      }
                       className="rounded"
                     />
                     <span className="flex items-center gap-1.5 text-sm text-gray-700">
@@ -198,41 +230,58 @@ export function AdvancedFilter({
               </div>
             </div>
 
-            {/* Firmă */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
                 <Building2 size={12} className="inline mr-1" />
-                Firmă angajatoare
+                {t("components.advancedFilter.employerCompany")}
               </label>
               <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
                 {companies.map((c) => (
-                  <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                  <label
+                    key={c.id}
+                    className="flex items-center gap-2 cursor-pointer"
+                  >
                     <input
                       type="checkbox"
                       checked={filters.company.includes(String(c.id))}
-                      onChange={() => update("company", toggleArrayItem(filters.company, String(c.id)))}
+                      onChange={() =>
+                        update(
+                          "company",
+                          toggleArrayItem(filters.company, String(c.id)),
+                        )
+                      }
                       className="rounded"
                     />
-                    <span className="text-sm text-gray-700 truncate">{c.name}</span>
+                    <span className="text-sm text-gray-700 truncate">
+                      {c.name}
+                    </span>
                   </label>
                 ))}
               </div>
             </div>
 
-            {/* Țară domiciliu (angajat) */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
                 <Globe size={12} className="inline mr-1" />
-                Țară (domiciliu)
+                {t("components.advancedFilter.countryResidence")}
               </label>
               <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
                 {countries.map((c) => (
-                  <label key={c.id} className="flex items-center gap-2 cursor-pointer">
+                  <label
+                    key={c.id}
+                    className="flex items-center gap-2 cursor-pointer"
+                  >
                     <input
                       type="checkbox"
                       checked={filters.employeeCountry.includes(String(c.id))}
                       onChange={() =>
-                        update("employeeCountry", toggleArrayItem(filters.employeeCountry, String(c.id)))
+                        update(
+                          "employeeCountry",
+                          toggleArrayItem(
+                            filters.employeeCountry,
+                            String(c.id),
+                          ),
+                        )
                       }
                       className="rounded"
                     />
@@ -244,18 +293,22 @@ export function AdvancedFilter({
               </div>
             </div>
 
-            {/* Țară detașare */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
                 <MapPin size={12} className="inline mr-1" />
-                Țară detașare
+                {t("components.advancedFilter.countryDeployment")}
               </label>
               <div className="flex flex-wrap gap-1.5">
                 {DEPLOYMENT_COUNTRIES.slice(0, 6).map((c) => (
                   <button
                     key={c.code}
                     type="button"
-                    onClick={() => update("country", toggleArrayItem(filters.country, c.code))}
+                    onClick={() =>
+                      update(
+                        "country",
+                        toggleArrayItem(filters.country, c.code),
+                      )
+                    }
                     className={`px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
                       filters.country.includes(c.code)
                         ? "bg-slate-900 text-white"
@@ -268,19 +321,20 @@ export function AdvancedFilter({
               </div>
             </div>
 
-            {/* Documente expirate */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
                 <FileText size={12} className="inline mr-1" />
-                Documente
+                {t("components.advancedFilter.documents")}
               </label>
               <select
                 value={filters.expiredDocumentType}
                 onChange={(e) => update("expiredDocumentType", e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
               >
-                {DOC_TYPE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
+                {docTypeOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
                 ))}
               </select>
               <label className="flex items-center gap-2 mt-2 cursor-pointer">
@@ -290,15 +344,16 @@ export function AdvancedFilter({
                   onChange={(e) => update("expiringSoon", e.target.checked)}
                   className="rounded"
                 />
-                <span className="text-sm text-gray-700">Doar ce expiră curând</span>
+                <span className="text-sm text-gray-700">
+                  {t("components.advancedFilter.expiringSoonOnly")}
+                </span>
               </label>
             </div>
 
-            {/* Perioadă angajare */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
                 <Calendar size={12} className="inline mr-1" />
-                Perioadă angajare
+                {t("components.advancedFilter.hirePeriod")}
               </label>
               <div className="space-y-2">
                 <input
@@ -306,22 +361,21 @@ export function AdvancedFilter({
                   value={filters.hireDateFrom}
                   onChange={(e) => update("hireDateFrom", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border bg-white text-sm"
-                  placeholder="De la"
+                  title={t("components.advancedFilter.hireFromPlaceholder")}
                 />
                 <input
                   type="date"
                   value={filters.hireDateTo}
                   onChange={(e) => update("hireDateTo", e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border bg-white text-sm"
-                  placeholder="Până la"
+                  title={t("components.advancedFilter.hireToPlaceholder")}
                 />
               </div>
             </div>
 
-            {/* Altele */}
             <div>
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1.5">
-                Altele
+                {t("components.advancedFilter.other")}
               </label>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -331,25 +385,27 @@ export function AdvancedFilter({
                   className="rounded"
                 />
                 <span className="text-sm text-gray-700">
-                  Doar cu detașare activă
+                  {t("components.advancedFilter.activeDeploymentOnly")}
                 </span>
               </label>
             </div>
           </div>
 
-          {/* Aplică */}
           <div className="mt-4 pt-3 border-t flex items-center justify-end gap-2">
             <button
               onClick={onReset}
               className="px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
-              Resetează
+              {t("components.advancedFilter.resetFilters")}
             </button>
             <button
-              onClick={() => { onApply(); setExpanded(false); }}
+              onClick={() => {
+                onApply();
+                setExpanded(false);
+              }}
               className="px-6 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors"
             >
-              Aplică filtre
+              {t("components.advancedFilter.applyFilters")}
             </button>
           </div>
         </div>

@@ -23,7 +23,10 @@ function toNumber(amount: Decimal | null | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function applyFx(monthlyInOriginalCurrency: number, currency: string | null | undefined): number {
+function applyFx(
+  monthlyInOriginalCurrency: number,
+  currency: string | null | undefined,
+): number {
   const raw = (currency ?? "RON").trim().toUpperCase();
   const code = raw || "RON";
   const rate = FX_TO_RON[code] ?? 1;
@@ -37,7 +40,7 @@ function applyFx(monthlyInOriginalCurrency: number, currency: string | null | un
 export function equivalentMonthlyGrossToRon(
   amount: Decimal | null | undefined,
   salaryType: string | null | undefined,
-  currency: string | null | undefined
+  currency: string | null | undefined,
 ): number {
   const base = toNumber(amount);
   if (base <= 0) return 0;
@@ -53,7 +56,7 @@ export function equivalentMonthlyGrossToRon(
 /** Brut lunar deja în moneda contractului → RON (fără conversie SAPTAMANAL/ORA). */
 export function salaryMonthlyToRon(
   amount: Decimal | null | undefined,
-  currency: string | null | undefined
+  currency: string | null | undefined,
 ): number {
   if (amount == null) return 0;
   return applyFx(toNumber(amount), currency);

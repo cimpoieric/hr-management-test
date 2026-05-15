@@ -1,78 +1,38 @@
 import "server-only";
 
-import { readFile, writeFile, mkdir } from "fs/promises";
 import { join } from "path";
-import type { jsPDF } from "jspdf";
-import type { Prisma } from "@prisma/client";
-import { prismaTyped as prisma } from "@/lib/prisma";
+import { getAppSettings } from "@/lib/appSettings";
 import { sanitizeFilename } from "@/lib/documentConstants";
 import {
-  buildFluturasJsPdfDocument,
-  type FluturasPdfData,
-} from "@/lib/pdf/fluturasPdf";
-
-function toMoney(n: unknown): number {
-  const v = typeof n === "object" && n !== null && "toString" in n ? Number(String(n)) : Number(n);
-  return Number.isFinite(v) ? v : 0;
-}
-
-function week2(week: number): string {
-  return String(week).padStart(2, "0");
-}
-
-function buildRelativePdfPath(year: number, weekNumber: number, fileName: string): string {
-  return `data/payslips/${year}/${week2(weekNumber)}/${fileName}`;
-}
-
-function resolveFsPathFromRelative(relative: string): string {
-  return join(process.cwd(), ...relative.split("/"));
-}
+  mapPayslipApiResponseToPayslipData,
+  weeklyPayslipPdfBytes,
+} from "@/lib/pdf/weeklyPayslipPdf";
+import { clampCalendarMonth } from "@/lib/paymentPeriod";
+import { prismaTyped as prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+import { mkdir, readFile, writeFile } from "fs/promises";
 
 const payslipPdfInclude = {
-  employee: { select: { id: true, firstName: true, lastName: true, position: true } as const },
+  employee: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      position: true,
+    } as const,
+  },
   company: { select: { id: true, name: true, address: true } as const },
   timesheet: { select: { id: true, hoursWorked: true } as const },
   items: { orderBy: { sortOrder: "asc" as const } },
 } as const;
 
-/** Shape returned by findUnique + payslipPdfInclude */
-export type PayslipForPdf = Prisma.PayslipGetPayload<{ include: typeof payslipPdfInclude }>;
-
-export function payslipToFluturasPdfData(payslip: PayslipForPdf): FluturasPdfData {
-  const currency = (payslip.currency || "EUR").toUpperCase();
-  const netSalaryItem = payslip.items.find((i) => i.type === "NET_SALARY");
-  const holidayMoneyItem = payslip.items.find((i) => i.type === "HOLIDAY_MONEY");
-  const travelAllowanceItem = payslip.items.find((i) => i.type === "TRAVEL_ALLOWANCE");
-
-  const empName = `${String(payslip.employee.lastName ?? "").trim()} ${String(
-    payslip.employee.firstName ?? ""
-  ).trim()}`.trim();
-
-  return {
-    angajatNume: empName || "—",
-    angajatId: String(payslip.employeeId),
-    pozitie: String(payslip.employee.position ?? "—"),
-    saptamana: payslip.weekNumber,
-    an: payslip.year,
-    perioadaStart: new Date(payslip.periodStart).toLocaleDateString("ro-RO"),
-    perioadaEnd: new Date(payslip.periodEnd).toLocaleDateString("ro-RO"),
-    oreLucrate: Number(payslip.timesheet.hoursWorked ?? 0),
-    salariuNet: toMoney(netSalaryItem?.amount ?? 0),
-    diurna: toMoney(travelAllowanceItem?.amount ?? 0),
-    totalPlatit: toMoney(payslip.totalPaid),
-    holidayMoney: toMoney(holidayMoneyItem?.amount ?? 0),
-    moneda: currency,
-    numeFirma: payslip.company.name ?? undefined,
-    adresaFirma: payslip.company.address ?? undefined,
-  };
-}
-
-/**
- * Construiește PDF-ul fluturașului (doar date salariale / firmă — fără subiect sau mesaj de email).
- */
-export function buildPayslipPdfDocument(payslip: PayslipForPdf): jsPDF {
-  return buildFluturasJsPdfDocument(payslipToFluturasPdfData(payslip));
-}
+export type PayslipForPdf = Prisma.PayslipGetPayload<{
+  include: typeof payslipPdfInclude;
+}> & {
+  type?: string | null;
+  month?: number | null;
+  monthYear?: number | null;
+};
 
 export type GeneratedPayslipPdf = {
   pdfBytes: Uint8Array;
@@ -80,11 +40,103 @@ export type GeneratedPayslipPdf = {
   fileName: string;
 };
 
-/**
- * Buffer PDF pentru atașament la email: **același conținut** ca fluturașul standard (fără text personalizat).
- */
+function isMonthlyPayslip(p: {
+  type?: string | null;
+  month?: number | null;
+  weekNumber?: number;
+}): boolean {
+  if (p.type === "monthly") return true;
+  return p.month != null && p.month > 0;
+}
+
+/** Folder segment under data/payslips/{yearDir}/{periodDir}/ */
+function buildPayslipStorageDirs(payslip: {
+  type?: string | null;
+  year: number;
+  weekNumber: number;
+  month?: number | null;
+  monthYear?: number | null;
+}): { yearDir: string; periodDir: string } {
+  if (isMonthlyPayslip(payslip)) {
+    const y = payslip.monthYear ?? payslip.year;
+    const m = clampCalendarMonth(payslip.month ?? 1);
+    return {
+      yearDir: String(y),
+      periodDir: `M${String(m).padStart(2, "0")}`,
+    };
+  }
+  const w = Math.min(53, Math.max(1, payslip.weekNumber || 1));
+  return {
+    yearDir: String(payslip.year),
+    periodDir: `W${String(w).padStart(2, "0")}`,
+  };
+}
+
+function buildRelativePdfPath(
+  payslip: {
+    type?: string | null;
+    year: number;
+    weekNumber: number;
+    month?: number | null;
+    monthYear?: number | null;
+  },
+  fileName: string,
+): string {
+  const { yearDir, periodDir } = buildPayslipStorageDirs(payslip);
+  return `data/payslips/${yearDir}/${periodDir}/${fileName}`;
+}
+
+function resolveFsPathFromRelative(relative: string): string {
+  return join(process.cwd(), ...relative.split("/"));
+}
+
+function payslipEmployeeFileName(payslip: PayslipForPdf): string {
+  const empName = `${String(payslip.employee.lastName ?? "").trim()} ${String(
+    payslip.employee.firstName ?? "",
+  ).trim()}`.trim();
+  const safeName =
+    sanitizeFilename(empName || `employee_${payslip.employeeId}`) ||
+    `employee_${payslip.employeeId}`;
+  return `${safeName}.pdf`;
+}
+
+function canPersistPayslipPdfToDisk(): boolean {
+  return process.env.VERCEL !== "1";
+}
+
+async function renderPayslipPdfBytes(
+  payslip: PayslipForPdf,
+): Promise<Uint8Array> {
+  const settings = await getAppSettings(payslip.organizationId);
+  return weeklyPayslipPdfBytes(
+    mapPayslipApiResponseToPayslipData(
+      {
+        type: payslip.type,
+        employeeId: payslip.employeeId,
+        weekNumber: payslip.weekNumber,
+        year: payslip.year,
+        month: payslip.month,
+        monthYear: payslip.monthYear,
+        periodStart: payslip.periodStart,
+        periodEnd: payslip.periodEnd,
+        netTotal: payslip.netTotal,
+        totalPaid: payslip.totalPaid,
+        employee: payslip.employee,
+        company: payslip.company,
+        timesheet: payslip.timesheet,
+        items: payslip.items,
+      },
+      {
+        companyName: settings.companyName,
+        companyAddress: settings.companyAddress,
+      },
+    ),
+  );
+}
+
+/** Email attachments: always in-memory (Vercel has no writable data/). */
 export async function buildPayslipPdfBufferForEmail(
-  payslipId: number
+  payslipId: number,
 ): Promise<{ buffer: Buffer; fileName: string }> {
   const payslip = await prisma.payslip.findUnique({
     where: { id: payslipId },
@@ -95,29 +147,25 @@ export async function buildPayslipPdfBufferForEmail(
     throw new Error("Payslip not found");
   }
 
-  if (payslip.pdfPath) {
+  if (canPersistPayslipPdfToDisk() && payslip.pdfPath) {
     try {
       const buf = await readFile(resolveFsPathFromRelative(payslip.pdfPath));
-      const empName = `${String(payslip.employee.lastName ?? "").trim()} ${String(
-        payslip.employee.firstName ?? ""
-      ).trim()}`.trim();
-      const safeName =
-        sanitizeFilename(empName || `employee_${payslip.employeeId}`) || `employee_${payslip.employeeId}`;
-      return { buffer: Buffer.from(buf), fileName: `${safeName}.pdf` };
+      return { buffer: Buffer.from(buf), fileName: payslipEmployeeFileName(payslip) };
     } catch {
-      // generează mai jos
+      // generate in memory below
     }
   }
 
-  const generated = await generatePayslipPdf(payslipId);
-  return { buffer: Buffer.from(generated.pdfBytes), fileName: generated.fileName };
+  const pdfBytes = await renderPayslipPdfBytes(payslip);
+  return {
+    buffer: Buffer.from(pdfBytes),
+    fileName: payslipEmployeeFileName(payslip),
+  };
 }
 
-/**
- * Generează PDF-ul unui fluturaș, îl salvează pe disc și actualizează `pdfPath` + `pdfGeneratedAt`.
- * Dacă `pdfPath` există și fișierul e prezent, returnează fișierul existent.
- */
-export async function generatePayslipPdf(payslipId: number): Promise<GeneratedPayslipPdf> {
+export async function generatePayslipPdf(
+  payslipId: number,
+): Promise<GeneratedPayslipPdf> {
   const payslip = await prisma.payslip.findUnique({
     where: { id: payslipId },
     include: payslipPdfInclude,
@@ -127,42 +175,39 @@ export async function generatePayslipPdf(payslipId: number): Promise<GeneratedPa
     throw new Error("Payslip not found");
   }
 
-  if (payslip.pdfPath) {
+  const fileName = payslipEmployeeFileName(payslip);
+
+  if (canPersistPayslipPdfToDisk() && payslip.pdfPath) {
     try {
       const buf = await readFile(resolveFsPathFromRelative(payslip.pdfPath));
       return {
         pdfBytes: new Uint8Array(buf),
         relativePath: payslip.pdfPath,
-        fileName: `payslip-${payslip.id}.pdf`,
+        fileName,
       };
     } catch {
       // fallthrough
     }
   }
 
-  const empName = `${String(payslip.employee.lastName ?? "").trim()} ${String(
-    payslip.employee.firstName ?? ""
-  ).trim()}`.trim();
-  const safeName =
-    sanitizeFilename(empName || `employee_${payslip.employeeId}`) || `employee_${payslip.employeeId}`;
-  const fileName = `${safeName}.pdf`;
+  const pdfBytes = await renderPayslipPdfBytes(payslip);
+  const relativePath = buildRelativePdfPath(payslip, fileName);
 
-  const relativePath = buildRelativePdfPath(payslip.year, payslip.weekNumber, fileName);
-  const fsPath = resolveFsPathFromRelative(relativePath);
+  if (canPersistPayslipPdfToDisk()) {
+    const { yearDir, periodDir } = buildPayslipStorageDirs(payslip);
+    const fsPath = resolveFsPathFromRelative(relativePath);
+    await mkdir(
+      join(process.cwd(), "data", "payslips", yearDir, periodDir),
+      { recursive: true },
+    );
+    await writeFile(fsPath, Buffer.from(pdfBytes));
 
-  await mkdir(join(process.cwd(), "data", "payslips", String(payslip.year), week2(payslip.weekNumber)), {
-    recursive: true,
-  });
-
-  const doc = buildPayslipPdfDocument(payslip);
-  const pdfBytes = new Uint8Array(doc.output("arraybuffer"));
-  await writeFile(fsPath, Buffer.from(pdfBytes));
-
-  await prisma.payslip.update({
-    where: { id: payslip.id },
-    data: { pdfPath: relativePath, pdfGeneratedAt: new Date() },
-    select: { id: true },
-  });
+    await prisma.payslip.update({
+      where: { id: payslip.id },
+      data: { pdfPath: relativePath, pdfGeneratedAt: new Date() },
+      select: { id: true },
+    });
+  }
 
   return { pdfBytes, relativePath, fileName };
 }

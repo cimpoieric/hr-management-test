@@ -5,14 +5,17 @@
  * Query params: status, source, search, limit, offset.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
@@ -21,14 +24,19 @@ export async function GET(request: NextRequest) {
     const statusRaw = searchParams.get("status");
     const status = statusRaw?.trim() ? statusRaw.trim().toUpperCase() : null;
     const source = searchParams.get("source");
-    const limit = Math.min(100, parseInt(searchParams.get("limit") ?? "50", 10));
-    const offset = parseInt(searchParams.get("offset") ?? "0", 10);
+    const limit = Math.min(
+      100,
+      Number.parseInt(searchParams.get("limit") ?? "50", 10),
+    );
+    const offset = Number.parseInt(searchParams.get("offset") ?? "0", 10);
 
     const where: Record<string, unknown> = {};
 
     if (
       status &&
-      ["PENDING", "APPROVED", "REJECTED", "DRAFT", "COMPLETED_UPDATE"].includes(status)
+      ["PENDING", "APPROVED", "REJECTED", "DRAFT", "COMPLETED_UPDATE"].includes(
+        status,
+      )
     ) {
       where.status = status;
     }

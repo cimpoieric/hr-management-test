@@ -1,5 +1,6 @@
 import { join } from "path";
 import { requireRole } from "@/lib/auth";
+import { electronDesktopOnlyResponse } from "@/lib/electronMode";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { writeFile } from "fs/promises";
 import { type NextRequest, NextResponse } from "next/server";
@@ -7,6 +8,11 @@ import { type NextRequest, NextResponse } from "next/server";
 const DB_PATH = join(process.cwd(), "prisma", "dev.db");
 
 export async function POST(request: NextRequest) {
+  const blocked = electronDesktopOnlyResponse(
+    "Importul local SQLite este disponibil doar în aplicația desktop.",
+  );
+  if (blocked) return blocked;
+
   const { user, response: authError } = await requireRole(
     request,
     ROLES_SETTINGS_ADMIN,

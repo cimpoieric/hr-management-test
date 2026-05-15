@@ -34,7 +34,7 @@ export async function GET(
         employee: {
           select: { id: true, firstName: true, lastName: true, position: true },
         },
-        company: { select: { id: true, name: true } },
+        company: { select: { id: true, name: true, address: true } },
         timesheet: {
           select: {
             id: true,

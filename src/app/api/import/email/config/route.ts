@@ -3,9 +3,10 @@
  * PUT  /api/import/email/config  — Salvează config IMAP (doar ADMIN)
  */
 
-import { NextRequest, NextResponse } from "next/server";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
+import { type NextRequest, NextResponse } from "next/server";
 
 // Keys pentru SystemConfig
 const CONFIG_KEYS = {
@@ -23,7 +24,10 @@ const CONFIG_KEYS = {
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
@@ -31,7 +35,13 @@ export async function GET(request: NextRequest) {
     const configs = await prisma.systemConfig.findMany({
       where: {
         key: {
-          in: [CONFIG_KEYS.host, CONFIG_KEYS.port, CONFIG_KEYS.user, CONFIG_KEYS.tls, CONFIG_KEYS.cronMinutes],
+          in: [
+            CONFIG_KEYS.host,
+            CONFIG_KEYS.port,
+            CONFIG_KEYS.user,
+            CONFIG_KEYS.tls,
+            CONFIG_KEYS.cronMinutes,
+          ],
         },
       },
     });
@@ -44,11 +54,19 @@ export async function GET(request: NextRequest) {
     // Fallback la .env
     const result = {
       host: dbValues[CONFIG_KEYS.host] ?? process.env.IMAP_HOST ?? "",
-      port: parseInt(dbValues[CONFIG_KEYS.port] ?? process.env.IMAP_PORT ?? "993", 10),
+      port: Number.parseInt(
+        dbValues[CONFIG_KEYS.port] ?? process.env.IMAP_PORT ?? "993",
+        10,
+      ),
       user: dbValues[CONFIG_KEYS.user] ?? process.env.IMAP_USER ?? "",
       // Password NU e returnat niciodată
-      tls: (dbValues[CONFIG_KEYS.tls] ?? process.env.IMAP_TLS ?? "true") === "true",
-      cronMinutes: parseInt(dbValues[CONFIG_KEYS.cronMinutes] ?? "15", 10),
+      tls:
+        (dbValues[CONFIG_KEYS.tls] ?? process.env.IMAP_TLS ?? "true") ===
+        "true",
+      cronMinutes: Number.parseInt(
+        dbValues[CONFIG_KEYS.cronMinutes] ?? "15",
+        10,
+      ),
     };
 
     return NextResponse.json(result, { status: 200 });
@@ -63,7 +81,10 @@ export async function GET(request: NextRequest) {
  * Testează conexiunea înainte de salvare.
  */
 export async function PUT(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
 
   try {
@@ -73,7 +94,7 @@ export async function PUT(request: NextRequest) {
     if (!host || !imapUser) {
       return NextResponse.json(
         { error: "Host și user sunt obligatorii" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -93,8 +114,10 @@ export async function PUT(request: NextRequest) {
         await testClient.logout();
       } catch {
         return NextResponse.json(
-          { error: "Test conexiune eșuat. Verifică host, port, user și parola." },
-          { status: 400 }
+          {
+            error: "Test conexiune eșuat. Verifică host, port, user și parola.",
+          },
+          { status: 400 },
         );
       }
     }
@@ -121,7 +144,10 @@ export async function PUT(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ message: "Configurație salvată" }, { status: 200 });
+    return NextResponse.json(
+      { message: "Configurație salvată" },
+      { status: 200 },
+    );
   } catch (error) {
     console.error("[EMAIL_CONFIG_PUT]", error);
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });

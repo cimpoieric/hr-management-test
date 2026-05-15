@@ -1,65 +1,55 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
-import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 import {
-  Search,
+  AdvancedFilter,
+  type FilterState,
+  defaultFilters,
+} from "@/components/filters/AdvancedFilter";
+import { BulkSelectionBar } from "@/components/tables/BulkSelection";
+import {
+  DataEmptyState,
+  DataErrorState,
+  EmployeeTableSkeletonBody,
+} from "@/components/shared/DataFetchStates";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/hooks/useAuth";
+import { useTranslation } from "@/hooks/useTranslation";
+import type { EmployeeKpiStats } from "@/lib/employeeStats";
+import { ROUTES } from "@/lib/routes";
+import type { TFunction } from "i18next";
+import {
+  Building2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  ChevronDown,
   Eye,
-  Pencil,
-  Trash2,
-  Building2,
   FileText,
-  MapPin,
   Filter,
+  MapPin,
+  Pencil,
+  Search,
+  Trash,
+  Trash2,
+  Users,
   X,
 } from "lucide-react";
-import { AdvancedFilter, defaultFilters, type FilterState } from "@/components/filters/AdvancedFilter";
-import { BulkSelectionBar } from "@/components/tables/BulkSelection";
-import type { EmployeeKpiStats } from "@/lib/employeeStats";
-import { useAuth } from "@/hooks/useAuth";
-import { PermissionGuard } from "@/components/auth/PermissionGuard";
-
-interface Employee {
-  id: number;
-  firstName: string;
-  lastName: string;
-  cnp: string;
-  seriesCI?: string | null;
-  numberCI?: string | null;
-  email: string | null;
-  phone: string | null;
-  position: string | null;
-  status: string;
-  address?: string | null;
-  city: string | null;
-  countryId: number | null;
-  country: { id: number; name: string; code: string } | null;
-  company: { id: number; name: string } | null;
-  documentCount: number;
-  deploymentCount: number;
-  createdAt: string;
-  hiredAt: string | null;
-  bankName?: string | null;
-  salaryType?: "LUNAR" | "SAPTAMANAL" | "ORA" | null;
-  salaryAmount?: number | null;
-  salaryCurrency?: string | null;
-}
-
-interface Company {
-  id: number;
-  name: string;
-}
-
-interface CountryOpt {
-  id: number;
-  name: string;
-  code: string;
-}
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
+import type { CompanyOption, CountryOption, EmployeeListApiRow } from "@/types";
 
 function statusesEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -68,30 +58,34 @@ function statusesEqual(a: string[], b: string[]): boolean {
   return sa.every((v, i) => v === sb[i]);
 }
 
-function salaryTypePresetLabel(code: string): string {
+function salaryTypePresetLabel(code: string, t: TFunction): string {
   switch (code) {
     case "LUNAR":
-      return "Plată lunară (LUNAR)";
+      return t("components.employeeTable.salaryMonthly");
     case "SAPTAMANAL":
-      return "Plată săptămânală (SAPTAMANAL)";
+      return t("components.employeeTable.salaryWeekly");
     case "ORA":
-      return "Plată pe oră (ORA)";
+      return t("components.employeeTable.salaryHourly");
     default:
       return code;
   }
 }
 
-function statusPresetLabel(statuses: string[]): string {
-  if (statuses.length === 1 && statuses[0] === "ACTIVE") return "Doar activi (ACTIVE)";
-  if (statuses.length === 1 && statuses[0] === "TERMINATED") return "Doar terminați (TERMINATED)";
-  return `Status: ${statuses.join(", ")}`;
+function statusPresetLabel(statuses: string[], t: TFunction): string {
+  if (statuses.length === 1 && statuses[0] === "ACTIVE")
+    return t("components.employeeTable.statusChipActiveOnly");
+  if (statuses.length === 1 && statuses[0] === "TERMINATED")
+    return t("components.employeeTable.statusChipTerminatedOnly");
+  return t("components.employeeTable.statusChipPrefix", {
+    list: statuses.join(", "),
+  });
 }
 
 interface EmployeeTableProps {
-  initialData?: Employee[];
+  initialData?: EmployeeListApiRow[];
   initialTotal?: number;
-  companies?: Company[];
-  countries?: CountryOpt[];
+  companies?: CompanyOption[];
+  countries?: CountryOption[];
   showAdvancedFilters?: boolean;
   showBulkActions?: boolean;
   /** KPI din aceleași funcții ca panoul (fără filtre pe listă). */
@@ -110,18 +104,26 @@ export function EmployeeTable({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { can } = useAuth();
+  const { t, i18n } = useTranslation();
+  const numberLocale = i18n.language?.startsWith("ro") ? "ro-RO" : "en-US";
   const presetStatusFromUrl = searchParams.get("status");
   const presetSalaryTypeFromUrl = searchParams.get("salaryType");
 
   // ── State ──
-  const [employees, setEmployees] = useState<Employee[]>(initialData);
+  const [employees, setEmployees] = useState<EmployeeListApiRow[]>(initialData);
   const [loading, setLoading] = useState(initialData.length === 0);
+  const [loadError, setLoadError] = useState(false);
   const [total, setTotal] = useState(initialTotal);
   const [page, setPage] = useState(1);
   const [limit] = useState(15);
   const [sortBy, setSortBy] = useState("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [permanentDeleteOpen, setPermanentDeleteOpen] = useState(false);
+  const [employeeIdPermanentDelete, setEmployeeIdPermanentDelete] = useState<
+    number | null
+  >(null);
+  const [permanentDeleting, setPermanentDeleting] = useState(false);
 
   // Advanced filters
   const [filters, setFilters] = useState<FilterState>(() => ({
@@ -135,7 +137,9 @@ export function EmployeeTable({
   }));
   const [salaryTypeQuickFilter, setSalaryTypeQuickFilter] = useState(() => {
     const normalized = (presetSalaryTypeFromUrl ?? "").trim().toUpperCase();
-    return normalized === "LUNAR" || normalized === "SAPTAMANAL" || normalized === "ORA"
+    return normalized === "LUNAR" ||
+      normalized === "SAPTAMANAL" ||
+      normalized === "ORA"
       ? normalized
       : "";
   });
@@ -145,7 +149,7 @@ export function EmployeeTable({
     (presetStatusFromUrl ?? "")
       .split(",")
       .map((s) => s.trim().toUpperCase())
-      .filter((s) => s === "ACTIVE" || s === "TERMINATED")
+      .filter((s) => s === "ACTIVE" || s === "TERMINATED"),
   );
 
   const showStatusPresetChip =
@@ -158,9 +162,11 @@ export function EmployeeTable({
       if (options.removeStatus) next.delete("status");
       if (options.removeSalaryType) next.delete("salaryType");
       const q = next.toString();
-      router.replace(q ? `/angajati?${q}` : "/angajati", { scroll: false });
+      router.replace(q ? `${ROUTES.employees}?${q}` : ROUTES.employees, {
+        scroll: false,
+      });
     },
-    [router]
+    [router],
   );
 
   const totalPages = Math.ceil(total / limit);
@@ -174,12 +180,16 @@ export function EmployeeTable({
     params.set("sortOrder", sortOrder);
 
     if (filters.search) params.set("search", filters.search);
-    if (filters.status.length > 0) params.set("status", filters.status.join(","));
-    if (filters.company.length > 0) params.set("company", filters.company.join(","));
-    if (filters.country.length > 0) params.set("country", filters.country.join(","));
+    if (filters.status.length > 0)
+      params.set("status", filters.status.join(","));
+    if (filters.company.length > 0)
+      params.set("company", filters.company.join(","));
+    if (filters.country.length > 0)
+      params.set("country", filters.country.join(","));
     if (filters.employeeCountry.length > 0)
       params.set("employeeCountry", filters.employeeCountry.join(","));
-    if (filters.expiredDocumentType) params.set("expiredDocumentType", filters.expiredDocumentType);
+    if (filters.expiredDocumentType)
+      params.set("expiredDocumentType", filters.expiredDocumentType);
     if (filters.expiringSoon) params.set("expiringSoon", "true");
     if (filters.hireDateFrom) params.set("hireDateFrom", filters.hireDateFrom);
     if (filters.hireDateTo) params.set("hireDateTo", filters.hireDateTo);
@@ -192,12 +202,13 @@ export function EmployeeTable({
   // ── Fetch employees ──
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
+    setLoadError(false);
     try {
       const params = buildParams();
       const res = await fetch(`/api/employees?${params.toString()}`, {
         cache: "no-store",
       });
-      if (!res.ok) throw new Error("Eroare fetch");
+      if (!res.ok) throw new Error("fetch failed");
 
       const data = await res.json();
       setEmployees(data.data ?? []);
@@ -205,8 +216,7 @@ export function EmployeeTable({
       // Reset selection on new data fetch
       setSelectedIds(new Set());
     } catch {
-      setEmployees([]);
-      setTotal(0);
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -217,7 +227,7 @@ export function EmployeeTable({
     if (initialData.length === 0 || filtersApplied) {
       fetchEmployees();
     }
-  }, [fetchEmployees, initialData.length]);
+  }, [fetchEmployees, initialData.length, filtersApplied]);
 
   // ── Sort ──
   function toggleSort(field: string) {
@@ -256,20 +266,58 @@ export function EmployeeTable({
     setSelectedIds(new Set());
   }
 
-  // ── Delete ──
-  async function handleDelete(id: number) {
-    // UI hidden via PermissionGuard; backend enforces too.
-    if (!confirm("Ești sigur că vrei să ștergi acest angajat?")) return;
+  // ── Soft delete (status TERMINATED) ──
+  async function handleSoftDelete(id: number) {
+    if (!confirm(t("components.employeeTable.confirmSoftTerminate"))) return;
     try {
-      const res = await fetch(`/api/employees/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/employees/${id}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
       if (res.ok) {
+        toast.success(t("components.toast.employeeMarkedTerminated"));
         fetchEmployees();
       } else {
-        const data = await res.json();
-        alert(data.error ?? "Eroare la ștergere");
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(data.error ?? t("components.toast.employeeTerminateError"));
       }
     } catch {
-      alert("Eroare de rețea");
+      toast.error(t("components.toast.networkError"));
+    }
+  }
+
+  function openPermanentDeleteDialog(id: number) {
+    setEmployeeIdPermanentDelete(id);
+    setPermanentDeleteOpen(true);
+  }
+
+  async function handleConfirmPermanentDelete() {
+    if (employeeIdPermanentDelete == null) return;
+    setPermanentDeleting(true);
+    try {
+      const res = await fetch(
+        `/api/employees/${employeeIdPermanentDelete}?permanent=true`,
+        { method: "DELETE", credentials: "same-origin" },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
+        message?: string;
+        error?: string;
+      };
+      if (res.ok && data.success) {
+        toast.success(t("components.employeeTable.permanentDeleteSuccess"));
+        setPermanentDeleteOpen(false);
+        setEmployeeIdPermanentDelete(null);
+        fetchEmployees();
+        return;
+      }
+      toast.error(
+        data.error ?? t("components.toast.employeePermanentDeleteFail"),
+      );
+    } catch {
+      toast.error(t("components.toast.networkError"));
+    } finally {
+      setPermanentDeleting(false);
     }
   }
 
@@ -285,17 +333,90 @@ export function EmployeeTable({
     setSalaryTypeQuickFilter("");
     setFiltersApplied(false);
     setPage(1);
-    router.replace("/angajati", { scroll: false });
+    router.replace(ROUTES.employees, { scroll: false });
   }
 
   const SortIcon = ({ field }: { field: string }) => {
-    if (sortBy !== field) return <span className="inline-block w-4 shrink-0" aria-hidden />;
+    if (sortBy !== field)
+      return <span className="inline-block w-4 shrink-0" aria-hidden />;
     return sortOrder === "asc" ? (
       <ChevronUp size={14} className="shrink-0" aria-hidden />
     ) : (
       <ChevronDown size={14} className="shrink-0" aria-hidden />
     );
   };
+
+  type EmployeeTableColumnKey =
+    | "lastName"
+    | "cnp"
+    | "company"
+    | "position"
+    | "salaryType"
+    | "salaryAmount"
+    | "salaryCurrency"
+    | "status"
+    | "documents"
+    | "deployments";
+
+  const tableColumns: {
+    key: EmployeeTableColumnKey;
+    label: string;
+    thClass: string;
+  }[] = useMemo(
+    () => [
+      {
+        key: "lastName",
+        label: t("components.employeeTable.colLastName"),
+        thClass: "w-[15%] min-w-0",
+      },
+      {
+        key: "cnp",
+        label: t("components.employeeTable.colCnp"),
+        thClass: "w-[9%] min-w-0 max-2xl:w-[8%]",
+      },
+      {
+        key: "company",
+        label: t("components.employeeTable.colCompany"),
+        thClass: "w-[14%] min-w-0",
+      },
+      {
+        key: "position",
+        label: t("components.employeeTable.colPosition"),
+        thClass: "w-[11%] min-w-0 max-2xl:w-[10%]",
+      },
+      {
+        key: "salaryType",
+        label: t("components.employeeTable.colSalaryType"),
+        thClass: "w-[8%] min-w-0",
+      },
+      {
+        key: "salaryAmount",
+        label: t("components.employeeTable.colAmount"),
+        thClass: "w-[9%] min-w-0",
+      },
+      {
+        key: "salaryCurrency",
+        label: t("components.employeeTable.colCurrency"),
+        thClass: "w-[5%] min-w-0",
+      },
+      {
+        key: "status",
+        label: t("components.employeeTable.colStatus"),
+        thClass: "w-[8%] min-w-0",
+      },
+      {
+        key: "documents",
+        label: t("components.employeeTable.colDocuments"),
+        thClass: "w-[5%] min-w-0",
+      },
+      {
+        key: "deployments",
+        label: t("components.employeeTable.colDeployments"),
+        thClass: "w-[5%] min-w-0",
+      },
+    ],
+    [t],
+  );
 
   // ── Active filter count ──
   const activeFilterCount = [
@@ -327,14 +448,19 @@ export function EmployeeTable({
 
       {canonicalKpi && (
         <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-          <span className="font-semibold text-slate-800">KPI (ca în panou de control):</span>{" "}
-          {canonicalKpi.totalEmployees} angajați în total, {canonicalKpi.activeEmployees} activi, cost
-          lunar estimat{" "}
+          <span className="font-semibold text-slate-800">
+            {t("components.employeeTable.kpiIntro")}
+          </span>{" "}
+          {t("components.employeeTable.kpiLinePart1", {
+            total: canonicalKpi.totalEmployees,
+          })}{" "}
+          {t("components.employeeTable.kpiLinePart2", {
+            active: canonicalKpi.activeEmployees,
+          })}{" "}
           <span className="font-mono font-medium tabular-nums">
-            {canonicalKpi.monthlySalaryCostRon.toLocaleString("ro-RO")} RON
+            {canonicalKpi.monthlySalaryCostRon.toLocaleString(numberLocale)} RON
           </span>
-          . Numărul „rezultate” de mai jos respectă filtrele; fără filtre, coincide cu totalul din
-          KPI.
+          {t("components.employeeTable.kpiLinePart3")}
         </p>
       )}
 
@@ -349,8 +475,10 @@ export function EmployeeTable({
             <input
               type="text"
               value={filters.search}
-              onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-              placeholder="Caută după nume, email sau CNP..."
+              onChange={(e) =>
+                setFilters((f) => ({ ...f, search: e.target.value }))
+              }
+              placeholder={t("components.employeeTable.searchPlaceholder")}
               className="w-full pl-9 pr-4 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
             />
             {filters.search && (
@@ -375,9 +503,15 @@ export function EmployeeTable({
               }
               className="px-3 py-2 rounded-lg border bg-white text-sm focus:outline-none focus:ring-2 focus:ring-slate-950"
             >
-              <option value="">Toate statusurile</option>
-              <option value="ACTIVE">Activi</option>
-              <option value="TERMINATED">Terminați</option>
+              <option value="">
+                {t("components.employeeTable.allStatuses")}
+              </option>
+              <option value="ACTIVE">
+                {t("components.employeeTable.statusActiveOption")}
+              </option>
+              <option value="TERMINATED">
+                {t("components.employeeTable.statusTerminatedOption")}
+              </option>
             </select>
           </div>
         </div>
@@ -385,11 +519,15 @@ export function EmployeeTable({
 
       {(salaryTypeQuickFilter || showStatusPresetChip) && (
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2.5 text-sm">
-          <span className="text-slate-600 font-medium shrink-0">Filtre din link:</span>
+          <span className="text-slate-600 font-medium shrink-0">
+            {t("components.employeeTable.presetFiltersFromLink")}
+          </span>
           {showStatusPresetChip && (
             <button
               type="button"
-              aria-label={`Elimină filtrul de status: ${statusPresetLabel(filters.status)}`}
+              aria-label={t("components.employeeTable.removeStatusFilterAria", {
+                label: statusPresetLabel(filters.status, t),
+              })}
               onClick={() => {
                 setFilters((f) => ({ ...f, status: defaultFilters.status }));
                 syncUrlAfterPresetChange({ removeStatus: true });
@@ -397,14 +535,16 @@ export function EmployeeTable({
               }}
               className="inline-flex items-center gap-1.5 rounded-full bg-white text-slate-800 border border-slate-200 px-3 py-1 text-xs font-medium shadow-sm hover:bg-slate-50"
             >
-              {statusPresetLabel(filters.status)}
+              {statusPresetLabel(filters.status, t)}
               <X size={14} className="shrink-0 text-slate-500" aria-hidden />
             </button>
           )}
           {salaryTypeQuickFilter && (
             <button
               type="button"
-              aria-label={`Elimină filtrul tip plată: ${salaryTypePresetLabel(salaryTypeQuickFilter)}`}
+              aria-label={t("components.employeeTable.removeSalaryFilterAria", {
+                label: salaryTypePresetLabel(salaryTypeQuickFilter, t),
+              })}
               onClick={() => {
                 setSalaryTypeQuickFilter("");
                 syncUrlAfterPresetChange({ removeSalaryType: true });
@@ -412,7 +552,7 @@ export function EmployeeTable({
               }}
               className="inline-flex items-center gap-1.5 rounded-full bg-white text-slate-800 border border-slate-200 px-3 py-1 text-xs font-medium shadow-sm hover:bg-slate-50"
             >
-              {salaryTypePresetLabel(salaryTypeQuickFilter)}
+              {salaryTypePresetLabel(salaryTypeQuickFilter, t)}
               <X size={14} className="shrink-0 text-slate-500" aria-hidden />
             </button>
           )}
@@ -432,16 +572,24 @@ export function EmployeeTable({
       {/* Results info + active filters badge */}
       <div className="flex items-center justify-between text-sm">
         <span className="text-gray-500">
-          {loading ? "Se încarcă..." : `${total} rezultate`}
+          {loading
+            ? t("common.loading")
+            : loadError
+              ? t("components.dataFetchStates.loadFailed")
+              : t("components.employeeTable.resultsCount", { count: total })}
           {activeFilterCount > 0 && (
             <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">
-              {activeFilterCount} filtre active
+              {t("components.employeeTable.activeFiltersBadge", {
+                count: activeFilterCount,
+              })}
             </span>
           )}
         </span>
         {selectedIds.size > 0 && (
           <span className="text-slate-600 bg-slate-100 px-3 py-1 rounded-lg text-sm">
-            {selectedIds.size} selectați
+            {t("components.employeeTable.selectedCount", {
+              count: selectedIds.size,
+            })}
           </span>
         )}
       </div>
@@ -465,18 +613,7 @@ export function EmployeeTable({
                     />
                   </th>
                 )}
-                {[
-                  { key: "lastName", label: "Nume", thClass: "w-[15%] min-w-0" },
-                  { key: "cnp", label: "CNP", thClass: "w-[9%] min-w-0 max-2xl:w-[8%]" },
-                  { key: "company", label: "Firmă", thClass: "w-[14%] min-w-0" },
-                  { key: "position", label: "Funcție", thClass: "w-[11%] min-w-0 max-2xl:w-[10%]" },
-                  { key: "salaryType", label: "Tip plată", thClass: "w-[8%] min-w-0" },
-                  { key: "salaryAmount", label: "Sumă", thClass: "w-[9%] min-w-0" },
-                  { key: "salaryCurrency", label: "Monedă", thClass: "w-[5%] min-w-0" },
-                  { key: "status", label: "Status", thClass: "w-[8%] min-w-0" },
-                  { key: "documents", label: "Doc.", thClass: "w-[5%] min-w-0" },
-                  { key: "deployments", label: "Det.", thClass: "w-[5%] min-w-0" },
-                ].map((col) => (
+                {tableColumns.map((col) => (
                   <th
                     key={col.key}
                     className={`px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-left font-medium text-gray-600 cursor-pointer hover:text-gray-900 select-none min-w-0 ${col.thClass ?? ""} ${
@@ -492,31 +629,58 @@ export function EmployeeTable({
                   >
                     <div className="flex items-center gap-0.5 min-w-0">
                       <span className="truncate">{col.label}</span>
-                      {col.key !== "documents" &&
-                        col.key !== "deployments" && (
-                          <SortIcon field={col.key} />
-                        )}
+                      {col.key !== "documents" && col.key !== "deployments" && (
+                        <SortIcon field={col.key} />
+                      )}
                     </div>
                   </th>
                 ))}
-                <th className="sticky right-0 z-20 w-[88px] max-2xl:w-[80px] px-2 py-2.5 max-2xl:px-1.5 text-right font-medium text-gray-600 bg-gray-50 border-l border-gray-200/80 shadow-[-6px_0_10px_-6px_rgba(15,23,42,0.1)]">
-                  Acțiuni
+                <th className="sticky right-0 z-20 w-[118px] max-2xl:w-[108px] px-2 py-2.5 max-2xl:px-1.5 text-right font-medium text-gray-600 bg-gray-50 border-l border-gray-200/80 shadow-[-6px_0_10px_-6px_rgba(15,23,42,0.1)]">
+                  {t("components.employeeTable.colActions")}
                 </th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
+                <EmployeeTableSkeletonBody showBulkActions={showBulkActions} />
+              ) : loadError ? (
                 <tr>
-                  <td colSpan={showBulkActions ? 12 : 11} className="px-4 py-12 text-center text-gray-400">
-                    Se încarcă...
+                  <td
+                    colSpan={showBulkActions ? 12 : 11}
+                    className="p-0 align-top"
+                  >
+                    <DataErrorState
+                      message={t("components.dataFetchStates.loadFailed")}
+                      retryLabel={t("common.retry")}
+                      onRetry={() => void fetchEmployees()}
+                    />
                   </td>
                 </tr>
               ) : employees.length === 0 ? (
                 <tr>
-                  <td colSpan={showBulkActions ? 12 : 11} className="px-4 py-12 text-center text-gray-400">
-                    {activeFilterCount > 0
-                      ? "Niciun angajat găsit cu filtrele selectate"
-                      : "Niciun angajat găsit"}
+                  <td
+                    colSpan={showBulkActions ? 12 : 11}
+                    className="p-4 align-top"
+                  >
+                    {activeFilterCount > 0 ? (
+                      <div className="py-12 text-center text-gray-500 text-sm">
+                        {t("components.employeeTable.emptyWithFilters")}
+                      </div>
+                    ) : (
+                      <DataEmptyState
+                        icon={Users}
+                        title={t("employees.emptyFriendly")}
+                        className="border-slate-200"
+                      >
+                        {can("employees:write") ? (
+                          <Button asChild>
+                            <Link href={ROUTES.employeesNew}>
+                              {t("employees.addEmployee")}
+                            </Link>
+                          </Button>
+                        ) : null}
+                      </DataEmptyState>
+                    )}
                   </td>
                 </tr>
               ) : (
@@ -536,11 +700,32 @@ export function EmployeeTable({
                       </td>
                     )}
                     <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2">
-                      <div className="font-medium text-gray-900 truncate" title={`${emp.lastName} ${emp.firstName}`}>
-                        {emp.lastName} {emp.firstName}
+                      <div
+                        className="font-medium text-gray-900 truncate flex items-center flex-wrap gap-1"
+                        title={`${emp.lastName} ${emp.firstName}`}
+                      >
+                        <span className="truncate">
+                          {emp.lastName} {emp.firstName}
+                        </span>
+                        {(emp.isMarkedDetached ||
+                          (emp.deploymentCount ?? 0) > 0) && (
+                          <span
+                            className="ml-1 shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-800"
+                            title={
+                              emp.hasActiveDeployment
+                                ? "Detasare activa"
+                                : "Profil detasare"
+                            }
+                          >
+                            Detasat
+                          </span>
+                        )}
                       </div>
                       {emp.email && (
-                        <div className="text-xs text-gray-400 truncate" title={emp.email}>
+                        <div
+                          className="text-xs text-gray-400 truncate"
+                          title={emp.email}
+                        >
                           {emp.email}
                         </div>
                       )}
@@ -555,31 +740,42 @@ export function EmployeeTable({
                         className="flex items-center gap-1 min-w-0 text-gray-600"
                         title={emp.company?.name ?? undefined}
                       >
-                        <Building2 size={12} className="text-gray-400 shrink-0 max-2xl:hidden" />
+                        <Building2
+                          size={12}
+                          className="text-gray-400 shrink-0 max-2xl:hidden"
+                        />
                         <span className="truncate text-xs max-2xl:text-[11px] leading-snug">
-                          {emp.company?.name ?? "—"}
+                          {emp.company?.name ?? t("common.emDash")}
                         </span>
                       </div>
                     </td>
                     <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-gray-600">
-                      <span className="block truncate text-xs max-2xl:text-[11px]" title={emp.position ?? undefined}>
-                        {emp.position ?? "—"}
+                      <span
+                        className="block truncate text-xs max-2xl:text-[11px]"
+                        title={emp.position ?? undefined}
+                      >
+                        {emp.position ?? t("common.emDash")}
                       </span>
                     </td>
                     <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-gray-600">
-                      <span className="block truncate text-xs" title={emp.salaryType ?? undefined}>
-                        {emp.salaryType ?? "—"}
+                      <span
+                        className="block truncate text-xs"
+                        title={emp.salaryType ?? undefined}
+                      >
+                        {emp.salaryType ?? t("common.emDash")}
                       </span>
                     </td>
                     <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-gray-600 tabular-nums">
                       <span className="block truncate text-xs">
                         {typeof emp.salaryAmount === "number"
-                          ? emp.salaryAmount.toLocaleString("ro-RO")
-                          : "—"}
+                          ? emp.salaryAmount.toLocaleString(numberLocale)
+                          : t("common.emDash")}
                       </span>
                     </td>
                     <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2 text-gray-600">
-                      <span className="block truncate text-xs">{emp.salaryCurrency ?? "—"}</span>
+                      <span className="block truncate text-xs">
+                        {emp.salaryCurrency ?? t("common.emDash")}
+                      </span>
                     </td>
                     <td className="min-w-0 px-2 py-2.5 max-2xl:px-1.5 max-2xl:py-2">
                       <StatusBadge status={emp.status} />
@@ -596,33 +792,59 @@ export function EmployeeTable({
                         {emp.deploymentCount}
                       </div>
                     </td>
-                    <td className="sticky right-0 z-10 w-[88px] max-2xl:w-[80px] px-1.5 py-2.5 max-2xl:py-2 bg-white group-hover:bg-gray-50 border-l border-gray-100 shadow-[-6px_0_10px_-6px_rgba(15,23,42,0.08)]">
-                      <div className="flex items-center justify-end gap-0.5">
+                    <td className="sticky right-0 z-10 w-[118px] max-2xl:w-[108px] px-1 py-2.5 max-2xl:py-2 bg-white group-hover:bg-gray-50 border-l border-gray-100 shadow-[-6px_0_10px_-6px_rgba(15,23,42,0.08)]">
+                      <div className="flex items-center justify-end gap-0.5 flex-wrap">
                         <Link
-                          href={`/angajati/${emp.id}`}
+                          href={`${ROUTES.employees}/${emp.id}`}
                           className="p-1 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors shrink-0"
-                          title="Vizualizare — deschide pagina angajatului"
-                          aria-label="Vizualizare angajat"
+                          title={t("components.employeeTable.actionViewTitle")}
+                          aria-label={t(
+                            "components.employeeTable.actionViewAria",
+                          )}
                         >
                           <Eye size={15} />
                         </Link>
                         {can("employees:write") && (
                           <Link
-                            href={`/angajati/${emp.id}`}
+                            href={`${ROUTES.employees}/${emp.id}`}
                             className="p-1 rounded-md text-gray-400 hover:text-amber-600 hover:bg-amber-50 transition-colors shrink-0"
-                            title="Editare — deschide pagina angajatului pentru modificări"
-                            aria-label="Editare angajat"
+                            title={t(
+                              "components.employeeTable.actionEditTitle",
+                            )}
+                            aria-label={t(
+                              "components.employeeTable.actionEditAria",
+                            )}
                           >
                             <Pencil size={15} />
                           </Link>
                         )}
-                        <PermissionGuard allowedRoles={["administrator"]} fallback={null}>
+                        <PermissionGuard
+                          allowedRoles={ROLES_SETTINGS_ADMIN}
+                          fallback={null}
+                        >
                           <button
                             type="button"
-                            onClick={() => handleDelete(emp.id)}
-                            className="p-1 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors shrink-0"
-                            title="Ștergere — elimină angajatul din evidență (ireversibil)"
-                            aria-label="Șterge angajat"
+                            onClick={() => handleSoftDelete(emp.id)}
+                            className="p-1 rounded-md text-gray-400 hover:text-orange-600 hover:bg-orange-50 transition-colors shrink-0"
+                            title={t(
+                              "components.employeeTable.actionSoftTerminateTitle",
+                            )}
+                            aria-label={t(
+                              "components.employeeTable.actionSoftTerminateAria",
+                            )}
+                          >
+                            <Trash size={15} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openPermanentDeleteDialog(emp.id)}
+                            className="p-1 rounded-md text-red-500 hover:text-red-700 hover:bg-red-50 transition-colors shrink-0"
+                            title={t(
+                              "components.employeeTable.actionPermanentDeleteTitle",
+                            )}
+                            aria-label={t(
+                              "components.employeeTable.actionPermanentDeleteAria",
+                            )}
                           >
                             <Trash2 size={15} />
                           </button>
@@ -640,7 +862,11 @@ export function EmployeeTable({
         {totalPages > 1 && (
           <div className="flex items-center justify-between px-4 py-3 border-t">
             <span className="text-sm text-gray-500">
-              Pagina {page} din {totalPages} ({total} total)
+              {t("components.employeeTable.paginationLabel", {
+                page,
+                totalPages,
+                total,
+              })}
             </span>
             <div className="flex items-center gap-1">
               <button
@@ -661,16 +887,61 @@ export function EmployeeTable({
           </div>
         )}
       </div>
+
+      <AlertDialog
+        open={permanentDeleteOpen}
+        onOpenChange={(open) => {
+          setPermanentDeleteOpen(open);
+          if (!open) setEmployeeIdPermanentDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("components.confirm.permanentDeleteTitle")}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left space-y-2">
+              <span>{t("components.confirm.permanentDeleteDescription")}</span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={permanentDeleting} />
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={permanentDeleting}
+              onClick={() => void handleConfirmPermanentDelete()}
+            >
+              {permanentDeleting
+                ? t("components.confirm.permanentDeleteLoading")
+                : t("components.confirm.permanentDeleteButton")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
   const config: Record<string, { bg: string; text: string; label: string }> = {
-    ACTIVE: { bg: "bg-green-100", text: "text-green-700", label: "Activ" },
-    TERMINATED: { bg: "bg-red-100", text: "text-red-700", label: "Terminat" },
+    ACTIVE: {
+      bg: "bg-green-100",
+      text: "text-green-700",
+      label: t("components.employeeTable.statusBadgeActive"),
+    },
+    TERMINATED: {
+      bg: "bg-red-100",
+      text: "text-red-700",
+      label: t("components.employeeTable.statusBadgeTerminated"),
+    },
   };
-  const c = config[status] ?? { bg: "bg-gray-100", text: "text-gray-700", label: status };
+  const c = config[status] ?? {
+    bg: "bg-gray-100",
+    text: "text-gray-700",
+    label: status,
+  };
 
   return (
     <span

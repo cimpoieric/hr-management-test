@@ -13,7 +13,11 @@ export interface Organization {
   id: string;
   name: string;
   slug: string;
-  plan: OrganizationPlan;
+  planId: string;
+  plan?: OrganizationPlan;
+  employeeCount: number;
+  subscriptionStatus: "active" | "trial" | "expired";
+  featuresOverride?: string | null;
   status: OrganizationStatus;
   trialEndsAt?: Date | null;
   stripeCustomerId?: string | null;
@@ -122,6 +126,10 @@ export interface EmployeeListApiRow {
   bankName?: string | null;
   iban?: string | null;
   observations?: string | null;
+  workNorm?: string | null;
+  /** Profil marcat detasare (import/CIM) — poate exista fara rand Deployment. */
+  isMarkedDetached?: boolean;
+  hasActiveDeployment?: boolean;
   salaryType?: "LUNAR" | "SAPTAMANAL" | "ORA" | string | null;
   salaryAmount?: number | null;
   salaryCurrency?: string | null;
@@ -148,6 +156,8 @@ export type EmployeeOption = {
   firstName: string;
   lastName: string;
   position?: string | null;
+  paymentFrequency?: string | null;
+  salaryType?: string | null;
 };
 
 // --- Document ----------------------------------------------------------------
@@ -206,8 +216,11 @@ export interface Payslip {
   timesheetId: number;
   employeeId: number;
   companyId: number;
+  type?: string;
   weekNumber: number;
   year: number;
+  month?: number | null;
+  monthYear?: number | null;
   periodStart: Date;
   periodEnd: Date;
   grossTotal: number;
@@ -268,8 +281,12 @@ export interface Timesheet {
 export type TimesheetRow = {
   id: number;
   employeeId: number;
+  type?: string;
+  periodKey?: string;
   weekNumber: number;
   year: number;
+  month?: number | null;
+  monthYear?: number | null;
   startDate: string;
   endDate: string;
   hoursWorked: string;

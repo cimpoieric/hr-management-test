@@ -1,38 +1,24 @@
 /**
- * POST /api/backup/restore — Restaurează din ZIP uploadat (ADMIN only)
+ * POST /api/backup/restore — Încarcă ZIP din memorie (ADMIN only)
  *
- * Body: form-data cu câmpul "backup" (fișier ZIP)
- * Proces:
- *   1. Creează safety backup automat
- *   2. Validează structura arhivei
- *   3. Extrage și suprascrie
- *   4. AuditLog
- *
- * ATENȚIE: Operațiune distructivă — toate datele noi vor fi pierdute.
+ * Creează safety backup în R2 înainte de validare.
+ * Restaurarea automată a datelor JSON nu este încă activată pe PostgreSQL.
  */
 
-import { existsSync } from "fs";
-import { join } from "path";
 import { getClientIp, logAuditFF } from "@/lib/audit";
-import { requireRole } from "@/lib/auth";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
-import { restoreFromBackup } from "@/lib/backup";
-import { mkdir, rm, writeFile } from "fs/promises";
+import { restoreFromBackupBuffer } from "@/lib/backup";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { type NextRequest, NextResponse } from "next/server";
 
-const TEMP_DIR = join(process.cwd(), "data", "temp");
-
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_SETTINGS_ADMIN,
-  );
-  if (authError || !user) return authError!;
-
-  let tempFile: string | null = null;
+  const planCheck = await checkPlan(request, FEATURES.AUTO_BACKUP, {
+    roles: ROLES_SETTINGS_ADMIN,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
 
   try {
-    // Parse form data
     const formData = await request.formData();
     const file = formData.get("backup") as File | null;
 
@@ -43,7 +29,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Max 2GB
     if (file.size > 2 * 1024 * 1024 * 1024) {
       return NextResponse.json(
         { error: "Fișier prea mare (max 2GB)" },
@@ -51,26 +36,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Salvează temporar
-    if (!existsSync(TEMP_DIR)) {
-      await mkdir(TEMP_DIR, { recursive: true });
-    }
-
-    tempFile = join(TEMP_DIR, `restore_${Date.now()}.zip`);
     const bytes = await file.arrayBuffer();
-    await writeFile(tempFile, Buffer.from(bytes));
+    const buffer = Buffer.from(bytes);
 
-    // Restaurează
-    const result = await restoreFromBackup(tempFile);
+    const result = await restoreFromBackupBuffer(
+      user.organizationId,
+      buffer,
+    );
 
-    // Șterge fișierul temporar
-    try {
-      if (tempFile) await rm(tempFile);
-    } catch {
-      /* ignore */
-    }
-
-    // Audit log
     logAuditFF({
       action: "BACKUP",
       entity: "System",
@@ -91,19 +64,8 @@ export async function POST(request: NextRequest) {
       message: "Restaurare completă",
       safetyBackup: result.safetyBackup,
       restored: result.restored,
-      warning:
-        "Aplicația trebuie repornită pentru reconectarea la baza de date.",
     });
   } catch (error) {
-    // Curăță fișierul temporar
-    if (tempFile) {
-      try {
-        await rm(tempFile);
-      } catch {
-        /* ignore */
-      }
-    }
-
     console.error("[BACKUP_RESTORE]", error);
     return NextResponse.json(
       {

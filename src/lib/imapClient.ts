@@ -5,7 +5,7 @@ import "server-only";
  * UNSEEN: căutare cu { seen: false }; conținut parte via download().
  */
 
-import { Readable } from "stream";
+import type { Readable } from "stream";
 import { ImapFlow, type MessageStructureObject } from "imapflow";
 
 export interface EmailAttachment {
@@ -27,7 +27,7 @@ export interface EmailMessage {
 function getConfig() {
   return {
     host: process.env.IMAP_HOST ?? "",
-    port: parseInt(process.env.IMAP_PORT ?? "993", 10),
+    port: Number.parseInt(process.env.IMAP_PORT ?? "993", 10),
     secure: process.env.IMAP_TLS !== "false",
     user: process.env.IMAP_USER ?? "",
     password: process.env.IMAP_PASSWORD ?? "",
@@ -42,7 +42,10 @@ async function readableToBuffer(stream: Readable): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-function collectLeafParts(node: MessageStructureObject | undefined, out: MessageStructureObject[]): void {
+function collectLeafParts(
+  node: MessageStructureObject | undefined,
+  out: MessageStructureObject[],
+): void {
   if (!node) return;
   if (node.childNodes?.length) {
     for (const ch of node.childNodes) {
@@ -57,7 +60,9 @@ export async function connectToIMAP(): Promise<ImapFlow> {
   const config = getConfig();
 
   if (!config.host || !config.user || !config.password) {
-    throw new Error("Config IMAP incomplet. Setează IMAP_HOST, IMAP_USER, IMAP_PASSWORD în .env");
+    throw new Error(
+      "Config IMAP incomplet. Setează IMAP_HOST, IMAP_USER, IMAP_PASSWORD în .env",
+    );
   }
 
   const client = new ImapFlow({
@@ -99,7 +104,7 @@ export async function fetchUnreadEmails(): Promise<EmailMessage[]> {
               envelope: true,
               bodyStructure: true,
             },
-            { uid: true }
+            { uid: true },
           );
 
           if (msg === false || !msg.uid) continue;
@@ -107,7 +112,9 @@ export async function fetchUnreadEmails(): Promise<EmailMessage[]> {
           const subject = msg.envelope?.subject ?? "(fără subiect)";
           const fromAddr = msg.envelope?.from?.[0]?.address ?? "unknown";
           const fromName = msg.envelope?.from?.[0]?.name ?? "";
-          const date = msg.envelope?.date ? new Date(msg.envelope.date) : new Date();
+          const date = msg.envelope?.date
+            ? new Date(msg.envelope.date)
+            : new Date();
 
           let bodyText = "";
           const attachments: EmailAttachment[] = [];
@@ -122,8 +129,12 @@ export async function fetchUnreadEmails(): Promise<EmailMessage[]> {
 
               if (ct.startsWith("text/plain")) {
                 try {
-                  const dl = await client.download(String(uid), leaf.part, { uid: true });
-                  bodyText = (await readableToBuffer(dl.content)).toString("utf-8");
+                  const dl = await client.download(String(uid), leaf.part, {
+                    uid: true,
+                  });
+                  bodyText = (await readableToBuffer(dl.content)).toString(
+                    "utf-8",
+                  );
                 } catch {
                   /* ignore */
                 }
@@ -142,7 +153,9 @@ export async function fetchUnreadEmails(): Promise<EmailMessage[]> {
               if (!isAttachment) continue;
 
               try {
-                const dl = await client.download(String(uid), leaf.part, { uid: true });
+                const dl = await client.download(String(uid), leaf.part, {
+                  uid: true,
+                });
                 const buf = await readableToBuffer(dl.content);
                 const filename =
                   leaf.dispositionParameters?.filename ??
@@ -165,7 +178,9 @@ export async function fetchUnreadEmails(): Promise<EmailMessage[]> {
 
           messages.push({
             uid: msg.uid,
-            subject: subject.startsWith("=?") ? decodeMimeSubject(subject) : subject,
+            subject: subject.startsWith("=?")
+              ? decodeMimeSubject(subject)
+              : subject,
             from: { address: fromAddr, name: fromName },
             date,
             bodyText,
@@ -190,7 +205,9 @@ export async function markAsSeen(uid: number): Promise<void> {
   try {
     const lock = await client.getMailboxLock("INBOX");
     try {
-      await client.messageFlagsAdd({ uid: uid.toString() }, ["\\Seen"], { uid: true });
+      await client.messageFlagsAdd({ uid: uid.toString() }, ["\\Seen"], {
+        uid: true,
+      });
     } finally {
       lock.release();
     }
@@ -202,12 +219,15 @@ export async function markAsSeen(uid: number): Promise<void> {
 function decodeMimeSubject(subject: string): string {
   try {
     return subject
-      .replace(/=\?([\w-]+)\?([BQ])\?([^?]+)\?=/gi, (_match, _charset, encoding, text) => {
-        if (encoding.toUpperCase() === "B") {
-          return Buffer.from(text, "base64").toString("utf-8");
-        }
-        return text.replace(/=/g, "%");
-      })
+      .replace(
+        /=\?([\w-]+)\?([BQ])\?([^?]+)\?=/gi,
+        (_match, _charset, encoding, text) => {
+          if (encoding.toUpperCase() === "B") {
+            return Buffer.from(text, "base64").toString("utf-8");
+          }
+          return text.replace(/=/g, "%");
+        },
+      )
       .replace(/%3D/g, "=")
       .replace(/%20/g, " ");
   } catch {

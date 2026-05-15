@@ -329,6 +329,7 @@ function spawnNextServer(appRoot, port) {
     PORT: String(port),
     HOST: process.env.HOST || "0.0.0.0",
     ELECTRON_RUN: "1",
+    ELECTRON_MODE: "true",
   };
 
   debugLog("--- server start ---", {

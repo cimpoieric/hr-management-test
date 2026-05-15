@@ -3,12 +3,87 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  // SQLite: calea din DATABASE_URL e relativă la folderul care conține schema.prisma (folderul prisma/).
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
-// Valid roles: operator | administrator | doar_vizualizare
+// --- Multi-tenant: Organization (= firmă / tenant) ---
+// Payslip = domeniu „payroll”; Timesheet = domeniu „attendance” (nu există modele Payroll/Attendance separate).
+
+model Plan {
+  id            String   @id @default(cuid())
+  name          String   @unique // STARTER, BUSINESS, ENTERPRISE, CUSTOM
+  priceLei      Int
+  maxEmployees  Int
+  features      String[] // feature flags: basic_reports, export_excel, ...
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organizations Organization[]
+}
+
+model Organization {
+  id                   String    @id @default(cuid())
+  name                 String
+  slug                 String    @unique // ex: firma-mea
+  planId               String
+  plan                 Plan      @relation(fields: [planId], references: [id])
+  employeeCount        Int       @default(0)
+  subscriptionStatus   String    @default("active") // active, trial, expired
+  featuresOverride     String? // JSON pentru plan CUSTOM / override
+  status               String    @default("active") // active, suspended, trial, grace
+  trialEndsAt          DateTime?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  /** Sfârșitul perioadei curente de facturare (sincronizat din Stripe). */
+  subscriptionCurrentPeriodEnd DateTime?
+  /** După invoice.payment_failed: acces limitat până la această dată. */
+  subscriptionGraceEndsAt     DateTime?
+
+  // Date companie
+  cui                  String?
+  registrationNumber   String?
+  address              String?
+  phone                String?
+  email                String?
+  bankAccount          String?
+  bankName             String?
+  logoUrl              String?
+
+  // Limbi
+  defaultLanguage      String    @default("en") // en sau ro
+
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  // Relations
+  users       User[]
+  companies   Company[]
+  employees   Employee[]
+  documents   Document[]
+  payslips    Payslip[] // payroll
+  timesheets  Timesheet[] // attendance (pontaj)
+  settings    Settings?
+  pendingImports PendingImport[]
+  usageLogs   UsageLog[]
+
+  @@index([planId])
+  @@index([subscriptionStatus])
+}
+
+model UsageLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  action         String // add_employee, export_pdf, ...
+  allowed        Boolean
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([createdAt])
+}
+
 // Valid employee status: ACTIVE | TERMINATED
 // Valid salary type: LUNAR | SAPTAMANAL | ORA (Prisma enum; SQLite stochează TEXT)
 // Valid document status: VALID | EXPIRING_SOON | EXPIRED | PENDING
@@ -16,24 +91,32 @@ datasource db {
 // Valid deployment status: ACTIVE | COMPLETED | CANCELLED
 
 model User {
-  id                 Int      @id @default(autoincrement())
-  name               String   @default("")
-  email              String   @unique
-  password           String   // bcrypt hash — NEVER expose in API
-  role               UserRole @default(operator)
-  isActive           Boolean  @default(true)
-  mustChangePassword Boolean  @default(false)
+  id                 String       @id @default(cuid())
+  email              String       @unique
+  name               String?
+  password           String // bcrypt hash — NEVER expose in API
+  role               UserRole     @default(EMPLOYEE)
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  isActive           Boolean      @default(true)
+  /** Login / password failures (admin unblock resets to 0). */
+  failedAttempts     Int          @default(0)
+  mustChangePassword Boolean      @default(false)
   lastLoginAt        DateTime?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  approvedTimesheets Timesheet[] @relation("TimesheetApprovedBy")
-  emailLogs          EmailLog[]  @relation("EmailLogUser")
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  approvedTimesheets Timesheet[]  @relation("TimesheetApprovedBy")
+  emailLogs          EmailLog[]   @relation("EmailLogUser")
+  auditLogs          AuditLog[]
+
+  @@index([organizationId])
 }
 
 enum UserRole {
-  operator
-  administrator
-  doar_vizualizare
+  SUPER_ADMIN // acces global
+  ORG_ADMIN // admin firmă
+  OPERATOR // pontaj, documente
+  EMPLOYEE // vizualizare proprii date
 }
 
 enum SalaryType {
@@ -47,53 +130,63 @@ model Country {
   name       String    @unique
   code       String    @unique // RO, DE, NL
   phoneCode  String?
+  isActive   Boolean   @default(true)
   companies  Company[]
   employees  Employee[]
   createdAt  DateTime  @default(now())
 }
 
 model Employee {
-  id           Int           @id @default(autoincrement())
-  cnp          String        @unique
-  cnpEncrypted String
-  cnpHash      String
-  firstName    String
-  lastName     String
-  seriesCI     String?
-  numberCI     String?
-  email        String?       @unique
-  phone        String?
-  iban         String?
-  ibanHash     String?
-  bankName     String?
-  position     String?
-  address      String?
-  city         String?
-  countryId    Int?
-  country      Country?      @relation(fields: [countryId], references: [id])
-  status       String        @default("ACTIVE")
-  observations String?
+  id             Int            @id @default(autoincrement())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  cnp            String
+  cnpEncrypted   String
+  cnpHash        String
+  firstName      String
+  lastName       String
+  seriesCI       String?
+  numberCI       String?
+  email          String?        @unique
+  phone          String?
+  /** IBAN criptat (afișare doar pentru roluri autorizate; hash în ibanHash). */
+  iban           String?
+  ibanHash       String?
+  /** Denumire bancă asociată IBAN-ului. */
+  bankName       String?
+  position       String?
+  address        String?
+  city           String?
+  countryId      Int?
+  country        Country?       @relation(fields: [countryId], references: [id])
+  status         String         @default("ACTIVE")
+  observations   String?
   /** Normă / timp de muncă (ex. din CIM). */
-  workNorm     String?
-  salaryType   SalaryType?
-  salaryAmount Decimal?
-  salaryCurrency String      @default("RON")
+  workNorm       String?
+  salaryType     SalaryType?
+  salaryAmount   Decimal?
+  salaryCurrency String         @default("RON")
   salaryStartDate DateTime?
-  companyId    Int
-  company      Company       @relation(fields: [companyId], references: [id])
-  hiredAt      DateTime      @default(now())
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  documents    Document[]
-  deployments  Deployment[]
+  /** weekly | monthly — determină tipul pontajului și fluturașului. */
+  paymentFrequency String       @default("weekly")
+  companyId      Int
+  company        Company        @relation(fields: [companyId], references: [id])
+  hiredAt        DateTime       @default(now())
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  documents      Document[]
+  deployments    Deployment[]
   salaryCalculations SalaryCalculation[]
-  auditLogs    AuditLog[]
-  timesheets   Timesheet[]
-  payslips     Payslip[]
-  emailLogs    EmailLog[]  @relation("EmailLogEmployee")
+  auditLogs      AuditLog[]
+  timesheets     Timesheet[]
+  payslips       Payslip[]
+  emailLogs      EmailLog[]     @relation("EmailLogEmployee")
   employeeHistory EmployeeHistory[]
+  pendingImports PendingImport[]
 
+  @@unique([organizationId, cnp])
   @@index([cnpHash])
+  @@index([organizationId])
   @@index([companyId])
   @@index([countryId])
   @@index([status])
@@ -115,37 +208,45 @@ model SalaryCalculation {
 }
 
 model Company {
-  id          Int        @id @default(autoincrement())
-  name        String     @unique
-  taxCode     String?
-  address     String?
-  countryId   Int?
-  country     Country?   @relation(fields: [countryId], references: [id])
-  status      String     @default("Activ") // Activ | Inactiv
-  employees   Employee[]
-  payslips    Payslip[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id             Int            @id @default(autoincrement())
+  organizationId String
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  taxCode        String?
+  address        String?
+  countryId      Int?
+  country        Country?       @relation(fields: [countryId], references: [id])
+  status         String         @default("Activ") // Activ | Inactiv
+  employees      Employee[]
+  payslips       Payslip[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
 }
 
 model Document {
-  id          Int      @id @default(autoincrement())
-  employeeId  Int
-  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  type        String   // CONTRACT | ID | MEDICAL | A1 | AUTHORIZATION | VISA | OTHER
-  number      String?  // Număr document (ex: nr. contract, serie CI)
-  fileName    String   // Nume original sanitizat
-  storagePath String   // Cale relativă în ./data/documents/
-  fileSize    Int      // Bytes
-  mimeType    String   // application/pdf, image/jpeg, etc.
-  status      String   @default("PENDING") // VALID | EXPIRING_SOON | EXPIRED | PENDING
-  issueDate   DateTime?
-  expiryDate  DateTime?
-  uploadedAt  DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime? // soft-delete — rândul rămâne pentru audit; fișier mutat în _deleted/
+  id             Int        @id @default(autoincrement())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employeeId     Int
+  employee       Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  type           String // CONTRACT | ID | MEDICAL | A1 | AUTHORIZATION | VISA | OTHER
+  number         String? // Număr document (ex: nr. contract, serie CI)
+  fileName       String // Nume original sanitizat
+  storagePath    String // Cale relativă în ./data/documents/
+  fileSize       Int // Bytes
+  mimeType       String // application/pdf, image/jpeg, etc.
+  status         String     @default("PENDING") // VALID | EXPIRING_SOON | EXPIRED | PENDING
+  issueDate      DateTime?
+  expiryDate     DateTime?
+  uploadedAt     DateTime   @default(now())
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  deletedAt      DateTime? // soft-delete — rândul rămâne pentru audit; fișier mutat în _deleted/
 
+  @@index([organizationId])
   @@index([employeeId])
   @@index([type])
   @@index([status])
@@ -171,15 +272,16 @@ model Deployment {
 
 model AuditLog {
   id          Int       @id @default(autoincrement())
-  action      String    // LOGIN, LOGOUT, CREATE, UPDATE, DELETE, VIEW, EXPORT, IMPORT_APPROVE, IMPORT_REJECT, BACKUP
-  entity      String    // Employee, Document, Deployment, User, Report, System
+  action      String // LOGIN, LOGOUT, CREATE, UPDATE, DELETE, VIEW, EXPORT, IMPORT_APPROVE, IMPORT_REJECT, BACKUP
+  entity      String // Employee, Document, Deployment, User, Report, System
   entityId    Int?
   employee    Employee? @relation(fields: [entityId], references: [id], onDelete: SetNull)
-  userId      Int?      // User who performed the action
-  userName    String?   // Denormalized for querying
-  userRole    String?   // Denormalized for querying
-  oldValues   String?   // JSON - masked for sensitive data
-  newValues   String?   // JSON - masked for sensitive data
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName    String? // Denormalized for querying
+  userRole    String? // Denormalized for querying
+  oldValues   String? // JSON - masked for sensitive data
+  newValues   String? // JSON - masked for sensitive data
   ipAddress   String?
   userAgent   String?
   createdAt   DateTime  @default(now())
@@ -194,10 +296,10 @@ model EmployeeHistory {
   id         Int      @id @default(autoincrement())
   employeeId Int
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  field      String   // function, company, work_norm, country, salary_start, salary, salary_currency, phone, email
+  field      String // function, company, work_norm, country, salary_start, salary, salary_currency, phone, email
   oldValue   String?
   newValue   String?
-  source     String   // ex: import_CIM
+  source     String // ex: import_CIM
   createdAt  DateTime @default(now())
 
   @@index([employeeId])
@@ -205,22 +307,26 @@ model EmployeeHistory {
 
 // Valid import status: PENDING | APPROVED | REJECTED | DRAFT | COMPLETED_UPDATE
 model PendingImport {
-  id              Int      @id @default(autoincrement())
-  sourceType      String   @default("MANUAL_UPLOAD")
+  id              Int       @id @default(autoincrement())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sourceType      String    @default("MANUAL_UPLOAD")
   fileName        String
-  filePath        String   // Cale relativă în ./data/import/
+  filePath        String // Cale relativă în ./data/import/
   mimeType        String
   fileSize        Int
-  rawText         String   // Text brut extras (PDF sau OCR)
-  extractedFields String   // JSON cu câmpurile extrase
-  confidenceScore Float    // 0.0 - 1.0
-  uncertainFields String   // JSON array cu numele câmpurilor incerte
-  status          String   @default("PENDING") // PENDING | APPROVED | REJECTED | DRAFT
-  employeeId      Int?     // Populat la aprobare (legare sau creare)
+  rawText         String // Text brut extras (PDF sau OCR)
+  extractedFields String // JSON cu câmpurile extrase
+  confidenceScore Float // 0.0 - 1.0
+  uncertainFields String // JSON array cu numele câmpurilor incerte
+  status          String    @default("PENDING") // PENDING | APPROVED | REJECTED | DRAFT
+  employeeId      Int? // Populat la aprobare (legare sau creare)
+  employee        Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
+  @@index([organizationId])
   @@index([status])
   @@index([createdAt])
 }
@@ -253,88 +359,131 @@ model SystemConfig {
   @@index([key])
 }
 
+/// Setări firmă pentru plăți bancare (singleton: un singur rând, id = 1). Poate fi sincronizat cu APP_COMPANY_IBAN din SystemConfig.
+model CompanySettings {
+  id            Int      @id @default(1)
+  companyIban   String?
+  companyBank   String?
+  updatedAt     DateTime @updatedAt
+}
+
 model EmailSettings {
   id              String   @id @default(cuid())
   smtpHost        String
   smtpPort        Int
   smtpUser        String
-  smtpPass        String   // encrypted
+  smtpPass        String // encrypted
   fromEmail       String
   fromName        String
   subjectTemplate String   @default("Fluturas salariu - {luna} {an}")
-  bodyTemplate    String   @default("")
+  bodyTemplate      String   @default("")
   isActive        Boolean  @default(true)
   updatedAt       DateTime @updatedAt
 
   @@index([isActive])
 }
 
-model Timesheet {
-  id             Int      @id @default(autoincrement())
-  employeeId     Int
-  employee       Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  weekNumber     Int
-  year           Int
-  startDate      DateTime
-  endDate        DateTime
-  hoursWorked       Decimal
-  standardHours     Decimal  @default(40)
-  /** Diurnă / travel allowance pentru săptămână (EUR sau unitate monetară afișată ca EUR în UI). */
-  travelAllowance   Float    @default(0)
-  dailyBreakdown String?  // JSON
-  status         String   @default("DRAFT")
-  notes          String?
-  submittedAt    DateTime?
-  approvedAt     DateTime?
-  approvedById   Int?
-  approvedBy     User?    @relation("TimesheetApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
-  payslip        Payslip?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+/// Setări per organizație (multi-tenant). Un rând per `organizationId`.
+model Settings {
+  id                     String       @id @default(cuid())
+  organizationId         String       @unique
+  organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  logoUrl                String?
+  language               String       @default("en")
+  /// JSON: preferințe aplicație (firmă, salarii, alerte, etc.).
+  preferencesJson        String?
+  /** JSON: work schedule, workdays, late tolerance (onboarding / pontaj). */
+  attendanceSettingsJson String?
+  updatedAt              DateTime     @updatedAt
+}
 
-  @@unique([employeeId, year, weekNumber])
+model Timesheet {
+  id               Int          @id @default(autoincrement())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employeeId       Int
+  employee         Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  /** weekly | monthly */
+  type             String       @default("weekly")
+  /** Cheie unică per angajat: 2026-W12 sau 2026-M03 */
+  periodKey        String
+  weekNumber       Int          @default(0)
+  year             Int
+  /** Luna calendaristică (1-12) pentru pontaj lunar */
+  month            Int?
+  monthYear        Int?
+  startDate        DateTime
+  endDate          DateTime
+  hoursWorked      Decimal
+  standardHours    Decimal      @default(40)
+  /** Diurnă / travel allowance pentru săptămână (EUR sau unitate monetară afișată ca EUR în UI). */
+  travelAllowance  Float        @default(0)
+  dailyBreakdown   String? // JSON
+  status           String       @default("DRAFT")
+  notes            String?
+  submittedAt      DateTime?
+  approvedAt       DateTime?
+  approvedById     String?
+  approvedBy       User?        @relation("TimesheetApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+  payslip          Payslip?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@unique([employeeId, periodKey])
+  @@index([organizationId])
   @@index([employeeId])
+  @@index([type])
   @@index([year, weekNumber])
+  @@index([monthYear, month])
   @@index([status])
 }
 
 model Payslip {
-  id              Int           @id @default(autoincrement())
-  timesheetId     Int           @unique
-  timesheet       Timesheet     @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
-  employeeId      Int
-  employee        Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  companyId       Int
-  company         Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  weekNumber      Int
-  year            Int
-  periodStart     DateTime
-  periodEnd       DateTime
-  items           PayslipItem[]
-  grossTotal      Decimal
-  deductionsTotal Decimal
-  netTotal        Decimal
-  totalPaid       Decimal
-  currency        String        @default("EUR")
-  pdfPath         String?
-  pdfGeneratedAt  DateTime?
-  emailSent       Boolean       @default(false)
-  emailSentAt     DateTime?
-  emailLogId      Int?
-  emailLog        EmailLog?     @relation("PayslipEmailLog", fields: [emailLogId], references: [id], onDelete: SetNull)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id               Int           @id @default(autoincrement())
+  organizationId   String
+  organization     Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  timesheetId      Int           @unique
+  timesheet        Timesheet     @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  employeeId       Int
+  employee         Employee      @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  companyId        Int
+  company          Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  /** weekly | monthly (alias Payroll în API) */
+  type             String        @default("weekly")
+  weekNumber       Int           @default(0)
+  year             Int
+  month            Int?
+  monthYear        Int?
+  periodStart      DateTime
+  periodEnd        DateTime
+  items            PayslipItem[]
+  grossTotal       Decimal
+  deductionsTotal  Decimal
+  netTotal         Decimal
+  totalPaid        Decimal
+  currency         String        @default("EUR")
+  pdfPath          String?
+  pdfGeneratedAt   DateTime?
+  emailSent        Boolean       @default(false)
+  emailSentAt      DateTime?
+  emailLogId       Int?
+  emailLog         EmailLog?     @relation("PayslipEmailLog", fields: [emailLogId], references: [id], onDelete: SetNull)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
+  @@index([organizationId])
   @@index([employeeId])
   @@index([companyId])
+  @@index([type])
   @@index([year, weekNumber])
+  @@index([monthYear, month])
 }
 
 model PayslipItem {
   id          Int     @id @default(autoincrement())
   payslipId   Int
   payslip     Payslip @relation(fields: [payslipId], references: [id], onDelete: Cascade)
-  type        String  // NET_SALARY | TRAVEL_ALLOWANCE | HOLIDAY_MONEY | OVERTIME | BONUS | DEDUCTION | OTHER
+  type        String // NET_SALARY | TRAVEL_ALLOWANCE | HOLIDAY_MONEY | OVERTIME | BONUS | DEDUCTION | OTHER
   label       String
   description String?
   amount      Decimal
@@ -362,7 +511,7 @@ model EmailLog {
   sentAt         DateTime?
   errorMessage   String?
   retryCount     Int       @default(0)
-  userId         Int?
+  userId         String?
   user           User?     @relation("EmailLogUser", fields: [userId], references: [id], onDelete: SetNull)
   ipAddress      String?
   createdAt      DateTime  @default(now())

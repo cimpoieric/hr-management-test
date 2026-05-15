@@ -8,14 +8,15 @@
  * Export contabilitate: date complete (CNP/IBAN nemascate).
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
-import { prismaTyped } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
-import { logAuditFF } from "@/lib/audit";
 import { getAppSettings } from "@/lib/appSettings";
-import { salaryAmountToJson } from "@/lib/salaryFields";
+import { logAuditFF } from "@/lib/audit";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { decrypt } from "@/lib/encryption";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
+import { prismaTyped } from "@/lib/prisma";
+import { salaryAmountToJson } from "@/lib/salaryFields";
+import type { Prisma } from "@prisma/client";
+import { type NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 
 // ─── Coloane disponibile ─────────────────────────────────────────────────────
@@ -38,17 +39,32 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: "phone", header: "Telefon", width: 14 },
   { key: "position", header: "Funcție", width: 20 },
   { key: "status", header: "Status", width: 12 },
-  { key: "company", header: "Firmă", width: 22, format: (_v, emp) => (emp.companyName as string) ?? "" },
+  {
+    key: "company",
+    header: "Firmă",
+    width: 22,
+    format: (_v, emp) => (emp.companyName as string) ?? "",
+  },
   { key: "address", header: "Adresă", width: 28 },
   { key: "city", header: "Oraș", width: 16 },
   { key: "country", header: "Țară", width: 10 },
-  { key: "hiredAt", header: "Data angajării", width: 16, format: (v) => v ? new Date(v as string).toLocaleDateString("ro-RO") : "" },
+  {
+    key: "hiredAt",
+    header: "Data angajării",
+    width: 16,
+    format: (v) => (v ? new Date(v as string).toLocaleDateString("ro-RO") : ""),
+  },
   { key: "iban", header: "IBAN", width: 25 },
   { key: "bankName", header: "Bancă", width: 18 },
   { key: "salaryType", header: "Tip plată", width: 14 },
   { key: "salaryAmount", header: "Sumă brută", width: 14 },
   { key: "salaryCurrency", header: "Monedă", width: 10 },
-  { key: "salaryStartDate", header: "Valabil de la", width: 14, format: (v) => v ? new Date(v as string).toLocaleDateString("ro-RO") : "" },
+  {
+    key: "salaryStartDate",
+    header: "Valabil de la",
+    width: 14,
+    format: (v) => (v ? new Date(v as string).toLocaleDateString("ro-RO") : ""),
+  },
   { key: "observations", header: "Observații", width: 35 },
 ];
 
@@ -72,35 +88,58 @@ function safeDecrypt(value: string | null | undefined): string {
 // ─── POST handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
-  if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
-  }
+  const planCheck = await checkPlan(request, FEATURES.EXPORT_EXCEL, {
+    roles: ROLES_SETTINGS_ADMIN,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
 
   try {
     const body = await request.json();
     const employeeIds: number[] = Array.isArray(body.employeeIds)
-      ? body.employeeIds.filter((id: unknown) => typeof id === "number" && id > 0)
+      ? body.employeeIds.filter(
+          (id: unknown) => typeof id === "number" && id > 0,
+        )
       : [];
 
     if (employeeIds.length === 0) {
-      return NextResponse.json({ error: "Niciun angajat selectat" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Niciun angajat selectat" },
+        { status: 400 },
+      );
     }
 
     if (employeeIds.length > 5000) {
-      return NextResponse.json({ error: "Maxim 5000 angajați per export" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Maxim 5000 angajați per export" },
+        { status: 400 },
+      );
     }
 
     // Coloane solicitate sau default
-    const requestedColumns: string[] = Array.isArray(body.columns) && body.columns.length > 0
-      ? body.columns
-      : [
-        "id", "lastName", "firstName", "cnp", "iban", "bankName", "email", "phone",
-        "status", "position", "company", "salaryType", "salaryAmount", "salaryCurrency", "salaryStartDate",
-      ];
+    const requestedColumns: string[] =
+      Array.isArray(body.columns) && body.columns.length > 0
+        ? body.columns
+        : [
+            "id",
+            "lastName",
+            "firstName",
+            "cnp",
+            "iban",
+            "bankName",
+            "email",
+            "phone",
+            "status",
+            "position",
+            "company",
+            "salaryType",
+            "salaryAmount",
+            "salaryCurrency",
+            "salaryStartDate",
+          ];
 
     // Query employees
-    const appSettings = await getAppSettings();
+    const appSettings = await getAppSettings(user.organizationId);
     /** Rând export Excel — nu moștenim `Employee` din client ca să evităm conflicte cu tipuri vechi. */
     interface EmployeeExcelRow {
       iban: string | null;
@@ -128,9 +167,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Selectează doar coloanele cerute care există
-    const activeColumns = ALL_COLUMNS.filter((c) => requestedColumns.includes(c.key));
+    const activeColumns = ALL_COLUMNS.filter((c) =>
+      requestedColumns.includes(c.key),
+    );
     if (activeColumns.length === 0) {
-      return NextResponse.json({ error: "Nicio coloană validă selectată" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Nicio coloană validă selectată" },
+        { status: 400 },
+      );
     }
 
     // Construiește header row
@@ -140,9 +184,7 @@ export async function POST(request: NextRequest) {
     const rows = employees.map((emp) => {
       const flatEmp: Record<string, unknown> = {
         ...emp,
-        country: emp.country
-          ? `${emp.country.name} (${emp.country.code})`
-          : "",
+        country: emp.country ? `${emp.country.name} (${emp.country.code})` : "",
         iban: safeDecrypt(emp.iban),
         companyName: emp.company?.name ?? "—",
         salaryType: emp.salaryType ?? "",
@@ -162,7 +204,9 @@ export async function POST(request: NextRequest) {
     const metadataRows = [
       [`Raport contabilitate — ${appSettings.companyName || "Companie"}`],
       [`CUI/Reg. Com.: ${appSettings.companyCuiReg || "-"}`],
-      [`Generat la: ${new Date().toLocaleString("ro-RO")} (${appSettings.timezone})`],
+      [
+        `Generat la: ${new Date().toLocaleString("ro-RO")} (${appSettings.timezone})`,
+      ],
       [],
     ];
     const ws = XLSX.utils.aoa_to_sheet([...metadataRows, headers, ...rows]);
@@ -189,7 +233,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Setează înălțime header
-    ws["!rows"] = [{ hpt: 20 }, { hpt: 18 }, { hpt: 18 }, { hpt: 10 }, { hpt: 22 }];
+    ws["!rows"] = [
+      { hpt: 20 },
+      { hpt: 18 },
+      { hpt: 18 },
+      { hpt: 10 },
+      { hpt: 22 },
+    ];
 
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Angajati");
@@ -211,13 +261,17 @@ export async function POST(request: NextRequest) {
     return new NextResponse(buf, {
       status: 200,
       headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "Content-Disposition": `attachment; filename="export-angajati-${new Date().toISOString().slice(0, 10)}.xlsx"`,
         "Content-Length": String(buf.byteLength),
       },
     });
   } catch (error) {
     console.error("[EXPORT_EXCEL]", error);
-    return NextResponse.json({ error: "Eroare la generare Excel" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Eroare la generare Excel" },
+      { status: 500 },
+    );
   }
 }

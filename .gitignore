@@ -11,6 +11,11 @@ package-lock.json
 .env.local
 .env.*
 !.env.example
+!.env.production.example
+
+# Test / temp artifacts
+test-results/
+tmp-*.png
 
 # Prisma
 prisma/*.db-journal
@@ -24,6 +29,7 @@ Thumbs.db
 dist/
 *.db
 data/
+data/reports/
 
 dist-electron/
 release-electron/
@@ -34,3 +40,10 @@ release-electron/
 
 # Font subsetting backups (regenerabile cu npm run subset-pdf-fonts)
 assets/fonts/*.pre-subset.bak
+
+release-electron
+dist-electron
+data
+node_modules
+.vercel
+.env*.local

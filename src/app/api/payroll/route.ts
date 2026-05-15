@@ -1,7 +1,7 @@
-import { requireRole } from "@/lib/auth";
+import { generatePayslipFromTimesheet } from "@/lib/payslipFromTimesheet";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { ROLES_PAYROLL } from "@/lib/roles";
 import { prismaTyped as prisma } from "@/lib/prisma";
-import { generatePayslipPdf } from "@/lib/services/payslipPdf";
 import { Prisma } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -11,7 +11,10 @@ const querySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
   employeeId: z.coerce.number().int().positive().optional(),
   year: z.coerce.number().int().min(2024).max(2030).optional(),
-  weekNumber: z.coerce.number().int().min(1).max(52).optional(),
+  weekNumber: z.coerce.number().int().min(0).max(52).optional(),
+  type: z.enum(["weekly", "monthly"]).optional(),
+  month: z.coerce.number().int().min(1).max(12).optional(),
+  monthYear: z.coerce.number().int().min(2024).max(2030).optional(),
   emailSent: z
     .enum(["true", "false"])
     .optional()
@@ -22,31 +25,11 @@ const generateBodySchema = z.object({
   timesheetId: z.coerce.number().int().positive(),
 });
 
-const SYS_KEYS = {
-  holidayMoneyRate: "holiday_money.rate",
-} as const;
-
-function parseDecimalSafe(
-  raw: string | null | undefined,
-  fallback: Prisma.Decimal,
-): Prisma.Decimal {
-  if (!raw) return fallback;
-  const n = Number(raw);
-  if (Number.isNaN(n)) return fallback;
-  return new Prisma.Decimal(n);
-}
-
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_PAYROLL,
-  );
-  if (authError || !user) {
-    return (
-      authError ??
-      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
-    );
-  }
+  const planCheck = await checkPlan(request, FEATURES.PAYROLL_SLIPS, {
+    roles: ROLES_PAYROLL,
+  });
+  if (!planCheck.allowed) return planCheck.response;
 
   try {
     const { searchParams } = request.nextUrl;
@@ -66,6 +49,9 @@ export async function GET(request: NextRequest) {
       employeeId: searchParams.get("employeeId") ?? undefined,
       year: searchParams.get("year") ?? undefined,
       weekNumber: searchParams.get("weekNumber") ?? undefined,
+      type: searchParams.get("type") ?? undefined,
+      month: searchParams.get("month") ?? undefined,
+      monthYear: searchParams.get("monthYear") ?? undefined,
       emailSent: searchParams.get("emailSent") ?? undefined,
     });
 
@@ -76,12 +62,16 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const { employeeId, year, weekNumber, emailSent } = parsed.data;
+    const { employeeId, year, weekNumber, type, month, monthYear, emailSent } =
+      parsed.data;
 
     const where: Prisma.PayslipWhereInput = {
       employeeId,
       year,
       weekNumber,
+      type,
+      month,
+      monthYear,
       emailSent: emailSent === undefined ? undefined : emailSent,
     };
 
@@ -126,11 +116,10 @@ export async function GET(request: NextRequest) {
  * Body: { timesheetId }
  */
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_PAYROLL,
-  );
-  if (authError || !user) return authError!;
+  const planCheck = await checkPlan(request, FEATURES.PAYROLL_SLIPS, {
+    roles: ROLES_PAYROLL,
+  });
+  if (!planCheck.allowed) return planCheck.response;
 
   try {
     const body = await request.json().catch(() => null);
@@ -140,189 +129,11 @@ export async function POST(request: NextRequest) {
     }
 
     const { timesheetId } = parsed.data;
-
-    const timesheet = await prisma.timesheet.findUnique({
-      where: { id: timesheetId },
-      include: {
-        employee: {
-          select: {
-            id: true,
-            salaryType: true,
-            salaryAmount: true,
-            salaryCurrency: true,
-            companyId: true,
-          },
-        },
-      },
-    });
-
-    if (!timesheet) {
-      return NextResponse.json({ error: "Pontaj inexistent" }, { status: 404 });
+    const result = await generatePayslipFromTimesheet(timesheetId);
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
     }
-
-    if (timesheet.status !== "APPROVED") {
-      return NextResponse.json(
-        { error: "Pontajul trebuie să fie APPROVED" },
-        { status: 400 },
-      );
-    }
-
-    if (
-      timesheet.employee.salaryAmount === null ||
-      timesheet.employee.salaryAmount === undefined
-    ) {
-      return NextResponse.json(
-        { error: "Angajatul nu are tarif orar configurat în profil" },
-        { status: 400 },
-      );
-    }
-
-    if (timesheet.employee.salaryType !== "ORA") {
-      return NextResponse.json(
-        { error: "Angajatul trebuie să aibă salaryType = ORA" },
-        { status: 400 },
-      );
-    }
-
-    const holidayCfg = await prisma.systemConfig.findUnique({
-      where: { key: SYS_KEYS.holidayMoneyRate },
-    });
-
-    const hoursWorked = new Prisma.Decimal(timesheet.hoursWorked);
-    const salaryAmount = new Prisma.Decimal(timesheet.employee.salaryAmount);
-    const holidayRate = parseDecimalSafe(
-      holidayCfg?.value,
-      new Prisma.Decimal(0.4),
-    );
-    const travelAllowance = new Prisma.Decimal(
-      Number(timesheet.travelAllowance ?? 0),
-    );
-
-    const netSalary = hoursWorked.mul(salaryAmount);
-    const holidayMoney = hoursWorked.mul(holidayRate);
-    const totalPaid = netSalary.add(holidayMoney).add(travelAllowance);
-
-    const currency = (timesheet.employee.salaryCurrency || "EUR").toUpperCase();
-
-    const existing = await prisma.payslip.findUnique({
-      where: { timesheetId },
-      select: { id: true },
-    });
-
-    const payslipId = await prisma.$transaction(async (tx) => {
-      const id =
-        existing?.id ??
-        (
-          await tx.payslip.create({
-            data: {
-              organizationId: timesheet.organizationId,
-              timesheetId: timesheet.id,
-              employeeId: timesheet.employeeId,
-              companyId: timesheet.employee.companyId,
-              weekNumber: timesheet.weekNumber,
-              year: timesheet.year,
-              periodStart: timesheet.startDate,
-              periodEnd: timesheet.endDate,
-              currency,
-              grossTotal: totalPaid,
-              deductionsTotal: 0,
-              netTotal: totalPaid,
-              totalPaid,
-            },
-            select: { id: true },
-          })
-        ).id;
-
-      if (existing?.id) {
-        await tx.payslip.update({
-          where: { id },
-          data: {
-            employeeId: timesheet.employeeId,
-            companyId: timesheet.employee.companyId,
-            weekNumber: timesheet.weekNumber,
-            year: timesheet.year,
-            periodStart: timesheet.startDate,
-            periodEnd: timesheet.endDate,
-            currency,
-            grossTotal: totalPaid,
-            deductionsTotal: 0,
-            netTotal: totalPaid,
-            totalPaid,
-          },
-          select: { id: true },
-        });
-        await tx.payslipItem.deleteMany({ where: { payslipId: id } });
-      }
-
-      await tx.payslipItem.createMany({
-        data: [
-          {
-            payslipId: id,
-            type: "NET_SALARY",
-            label: "Salariu net",
-            description: "Tarif orar",
-            amount: netSalary,
-            quantity: hoursWorked,
-            rate: salaryAmount,
-            sortOrder: 10,
-          },
-          {
-            payslipId: id,
-            type: "HOLIDAY_MONEY",
-            label: "Bani concediu",
-            description: `Rate: ${holidayRate.toString()} / oră`,
-            amount: holidayMoney,
-            quantity: hoursWorked,
-            rate: holidayRate,
-            sortOrder: 20,
-          },
-          {
-            payslipId: id,
-            type: "TRAVEL_ALLOWANCE",
-            label: "Diurnă / transport",
-            description: "Introdus la pontaj (Diurnă / Travel Allowance)",
-            amount: travelAllowance,
-            quantity: null,
-            rate: null,
-            sortOrder: 30,
-          },
-        ],
-      });
-
-      return id;
-    });
-
-    // Persist PDF on disk + set pdfPath / pdfGeneratedAt (required by email routes).
-    try {
-      await generatePayslipPdf(payslipId);
-    } catch (pdfErr) {
-      console.error("[PAYSLIPS_POST_PDF]", pdfErr);
-      return NextResponse.json(
-        {
-          error:
-            "Fluturasul a fost salvat dar generarea PDF a esuat. Reincercati sau deschideti previzualizarea PDF din lista.",
-        },
-        { status: 500 },
-      );
-    }
-
-    const full = await prisma.payslip.findUnique({
-      where: { id: payslipId },
-      include: {
-        employee: { select: { id: true, firstName: true, lastName: true } },
-        timesheet: {
-          select: {
-            id: true,
-            hoursWorked: true,
-            standardHours: true,
-            status: true,
-          },
-        },
-        items: { orderBy: { sortOrder: "asc" } },
-      },
-    });
-
-    return NextResponse.json(full, { status: 201 });
+    return NextResponse.json(result.payslip, { status: result.status });
   } catch (error) {
     console.error("[PAYSLIPS_POST]", error);
     return NextResponse.json(

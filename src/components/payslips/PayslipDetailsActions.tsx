@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  fetchEmployerDetailsForPayslip,
+  generateWeeklyPayslip,
+  mapPayslipApiResponseToPayslipData,
+} from "@/components/payroll/WeeklyPayslipPDF";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -7,16 +12,6 @@ import { toast } from "sonner";
 export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-
-  async function post(url: string) {
-    const res = await fetch(url, {
-      method: "POST",
-      credentials: "same-origin",
-    });
-    const data = (await res.json().catch(() => ({}))) as { error?: string };
-    if (!res.ok) throw new Error(data.error ?? "Operațiunea a eșuat");
-    return data;
-  }
 
   async function postJson(url: string, body?: unknown) {
     const res = await fetch(url, {
@@ -33,16 +28,42 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
     return data;
   }
 
+  async function handleDownloadPdf() {
+    const [res, employer] = await Promise.all([
+      fetch(`/api/payroll/${payslipId}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      }),
+      fetchEmployerDetailsForPayslip(),
+    ]);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(
+        typeof data.error === "string" ? data.error : "Eroare la citirea PDF",
+      );
+    }
+    generateWeeklyPayslip(mapPayslipApiResponseToPayslipData(data, employer));
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <a
+      <button
+        type="button"
         className="rounded-lg border bg-white px-3 py-2 text-sm hover:bg-gray-50"
-        href={`/api/payroll/${payslipId}/pdf`}
-        target="_blank"
-        rel="noreferrer"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await handleDownloadPdf();
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Eroare");
+          } finally {
+            setBusy(false);
+          }
+        }}
       >
         PDF
-      </a>
+      </button>
       <button
         className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
         disabled={busy}

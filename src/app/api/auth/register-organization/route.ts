@@ -3,7 +3,7 @@ import { createDefaultOrganizationSettings } from "@/lib/organizationSettings";
 import { resolveUniqueOrganizationSlug } from "@/lib/organizationSlug";
 import { prismaBase as prisma } from "@/lib/prisma";
 import type { PricingPlanId } from "@/lib/pricingPlans";
-import { normalizePlanKey } from "@/lib/stripeOrganization";
+import { buildNewOrganizationPlanData } from "@/lib/organizationPlan";
 import { type NextRequest, NextResponse } from "next/server";
 import { UserRole } from "@prisma/client";
 import { z } from "zod";
@@ -70,7 +70,9 @@ export async function POST(request: NextRequest) {
 
     const slug = await resolveUniqueOrganizationSlug(d.companyName);
     const passwordHash = await hashPassword(d.password);
-    const planKey = normalizePlanKey(planId);
+    const planData = await buildNewOrganizationPlanData(prisma, planId, {
+      trial: true,
+    });
 
     const org = await prisma.organization.create({
       data: {
@@ -80,8 +82,7 @@ export async function POST(request: NextRequest) {
         address: emptyToNull(d.companyAddress),
         phone: emptyToNull(d.companyPhone),
         email: companyEmail,
-        plan: planKey,
-        status: "trial",
+        ...planData,
       },
     });
 

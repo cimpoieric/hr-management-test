@@ -171,7 +171,7 @@ export default function AngajatDetailPage() {
         return;
       }
 
-      const dl = await fetch(data.downloadUrl);
+      const dl = await fetch(data.downloadUrl, { credentials: "same-origin" });
       if (!dl.ok) {
         alert("Fișa a fost generată, dar nu a putut fi descărcată.");
         return;

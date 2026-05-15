@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
+import { requireRole } from "@/lib/auth";
+import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { decrypt } from "@/lib/encryption";
+import { prisma } from "@/lib/prisma";
 import { salaryAmountToJson } from "@/lib/salaryFields";
+import { type NextRequest, NextResponse } from "next/server";
 
 function safeDecrypt(value: string | null | undefined): string {
   if (!value) return "";
@@ -14,9 +15,15 @@ function safeDecrypt(value: string | null | undefined): string {
 }
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_SETTINGS_ADMIN,
+  );
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   const employees = await prisma.employee.findMany({
@@ -69,7 +76,7 @@ export async function GET(request: NextRequest) {
         String(r.salaryAmount),
         r.salaryCurrency,
         r.status,
-      ].join(";")
+      ].join(";"),
     ),
   ];
 
@@ -77,6 +84,6 @@ export async function GET(request: NextRequest) {
     totalSampleRows: rows.length,
     rows,
     csvPreview: csvPreviewLines.join("\n"),
-    note: "CNP/IBAN sunt forțate text pentru export contabil (CSV: =\"...\", XLSX: cell type s).",
+    note: 'CNP/IBAN sunt forțate text pentru export contabil (CSV: ="...", XLSX: cell type s).',
   });
 }

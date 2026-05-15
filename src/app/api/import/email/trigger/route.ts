@@ -5,13 +5,17 @@
  * Doar ADMIN și OPERATOR.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee } from "@/lib/permissions";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { triggerManualImport } from "@/lib/cron";
+import { canEditEmployee } from "@/lib/permissions";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -23,8 +27,11 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error("[EMAIL_TRIGGER]", error);
     return NextResponse.json(
-      { error: "Eroare la procesare", message: error instanceof Error ? error.message : "?" },
-      { status: 500 }
+      {
+        error: "Eroare la procesare",
+        message: error instanceof Error ? error.message : "?",
+      },
+      { status: 500 },
     );
   }
 }

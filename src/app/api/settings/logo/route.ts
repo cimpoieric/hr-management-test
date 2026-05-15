@@ -5,52 +5,52 @@
  * POST   /api/settings/logo — Upload logo nou (PNG/JPG, max 500KB)
  * DELETE /api/settings/logo — Șterge logo
  *
- * Logo stocat per organizație în: ./data/settings/{organizationId}/logo.png
+ * Producție (Vercel): Cloudflare R2 / S3 (`S3_*`, opțional `S3_PUBLIC_BASE_URL`).
+ * Local: fallback pe disc în ./data/settings/{organizationId}/logo.png
  */
 
-import { existsSync } from "fs";
-import { join } from "path";
-import { requireAuth, requireRole } from "@/lib/auth";
+import { requireAuth } from "@/lib/auth";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
+import {
+  clearOrganizationLogo,
+  resolveOrganizationLogo,
+  uploadOrganizationLogo,
+} from "@/lib/organizationLogoStorage";
 import { prisma } from "@/lib/prisma";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
-import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import { type NextRequest, NextResponse } from "next/server";
 
-const SETTINGS_ROOT = join(process.cwd(), "data", "settings");
 const MAX_SIZE = 500 * 1024; // 500KB
 
-function logoDirForOrganization(organizationId: string): string {
-  return join(SETTINGS_ROOT, organizationId);
-}
-
-function logoPathForOrganization(organizationId: string): string {
-  return join(logoDirForOrganization(organizationId), "logo.png");
-}
-
-async function ensureSettingsDir(organizationId: string): Promise<void> {
-  const dir = logoDirForOrganization(organizationId);
-  if (!existsSync(dir)) {
-    await mkdir(dir, { recursive: true });
-  }
-}
-
-async function clearStoredLogo(organizationId: string): Promise<void> {
-  const logoPath = logoPathForOrganization(organizationId);
-  if (existsSync(logoPath)) {
-    await unlink(logoPath);
-  }
-
-  await prisma.settings.upsert({
+async function getStoredLogoUrl(
+  organizationId: string,
+): Promise<string | null> {
+  const settings = await prisma.settings.findUnique({
     where: { organizationId },
-    create: {
-      organizationId,
-      logoUrl: null,
-      language: "en",
-    },
-    update: {
-      logoUrl: null,
-    },
+    select: { logoUrl: true },
   });
+  return settings?.logoUrl ?? null;
+}
+
+async function persistLogoUrl(
+  organizationId: string,
+  logoUrl: string | null,
+): Promise<void> {
+  await prisma.$transaction([
+    prisma.settings.upsert({
+      where: { organizationId },
+      create: {
+        organizationId,
+        logoUrl,
+        language: "en",
+      },
+      update: { logoUrl },
+    }),
+    prisma.organization.update({
+      where: { id: organizationId },
+      data: { logoUrl },
+    }),
+  ]);
 }
 
 export async function GET(request: NextRequest) {
@@ -63,20 +63,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const logoPath = logoPathForOrganization(user.organizationId);
-    const exists = existsSync(logoPath);
-    if (!exists) {
+    const storedLogoUrl = await getStoredLogoUrl(user.organizationId);
+    const logo = await resolveOrganizationLogo(
+      user.organizationId,
+      storedLogoUrl,
+    );
+    if (!logo.exists) {
       return NextResponse.json({ exists: false });
     }
 
-    const buffer = await readFile(logoPath);
-    const base64 = buffer.toString("base64");
-    const mimeType = "image/png";
-
     return NextResponse.json({
       exists: true,
-      url: `data:${mimeType};base64,${base64}`,
-      size: buffer.length,
+      url: logo.url,
+      size: logo.size,
     });
   } catch (error) {
     console.error("[LOGO_GET]", error);
@@ -85,20 +84,13 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_SETTINGS_ADMIN,
-  );
-  if (authError || !user) {
-    return (
-      authError ??
-      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
-    );
-  }
+  const planCheck = await checkPlan(request, FEATURES.CUSTOM_BRANDING, {
+    roles: ROLES_SETTINGS_ADMIN,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
 
   try {
-    await ensureSettingsDir(user.organizationId);
-
     const formData = await request.formData();
     const file = formData.get("logo") as File | null;
 
@@ -119,46 +111,54 @@ export async function POST(request: NextRequest) {
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
-    const logoPath = logoPathForOrganization(user.organizationId);
+    const previousLogoUrl = await getStoredLogoUrl(user.organizationId);
+    const uploaded = await uploadOrganizationLogo(
+      user.organizationId,
+      file,
+      buffer,
+    );
 
-    await writeFile(logoPath, buffer);
+    await persistLogoUrl(user.organizationId, uploaded.url);
 
-    await prisma.settings.upsert({
-      where: { organizationId: user.organizationId },
-      create: {
-        organizationId: user.organizationId,
-        logoUrl: logoPath,
-        language: "en",
-      },
-      update: {
-        logoUrl: logoPath,
-      },
-    });
+    if (previousLogoUrl && previousLogoUrl !== uploaded.url) {
+      await clearOrganizationLogo(user.organizationId, previousLogoUrl);
+    }
 
     return NextResponse.json({
       success: true,
-      size: buffer.length,
+      url: uploaded.url,
+      size: uploaded.size,
+      storage: uploaded.storage,
     });
   } catch (error) {
     console.error("[LOGO_POST]", error);
+    const message =
+      error instanceof Error ? error.message : "Eroare la upload";
+    if (message.includes("S3_") || message.includes("R2/S3")) {
+      return NextResponse.json(
+        {
+          error:
+            "Stocarea logo-ului nu este configurata. Seteaza variabilele S3_* (si optional S3_PUBLIC_BASE_URL) in Vercel.",
+        },
+        { status: 503 },
+      );
+    }
     return NextResponse.json({ error: "Eroare la upload" }, { status: 500 });
   }
 }
 
 export async function DELETE(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_SETTINGS_ADMIN,
-  );
-  if (authError || !user) {
-    return (
-      authError ??
-      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
-    );
-  }
+  const planCheck = await checkPlan(request, FEATURES.CUSTOM_BRANDING, {
+    roles: ROLES_SETTINGS_ADMIN,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
 
   try {
-    await clearStoredLogo(user.organizationId);
+    const storedLogoUrl = await getStoredLogoUrl(user.organizationId);
+    await clearOrganizationLogo(user.organizationId, storedLogoUrl);
+    await persistLogoUrl(user.organizationId, null);
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("[LOGO_DELETE]", error);

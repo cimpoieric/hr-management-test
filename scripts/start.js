@@ -174,9 +174,18 @@ function resolveNextCliPath() {
   try {
     return require.resolve("next/dist/bin/next", { paths: [CWD] });
   } catch {
-    const fallback = path.join(CWD, "node_modules", "next", "dist", "bin", "next");
+    const fallback = path.join(
+      CWD,
+      "node_modules",
+      "next",
+      "dist",
+      "bin",
+      "next",
+    );
     if (!fs.existsSync(fallback)) {
-      logERR(`Next.js nu a fost găsit (lipsește node_modules?). Căutat: ${fallback}`);
+      logERR(
+        `Next.js nu a fost găsit (lipsește node_modules?). Căutat: ${fallback}`,
+      );
       process.exit(1);
     }
     return fallback;
@@ -184,13 +193,17 @@ function resolveNextCliPath() {
 }
 
 const nextCli = resolveNextCliPath();
-const nextArgs = isDev ? ["dev", "-p", port, "-H", host] : ["start", "-p", port, "-H", host];
+const nextArgs = isDev
+  ? ["dev", "-p", port, "-H", host]
+  : ["start", "-p", port, "-H", host];
 
 // Backup automat (opțional) — via cron / Task Scheduler
 const backupAuto = process.env.BACKUP_AUTO === "true";
 if (!isDev && backupAuto) {
   logWARN("Backup automat activat — configurează cron sau Task Scheduler");
-  log("  Exemplu: 0 2 * * * curl -X POST http://localhost:3000/api/backup/create");
+  log(
+    "  Exemplu: 0 2 * * * curl -X POST http://localhost:3000/api/backup/create",
+  );
 }
 
 log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

@@ -5,22 +5,22 @@
  */
 
 export interface Country {
-  code: string;      // ISO 3166-1 alpha-2 (ex: "NL")
-  name: string;      // Nume românesc (ex: "Olanda")
-  flag: string;      // Emoji steag (ex: "🇳🇱")
-  currency: string;  // Ex: "EUR"
+  code: string; // ISO 3166-1 alpha-2 (ex: "NL")
+  name: string; // Nume românesc (ex: "Olanda")
+  flag: string; // Emoji steag (ex: "🇳🇱")
+  currency: string; // Ex: "EUR"
 }
 
 export const DEPLOYMENT_COUNTRIES: Country[] = [
-  { code: "NL", name: "Olanda",       flag: "🇳🇱", currency: "EUR" },
-  { code: "DE", name: "Germania",     flag: "🇩🇪", currency: "EUR" },
-  { code: "IT", name: "Italia",       flag: "🇮🇹", currency: "EUR" },
-  { code: "BE", name: "Belgia",       flag: "🇧🇪", currency: "EUR" },
-  { code: "FR", name: "Franța",       flag: "🇫🇷", currency: "EUR" },
-  { code: "AT", name: "Austria",      flag: "🇦🇹", currency: "EUR" },
-  { code: "ES", name: "Spania",       flag: "🇪🇸", currency: "EUR" },
-  { code: "DK", name: "Danemarca",    flag: "🇩🇰", currency: "DKK" },
-  { code: "SE", name: "Suedia",       flag: "🇸🇪", currency: "SEK" },
+  { code: "NL", name: "Olanda", flag: "🇳🇱", currency: "EUR" },
+  { code: "DE", name: "Germania", flag: "🇩🇪", currency: "EUR" },
+  { code: "IT", name: "Italia", flag: "🇮🇹", currency: "EUR" },
+  { code: "BE", name: "Belgia", flag: "🇧🇪", currency: "EUR" },
+  { code: "FR", name: "Franța", flag: "🇫🇷", currency: "EUR" },
+  { code: "AT", name: "Austria", flag: "🇦🇹", currency: "EUR" },
+  { code: "ES", name: "Spania", flag: "🇪🇸", currency: "EUR" },
+  { code: "DK", name: "Danemarca", flag: "🇩🇰", currency: "DKK" },
+  { code: "SE", name: "Suedia", flag: "🇸🇪", currency: "SEK" },
   { code: "UK", name: "Marea Britanie", flag: "🇬🇧", currency: "GBP" },
 ];
 

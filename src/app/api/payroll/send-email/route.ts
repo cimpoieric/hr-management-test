@@ -1,11 +1,11 @@
 import { withAuditContext } from "@/lib/audit";
-import { requireRole } from "@/lib/auth";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { ROLES_PAYROLL } from "@/lib/roles";
-import { sendFluturasEmail } from "@/lib/email";
+import { sendPayslipFluturasById } from "@/lib/email";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import {
-  getEmailSettings,
   getSMTPConfig,
+  isSmtpConfigured,
   testSMTPConfig,
 } from "@/lib/services/email";
 import { type NextRequest, NextResponse } from "next/server";
@@ -17,21 +17,12 @@ const postSchema = z.object({
   subiect: z.string().min(1).max(200).optional(),
 });
 
-function formatRoDate(d: Date): string {
-  const dt = new Date(d);
-  const dd = String(dt.getDate()).padStart(2, "0");
-  const mm = String(dt.getMonth() + 1).padStart(2, "0");
-  const yyyy = String(dt.getFullYear());
-  return `${dd}.${mm}.${yyyy}`;
-}
-
 export async function POST(request: NextRequest) {
   return withAuditContext(request, async () => {
-    const { user, response: authError } = await requireRole(
-      request,
-      ROLES_PAYROLL,
-    );
-    if (authError || !user) return authError!;
+    const planCheck = await checkPlan(request, FEATURES.PAYROLL_SLIPS, {
+      roles: ROLES_PAYROLL,
+    });
+    if (!planCheck.allowed) return planCheck.response;
 
     try {
       const body = await request.json().catch(() => null);
@@ -49,12 +40,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Empty list" }, { status: 400 });
       }
 
-      const settings = await getEmailSettings();
-      if (!settings || !settings.smtpHost) {
+      if (!(await isSmtpConfigured())) {
         return NextResponse.json(
           {
             error:
-              "Setarile email nu sunt configurate. Contactati administratorul.",
+              "Serviciul de email nu este configurat (SMTP in Vercel sau Setari email).",
           },
           { status: 400 },
         );
@@ -113,92 +103,21 @@ export async function POST(request: NextRequest) {
 
       for (const payslipId of payslipIds) {
         try {
+          const r = await sendPayslipFluturasById(payslipId, {
+            subiect: parsed.data.subiect,
+          });
           const payslip = await prisma.payslip.findUnique({
             where: { id: payslipId },
-            include: {
-              employee: {
-                select: {
-                  id: true,
-                  firstName: true,
-                  lastName: true,
-                  email: true,
-                  position: true,
-                },
-              },
-              company: { select: { id: true, name: true, address: true } },
-              timesheet: { select: { id: true, hoursWorked: true } },
-              items: { orderBy: { sortOrder: "asc" } },
+            select: {
+              employeeId: true,
+              employee: { select: { email: true } },
             },
-          });
-
-          if (!payslip) {
-            detalii.push({
-              angajatId: String(payslipId),
-              status: "esuat",
-              eroare: "Fluturas inexistent",
-              payslipId,
-            });
-            continue;
-          }
-
-          const toAddress = (payslip.employee.email ?? "").trim();
-          if (!toAddress) {
-            detalii.push({
-              angajatId: String(payslip.employeeId),
-              status: "esuat",
-              eroare: "Angajatul nu are email setat",
-              payslipId,
-            });
-            continue;
-          }
-
-          const currency = String(payslip.currency ?? "EUR").toUpperCase();
-          const netSalary =
-            payslip.items.find((i) => i.type === "NET_SALARY")?.amount ?? 0;
-          const travel =
-            payslip.items.find((i) => i.type === "TRAVEL_ALLOWANCE")?.amount ??
-            0;
-          const holiday =
-            payslip.items.find((i) => i.type === "HOLIDAY_MONEY")?.amount ?? 0;
-
-          const r = await sendFluturasEmail({
-            angajatEmail: toAddress,
-            angajatNume:
-              `${String(payslip.employee.lastName ?? "").trim()} ${String(
-                payslip.employee.firstName ?? "",
-              ).trim()}`.trim(),
-            angajatId: String(payslip.employeeId),
-            pozitie: String(payslip.employee.position ?? "").trim(),
-            saptamana: payslip.weekNumber,
-            an: payslip.year,
-            perioadaStart: formatRoDate(payslip.periodStart),
-            perioadaEnd: formatRoDate(payslip.periodEnd),
-            oreLucrate: Number(String(payslip.timesheet.hoursWorked)),
-            salariuOreLucrate: Number(String(netSalary)),
-            salariuNet: Number(String(netSalary)),
-            diurna: Number(String(travel)),
-            totalPlatit: Number(String(payslip.totalPaid)),
-            holidayMoney: Number(String(holiday)),
-            moneda: currency,
-            subiect: parsed.data.subiect,
-            numeFirma: String(payslip.company.name ?? "Cedol Autocraft SRL"),
-            adresaFirma: String(payslip.company.address ?? ""),
-          });
-
-          await prisma.payslip.update({
-            where: { id: payslip.id },
-            data: {
-              emailSent: true,
-              emailSentAt: new Date(),
-              emailLogId: r.emailLogId || null,
-            },
-            select: { id: true },
           });
 
           detalii.push({
-            angajatId: String(payslip.employeeId),
+            angajatId: String(payslip?.employeeId ?? payslipId),
             status: "trimis",
-            email: toAddress,
+            email: String(payslip?.employee.email ?? "").trim(),
             payslipId,
             emailLogId: r.emailLogId,
           });

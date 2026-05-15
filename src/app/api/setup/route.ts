@@ -1,4 +1,5 @@
 import { encrypt } from "@/lib/encryption";
+import { buildNewOrganizationPlanData } from "@/lib/organizationPlan";
 import { createDefaultOrganizationSettingsInTx } from "@/lib/organizationSettings";
 import { prismaBase } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
@@ -105,11 +106,16 @@ export async function POST(req: NextRequest) {
         slug = `${slug}-${Date.now().toString(36)}`;
       }
 
+      const planData = await buildNewOrganizationPlanData(tx, "starter", {
+        trial: true,
+      });
+
       const organization = await tx.organization.create({
         data: {
           name: data.companyName,
           slug,
           defaultLanguage: "ro",
+          ...planData,
         },
         select: { id: true, name: true, slug: true },
       });

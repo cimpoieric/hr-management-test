@@ -10,7 +10,9 @@ import {
 } from "@/components/filters/AdvancedFilter";
 import { ReadOnlyField } from "@/components/ui/ReadOnlyField";
 import { useCanEdit } from "@/hooks/usePermission";
-import { getPayrollWeekDefaults } from "@/lib/isoWeek";
+import { generateWeeklyPayslip } from "@/components/payroll/WeeklyPayslipPDF";
+import { formatIsoWeekPeriod, getPayrollWeekDefaults } from "@/lib/isoWeek";
+import { preventWheelOnFocusedNumberInput } from "@/lib/numericInput";
 import {
   LUNAR_WORKING_DAYS_NORM,
   parseSalaryTypeInput,
@@ -50,6 +52,22 @@ export default function PlataPage() {
   const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
   const [payYear, setPayYear] = useState(() => getPayrollWeekDefaults().year);
   const [payWeek, setPayWeek] = useState(() => getPayrollWeekDefaults().week);
+  const [companyName, setCompanyName] = useState("Cedol Autocraft SRL");
+  const [companyAddress, setCompanyAddress] = useState(
+    "Iasi, Str. Pacurari nr. 159a, Jud. Iasi",
+  );
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("settings"))))
+      .then((data) => {
+        if (data.companyName) setCompanyName(String(data.companyName));
+        if (data.companyAddress) setCompanyAddress(String(data.companyAddress));
+      })
+      .catch(() => {
+        // keep defaults
+      });
+  }, []);
 
   useEffect(() => {
     fetch("/api/organization/companies")
@@ -167,20 +185,15 @@ export default function PlataPage() {
     return () => ch.close();
   }, []);
 
-  /** Same tab: return after editing timesheet. */
+  /** Resync ore din pontaj doar la revenirea pe tab (nu la fiecare focus pe input). */
   useEffect(() => {
-    const run = () => void syncRef.current();
     const onVis = () => {
-      if (document.visibilityState === "visible") run();
+      if (document.visibilityState === "visible") {
+        void syncRef.current();
+      }
     };
-    window.addEventListener("focus", run);
     document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("pageshow", run);
-    return () => {
-      window.removeEventListener("focus", run);
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("pageshow", run);
-    };
+    return () => document.removeEventListener("visibilitychange", onVis);
   }, []);
 
   const selectableEmployees = employees.filter((e) =>
@@ -336,49 +349,44 @@ export default function PlataPage() {
     if (!pdfExportAllowed) return;
     setExporting("pdf");
     try {
-      const unitsByEmployeeId: Record<string, number> = {};
+      const period = formatIsoWeekPeriod(payYear, payWeek);
       for (const id of selectedIds) {
         const emp = employees.find((e) => e.id === id);
-        if (!emp) continue;
-        const t = parseSalaryTypeInput(emp.salaryType ?? "");
-        const raw = unitsByEmp[String(id)];
-        const s = raw !== undefined ? String(raw).trim() : "";
-        if (t === "LUNAR") {
-          if (s === "") unitsByEmployeeId[String(id)] = LUNAR_WORKING_DAYS_NORM;
-          else {
-            const n = Number(s.replace(",", "."));
-            unitsByEmployeeId[String(id)] =
-              Number.isFinite(n) && n >= 0 ? n : LUNAR_WORKING_DAYS_NORM;
-          }
-        } else {
-          const n = Number(
-            (raw !== undefined ? String(raw) : "0").replace(",", "."),
-          );
-          unitsByEmployeeId[String(id)] = Number.isFinite(n) && n >= 0 ? n : 0;
-        }
+        if (!emp || !weeklyPaySalaryDataComplete(emp)) continue;
+        const units = parsedUnitsForExport(emp, unitsByEmp[String(id)]);
+        if (units <= 0) continue;
+        const netSalary = liveWeeklyPayTotal(
+          emp.salaryType,
+          unitsByEmp[String(id)],
+          emp.salaryAmount,
+        );
+        if (netSalary == null) continue;
+        const hoursWorked =
+          parseSalaryTypeInput(emp.salaryType ?? "") === "ORA" ? units : 0;
+        const hourlyRate =
+          hoursWorked > 0 ? netSalary / hoursWorked : Number(emp.salaryAmount ?? 0);
+        const employeeName =
+          `${String(emp.lastName ?? "").trim()} ${String(emp.firstName ?? "").trim()}`.trim() ||
+          "—";
+        generateWeeklyPayslip({
+          companyName,
+          companyAddress,
+          employeeName,
+          employeeId: String(emp.id),
+          position: "—",
+          weekNumber: payWeek,
+          year: payYear,
+          periodStart: period.start,
+          periodEnd: period.end,
+          hoursWorked,
+          hourlyRate,
+          salaryForHours: netSalary,
+          netSalary,
+          travelAllowance: 0,
+          totalPaid: netSalary,
+          holidayMoney: 0,
+        });
       }
-      const res = await fetch("/api/export/weekly-pay-pdf", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          employeeIds: Array.from(selectedIds),
-          unitsByEmployeeId,
-        }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        alert((d.error as string) ?? t("pages.pay.alertPdfExportFailed"));
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `weekly-pay-sheet-${new Date().toISOString().slice(0, 10)}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
     } catch {
       alert(t("pages.pay.alertPdfExportFailed"));
     } finally {
@@ -404,9 +412,13 @@ export default function PlataPage() {
             type="number"
             min={2020}
             max={2040}
-            className="mt-1 w-28 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm"
+            className="mt-1 w-28 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm tabular-nums"
+            onWheel={preventWheelOnFocusedNumberInput}
             value={payYear}
-            onChange={(e) => setPayYear(Number(e.target.value) || payYear)}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10);
+              if (e.target.value !== "" && Number.isFinite(n)) setPayYear(n);
+            }}
           />
         </div>
         <div>
@@ -417,9 +429,13 @@ export default function PlataPage() {
             type="number"
             min={1}
             max={53}
-            className="mt-1 w-24 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm"
+            className="mt-1 w-24 rounded-lg border border-violet-200 bg-white px-2 py-1.5 text-sm tabular-nums"
+            onWheel={preventWheelOnFocusedNumberInput}
             value={payWeek}
-            onChange={(e) => setPayWeek(Number(e.target.value) || payWeek)}
+            onChange={(e) => {
+              const n = Number.parseInt(e.target.value, 10);
+              if (e.target.value !== "" && Number.isFinite(n)) setPayWeek(n);
+            }}
           />
         </div>
         <p className="text-xs text-gray-700 flex-1 min-w-[14rem] leading-snug">
@@ -573,9 +589,9 @@ export default function PlataPage() {
                               {cfg.label}
                             </label>
                             <ReadOnlyField
-                              type="number"
+                              type="text"
+                              inputMode="decimal"
                               min={cfg.min}
-                              step={cfg.step}
                               placeholder={cfg.placeholder || undefined}
                               value={raw}
                               onChange={(e) =>

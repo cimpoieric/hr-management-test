@@ -15,6 +15,13 @@ import { startTransition, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { PermissionGuard } from "@/components/auth/PermissionGuard";
+import {
+  fetchEmployerDetailsForPayslip,
+  generateWeeklyPayslip,
+  mapPayslipApiResponseToPayslipData,
+  openWeeklyPayslipPreview,
+} from "@/components/payroll/WeeklyPayslipPDF";
+import { isValidDate } from "@/lib/paymentPeriod";
 import { ROUTES } from "@/lib/routes";
 import {
   AlertDialog,
@@ -129,20 +136,41 @@ export function PayslipsTableClient({
     return data;
   }
 
-  function handlePreviewPDF(payslipId: number) {
-    window.open(
-      `/api/payroll/${payslipId}/pdf`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+  async function loadPayslipData(payslipId: number) {
+    const [res, employer] = await Promise.all([
+      fetch(`/api/payroll/${payslipId}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      }),
+      fetchEmployerDetailsForPayslip(),
+    ]);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(
+        typeof data.error === "string"
+          ? data.error
+          : t("components.toast.errorGeneric"),
+      );
+    }
+    return mapPayslipApiResponseToPayslipData(data, employer);
   }
 
-  function handleDownloadPDF(payslipId: number) {
-    window.open(
-      `/api/payroll/${payslipId}/pdf`,
-      "_blank",
-      "noopener,noreferrer",
-    );
+  async function handlePreviewPDF(payslipId: number) {
+    try {
+      const data = await loadPayslipData(payslipId);
+      openWeeklyPayslipPreview(data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("common.error"));
+    }
+  }
+
+  async function handleDownloadPDF(payslipId: number) {
+    try {
+      const data = await loadPayslipData(payslipId);
+      generateWeeklyPayslip(data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("common.error"));
+    }
   }
 
   async function handleSendEmail(payslipId: number) {
@@ -179,8 +207,8 @@ export function PayslipsTableClient({
   function defaultSubjectFromSelection(): string {
     const samplePayslip = items.find((p) => selected.has(p.id)) ?? items[0];
     if (!samplePayslip) return t("pages.payroll.payslipSubjectDefault");
-    const d = new Date(samplePayslip.periodEnd);
-    if (Number.isNaN(d.getTime()))
+    const d = new Date(String(samplePayslip.periodEnd ?? ""));
+    if (!isValidDate(d))
       return t("pages.payroll.payslipSubjectWithYear", {
         year: String(samplePayslip.year),
       });
@@ -410,20 +438,14 @@ export function PayslipsTableClient({
                   </TableCell>
 
                   <TableCell className="w-[60px] p-2 text-center">
-                    {p.pdfPath ? (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        asChild
-                      >
-                        <a href={`/api/payroll/${p.id}/pdf`} download>
-                          <Download className="h-4 w-4" />
-                        </a>
-                      </Button>
-                    ) : (
-                      <span className="text-muted-foreground text-xs">-</span>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => void handleDownloadPDF(p.id)}
+                    >
+                      <Download className="h-4 w-4" />
+                    </Button>
                   </TableCell>
 
                   <TableCell className="w-[80px] p-2 text-center">

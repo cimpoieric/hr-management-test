@@ -11,6 +11,7 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { preventWheelOnFocusedNumberInput } from "@/lib/numericInput";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -39,6 +40,7 @@ interface FormData {
   salaryAmount: string;
   salaryCurrency: string;
   salaryStartDate: string;
+  paymentFrequency: "weekly" | "monthly";
 }
 
 interface FormErrors {
@@ -73,6 +75,7 @@ const initialForm: FormData = {
   salaryAmount: "",
   salaryCurrency: "RON",
   salaryStartDate: "",
+  paymentFrequency: "weekly",
 };
 
 interface EmployeeFormProps {
@@ -235,6 +238,8 @@ export function EmployeeForm({
           salaryStartDate: data.salaryStartDate
             ? new Date(data.salaryStartDate).toISOString().slice(0, 10)
             : "",
+          paymentFrequency:
+            data.paymentFrequency === "monthly" ? "monthly" : "weekly",
         });
       })
       .catch(() => {
@@ -505,6 +510,7 @@ export function EmployeeForm({
               : null,
           salaryCurrency: hasSalaryCore ? form.salaryCurrency || "RON" : null,
           salaryStartDate: form.salaryStartDate.trim() || null,
+          paymentFrequency: form.paymentFrequency,
         });
       }
 
@@ -821,14 +827,29 @@ export function EmployeeForm({
                 options={salaryTypeSelectOptions}
               />
               <Field
+                label="Frecvență plată"
+                name="paymentFrequency"
+                value={form.paymentFrequency}
+                onChange={(v) =>
+                  updateField(
+                    "paymentFrequency",
+                    v === "monthly" ? "monthly" : "weekly",
+                  )
+                }
+                type="select"
+                options={[
+                  { value: "weekly", label: "Săptămânal (pontaj + fluturaș)" },
+                  { value: "monthly", label: "Lunar (pontaj + fluturaș)" },
+                ]}
+              />
+              <Field
                 label={t("components.employeeForm.field.grossAmount")}
                 name="salaryAmount"
                 value={form.salaryAmount}
                 onChange={(v) =>
                   updateField("salaryAmount", v.replace(/[^0-9.,]/g, ""))
                 }
-                type="number"
-                step="0.01"
+                type="decimal"
                 placeholder={t("components.employeeForm.field.grossAmountPh")}
                 warning={
                   salaryAmountNonPositiveWarning
@@ -996,7 +1017,7 @@ interface FieldProps {
   error?: string;
   /** Avertisment soft (portocaliu), nu blochează submit-ul */
   warning?: string;
-  type?: "text" | "email" | "number" | "date" | "select" | "textarea";
+  type?: "text" | "email" | "number" | "decimal" | "date" | "select" | "textarea";
   placeholder?: string;
   maxLength?: number;
   step?: string;
@@ -1058,16 +1079,26 @@ function Field({
         />
       ) : (
         <input
-          type={type}
+          type={type === "decimal" ? "text" : type}
           name={name}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           placeholder={placeholder}
           maxLength={maxLength}
+          inputMode={type === "decimal" ? "decimal" : undefined}
           step={type === "number" ? step : undefined}
           disabled={disabled}
-          className={inputClass}
+          autoComplete={type === "decimal" ? "off" : undefined}
+          onWheel={
+            type === "number" || type === "decimal"
+              ? preventWheelOnFocusedNumberInput
+              : undefined
+          }
+          className={
+            inputClass +
+            (type === "decimal" || type === "number" ? " tabular-nums" : "")
+          }
         />
       )}
       {warning && !error && (

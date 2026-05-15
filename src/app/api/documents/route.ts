@@ -5,21 +5,21 @@
  * Paginare server: limit implicit 50, max 200. Răspuns: total, totalPages, page, stats.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { getAppSettings } from "@/lib/appSettings";
 import { requireAuth } from "@/lib/auth";
 import { DOCUMENT_TYPES } from "@/lib/documentConstants";
 import { expiredDocumentsWhere } from "@/lib/documentStats";
 import { documentsWhereVisible } from "@/lib/documentVisibility";
-import { getAppSettings } from "@/lib/appSettings";
+import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+import { type NextRequest, NextResponse } from "next/server";
 
 function expiringSoonWindowWhere(
   at: Date,
-  alertExpiredDocumentsDays: number
+  alertExpiredDocumentsDays: number,
 ): Prisma.DocumentWhereInput {
   const expiringLimit = new Date(
-    at.getTime() + alertExpiredDocumentsDays * 24 * 60 * 60 * 1000
+    at.getTime() + alertExpiredDocumentsDays * 24 * 60 * 60 * 1000,
   );
   return {
     expiryDate: {
@@ -32,10 +32,10 @@ function expiringSoonWindowWhere(
 
 function validBucketWhere(
   at: Date,
-  alertExpiredDocumentsDays: number
+  alertExpiredDocumentsDays: number,
 ): Prisma.DocumentWhereInput {
   const expiringLimit = new Date(
-    at.getTime() + alertExpiredDocumentsDays * 24 * 60 * 60 * 1000
+    at.getTime() + alertExpiredDocumentsDays * 24 * 60 * 60 * 1000,
   );
   return {
     AND: [
@@ -71,7 +71,7 @@ function searchWhere(term: string): Prisma.DocumentWhereInput {
     },
     { type: { contains: safe } },
   ];
-  const asNum = parseInt(safe, 10);
+  const asNum = Number.parseInt(safe, 10);
   if (!Number.isNaN(asNum) && String(asNum) === safe) {
     parts.push({ employeeId: asNum });
   }
@@ -81,17 +81,23 @@ function searchWhere(term: string): Prisma.DocumentWhereInput {
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
     const { searchParams } = request.nextUrl;
     const now = new Date();
 
-    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
+    const page = Math.max(
+      1,
+      Number.parseInt(searchParams.get("page") ?? "1", 10),
+    );
     const limit = Math.min(
       200,
-      Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10))
+      Math.max(1, Number.parseInt(searchParams.get("limit") ?? "50", 10)),
     );
     const skip = (page - 1) * limit;
 
@@ -100,19 +106,22 @@ export async function GET(request: NextRequest) {
     const statusRaw = searchParams.get("status");
     const search = searchParams.get("search")?.trim() ?? "";
 
-    const settings = await getAppSettings();
+    const settings = await getAppSettings(user.organizationId);
     const alertDays = settings.alertExpiredDocumentsDays;
 
     const andParts: Prisma.DocumentWhereInput[] = [];
 
     if (employeeIdRaw) {
-      const id = parseInt(employeeIdRaw, 10);
+      const id = Number.parseInt(employeeIdRaw, 10);
       if (!Number.isNaN(id)) {
         andParts.push({ employeeId: id });
       }
     }
 
-    if (type && DOCUMENT_TYPES.includes(type as (typeof DOCUMENT_TYPES)[number])) {
+    if (
+      type &&
+      DOCUMENT_TYPES.includes(type as (typeof DOCUMENT_TYPES)[number])
+    ) {
       andParts.push({ type });
     }
 
@@ -142,12 +151,18 @@ export async function GET(request: NextRequest) {
     }
 
     const combined: Prisma.DocumentWhereInput =
-      andParts.length === 0 ? {} : andParts.length === 1 ? andParts[0]! : { AND: andParts };
+      andParts.length === 0
+        ? {}
+        : andParts.length === 1
+          ? andParts[0]!
+          : { AND: andParts };
 
     const visibleWhere = documentsWhereVisible(combined);
 
     const withExpired = andParts.length
-      ? ({ AND: [combined, expiredDocumentsWhere(now)] } as Prisma.DocumentWhereInput)
+      ? ({
+          AND: [combined, expiredDocumentsWhere(now)],
+        } as Prisma.DocumentWhereInput)
       : expiredDocumentsWhere(now);
     const withExpiring = andParts.length
       ? ({
@@ -158,34 +173,35 @@ export async function GET(request: NextRequest) {
     const expiredFacetWhere = documentsWhereVisible(withExpired);
     const expiringFacetWhere = documentsWhereVisible(withExpiring);
 
-    const [documents, total, expiredInFilter, expiringSoonInFilter] = await Promise.all([
-      prisma.document.findMany({
-        where: visibleWhere,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          employeeId: true,
-          type: true,
-          number: true,
-          fileName: true,
-          fileSize: true,
-          mimeType: true,
-          status: true,
-          issueDate: true,
-          expiryDate: true,
-          uploadedAt: true,
-          createdAt: true,
-          employee: {
-            select: { id: true, firstName: true, lastName: true, cnp: true },
+    const [documents, total, expiredInFilter, expiringSoonInFilter] =
+      await Promise.all([
+        prisma.document.findMany({
+          where: visibleWhere,
+          orderBy: { createdAt: "desc" },
+          skip,
+          take: limit,
+          select: {
+            id: true,
+            employeeId: true,
+            type: true,
+            number: true,
+            fileName: true,
+            fileSize: true,
+            mimeType: true,
+            status: true,
+            issueDate: true,
+            expiryDate: true,
+            uploadedAt: true,
+            createdAt: true,
+            employee: {
+              select: { id: true, firstName: true, lastName: true, cnp: true },
+            },
           },
-        },
-      }),
-      prisma.document.count({ where: visibleWhere }),
-      prisma.document.count({ where: expiredFacetWhere }),
-      prisma.document.count({ where: expiringFacetWhere }),
-    ]);
+        }),
+        prisma.document.count({ where: visibleWhere }),
+        prisma.document.count({ where: expiredFacetWhere }),
+        prisma.document.count({ where: expiringFacetWhere }),
+      ]);
 
     const empIds = [...new Set(documents.map((d) => d.employeeId))];
     const activeDeploymentRows =
@@ -200,7 +216,7 @@ export async function GET(request: NextRequest) {
             select: { employeeId: true },
           });
     const employeesWithActiveDeployment = new Set(
-      activeDeploymentRows.map((r) => r.employeeId)
+      activeDeploymentRows.map((r) => r.employeeId),
     );
 
     const mapped = documents.map((doc) => ({
@@ -218,7 +234,7 @@ export async function GET(request: NextRequest) {
       createdAt: doc.createdAt.toISOString(),
       employee: doc.employee,
       employeeHasActiveDeployment: employeesWithActiveDeployment.has(
-        doc.employeeId
+        doc.employeeId,
       ),
       downloadUrl: `/api/documents/${doc.id}/download`,
     }));
@@ -237,7 +253,7 @@ export async function GET(request: NextRequest) {
           expiringSoon: expiringSoonInFilter,
         },
       },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (error) {
     console.error("[DOCUMENTS_GET]", error);

@@ -1,21 +1,19 @@
 /**
- * GET /api/backup/download?filename=... — Descarcă backup ZIP (ADMIN only)
- *
- * Verifică path traversal, servește fișierul ca attachment.
+ * GET /api/backup/download?filename=... — Descarcă backup ZIP din R2 (ADMIN only)
+ * DELETE — Șterge backup
  */
 
-import { requireRole } from "@/lib/auth";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
-import { deleteBackup, getBackupPath } from "@/lib/backup";
-import { readFile } from "fs/promises";
+import { deleteBackup, getBackupBuffer } from "@/lib/backup";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_SETTINGS_ADMIN,
-  );
-  if (authError || !user) return authError!;
+  const planCheck = await checkPlan(request, FEATURES.AUTO_BACKUP, {
+    roles: ROLES_SETTINGS_ADMIN,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
 
   try {
     const filename = request.nextUrl.searchParams.get("filename");
@@ -23,10 +21,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Filename necesar" }, { status: 400 });
     }
 
-    const filePath = getBackupPath(filename);
-    const buffer = await readFile(filePath);
+    const buffer = await getBackupBuffer(user.organizationId, filename);
 
-    return new NextResponse(buffer, {
+    return new NextResponse(new Uint8Array(buffer), {
       status: 200,
       headers: {
         "Content-Type": "application/zip",
@@ -40,15 +37,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-/**
- * DELETE /api/backup/download?filename=... — Șterge un backup (ADMIN only)
- */
 export async function DELETE(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_SETTINGS_ADMIN,
-  );
-  if (authError || !user) return authError!;
+  const planCheck = await checkPlan(request, FEATURES.AUTO_BACKUP, {
+    roles: ROLES_SETTINGS_ADMIN,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
 
   try {
     const filename = request.nextUrl.searchParams.get("filename");
@@ -56,7 +50,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Filename necesar" }, { status: 400 });
     }
 
-    await deleteBackup(filename);
+    await deleteBackup(user.organizationId, filename);
     return NextResponse.json({ success: true });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Eroare";

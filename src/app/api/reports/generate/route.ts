@@ -8,18 +8,15 @@
  *   columns?: ColumnDef[]
  * }
  *
- * Returnează: { downloadUrl: string, reportId: string, expiresAt: string }
+ * Returnează: { success, downloadUrl, storageKey, reportId, expiresAt }
  *
- * Salvează PDF în ./data/reports/{uuid}.pdf (șters automat după 24h)
- * AuditLog: cine a generat ce raport, câți angajați inclusi
+ * PDF în memorie → R2: firm/{organizationId}/reports/{type}-{timestamp}.pdf
  */
 
-import { randomUUID } from "crypto";
 import { existsSync } from "fs";
 import { join } from "path";
 import { getAppSettings } from "@/lib/appSettings";
 import { logAuditFF } from "@/lib/audit";
-import { requireRole } from "@/lib/auth";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
 import { calculateStatus } from "@/lib/documentStatus";
@@ -36,17 +33,20 @@ import {
   generateCountryReportPDF,
   generateEmployeeSheetPDF,
 } from "@/lib/pdfGenerator";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
+import {
+  buildReportS3Key,
+  cleanupOldOrganizationReports,
+  putOrganizationReport,
+  reportIdFromStorageKey,
+} from "@/lib/organizationReportStorage";
 import { prismaTyped } from "@/lib/prisma";
 import { salaryAmountToJson } from "@/lib/salaryFields";
 import { Prisma } from "@prisma/client";
-import { mkdir, stat, writeFile } from "fs/promises";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { type NextRequest, NextResponse } from "next/server";
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const REPORTS_DIR = join(process.cwd(), "data", "reports");
 const REPORT_TTL_MS = 24 * 60 * 60 * 1000; // 24 ore
 
 /** Status A1 în raport — aceleași coduri ca în `generateA1ReportPDF`. */
@@ -172,30 +172,6 @@ type FisaReportEmployee = {
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-async function ensureReportsDir(): Promise<void> {
-  if (!existsSync(REPORTS_DIR)) {
-    await mkdir(REPORTS_DIR, { recursive: true });
-  }
-}
-
-async function cleanupOldReports(): Promise<void> {
-  try {
-    const { readdir, unlink } = await import("fs/promises");
-    const files = await readdir(REPORTS_DIR);
-    const now = Date.now();
-    for (const file of files) {
-      if (!file.endsWith(".pdf")) continue;
-      const filePath = join(REPORTS_DIR, file);
-      const stats = await stat(filePath);
-      if (now - stats.mtimeMs > REPORT_TTL_MS) {
-        await unlink(filePath);
-      }
-    }
-  } catch {
-    // ignore cleanup errors
-  }
-}
 
 function getClientIp(request: NextRequest): string {
   return (
@@ -344,17 +320,6 @@ async function generateAccountingListPdf(params: {
 // ─── POST handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_SETTINGS_ADMIN,
-  );
-  if (authError || !user) {
-    return (
-      authError ??
-      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
-    );
-  }
-
   try {
     const body: GenerateRequest = await request.json();
     const reportType = body.type;
@@ -366,8 +331,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await ensureReportsDir();
-    await cleanupOldReports();
+    const reportFeature =
+      reportType === "lista"
+        ? FEATURES.EXPORT_PDF
+        : FEATURES.ADVANCED_REPORTS;
+
+    const planCheck = await checkPlan(request, reportFeature, {
+      roles: ROLES_SETTINGS_ADMIN,
+    });
+    if (!planCheck.allowed) return planCheck.response;
+    const { user } = planCheck;
+
+    await cleanupOldOrganizationReports(user.organizationId);
 
     const logoPath = getLogoPath();
     const appSettings = await getAppSettings(user.organizationId);
@@ -819,16 +794,18 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // ─── Save PDF ─────────────────────────────────────────────────────────
-    const reportId = randomUUID();
-    const fileName = `${reportId}.pdf`;
-    const filePath = join(REPORTS_DIR, fileName);
+    const storageKey = buildReportS3Key(user.organizationId, reportType);
+    const pdfBuffer = Buffer.from(pdfBytes);
+    const stored = await putOrganizationReport(
+      user.organizationId,
+      storageKey,
+      pdfBuffer,
+    );
 
-    await writeFile(filePath, Buffer.from(pdfBytes));
-
+    const reportId = reportIdFromStorageKey(storageKey);
     const expiresAt = new Date(Date.now() + REPORT_TTL_MS);
+    const downloadUrl = `/api/reports/download?key=${encodeURIComponent(storageKey)}`;
 
-    // ─── Audit Log ────────────────────────────────────────────────────────
     logAuditFF({
       action: "REPORT_GENERATE",
       entity: "Report",
@@ -841,12 +818,16 @@ export async function POST(request: NextRequest) {
         title: reportTitle,
         employeeCount,
         reportId,
+        storageKey,
       },
     });
 
     return NextResponse.json({
+      success: true,
       reportId,
-      downloadUrl: `/api/reports/download/${reportId}`,
+      storageKey,
+      downloadUrl,
+      publicUrl: stored.publicUrl,
       expiresAt: expiresAt.toISOString(),
       title: reportTitle,
       employeeCount,

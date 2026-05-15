@@ -93,10 +93,23 @@ export default async function AttendancePage({
             ? e.message
             : serverT(lng, "pages.attendance.fetchListError"),
       })),
-    prisma.employee.findMany({
-      select: { id: true, firstName: true, lastName: true, position: true },
-      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
-    }) as Promise<EmployeeOption[]>,
+    prisma.employee
+      .findMany({
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          position: true,
+          paymentFrequency: true,
+        },
+        orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      })
+      .then((rows) =>
+        rows.map((e) => ({
+          ...e,
+          paymentFrequency: e.paymentFrequency || "weekly",
+        })),
+      ) as Promise<EmployeeOption[]>,
   ]);
 
   return (

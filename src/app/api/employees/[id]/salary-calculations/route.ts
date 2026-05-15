@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee } from "@/lib/permissions";
 import { logAuditFF } from "@/lib/audit";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
+import { canEditEmployee } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 const saveSchema = z.object({
   salaryType: z.enum(["LUNAR", "SAPTAMANAL", "ORA"]),
@@ -24,18 +25,21 @@ function getClientIp(request: NextRequest): string {
 
 async function getEmployeeId(params: Promise<{ id: string }>): Promise<number> {
   const { id } = await params;
-  const parsed = parseInt(id, 10);
+  const parsed = Number.parseInt(id, 10);
   if (Number.isNaN(parsed)) throw new Error("ID invalid");
   return parsed;
 }
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
@@ -47,10 +51,10 @@ export async function GET(
       period === "today"
         ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
         : period === "7d"
-        ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        : period === "30d"
-        ? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
-        : null;
+          ? new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+          : period === "30d"
+            ? new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+            : null;
 
     const items = await prisma.salaryCalculation.findMany({
       where: {
@@ -69,9 +73,12 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -84,7 +91,7 @@ export async function POST(
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Date invalide", issues: parsed.error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 

@@ -1,8 +1,8 @@
-import { prisma } from "@/lib/prisma";
 import {
   activeDeploymentKpiWhere,
   getActiveDeploymentsCount,
 } from "@/lib/activeDeployments";
+import { prisma } from "@/lib/prisma";
 
 export type DeploymentCountryCount = {
   country: string;

@@ -1,3 +1,4 @@
+import { FEATURES, type PlanFeature } from "@/lib/plan-features";
 import type { UserRole } from "@/lib/roles";
 import {
   ROLES_EMPLOYEES_RW,
@@ -166,9 +167,11 @@ export type SidebarRouteDef = {
   href: string;
   i18nKey: string;
   icon: LucideIcon | ElementType<{ size?: number }>;
-  /** Dac? lipse?te: orice rol autentificat (JWT valid). */
+  /** Daca lipseste: orice rol autentificat (JWT valid). */
   rolesAllowed?: UserRole[];
   showAdminBadge?: boolean;
+  /** Feature plan necesar (UI lock; backend valideaza separat). */
+  planFeature?: PlanFeature | string;
 };
 
 export const SIDEBAR_ROUTE_DEFS: SidebarRouteDef[] = [
@@ -197,12 +200,14 @@ export const SIDEBAR_ROUTE_DEFS: SidebarRouteDef[] = [
     i18nKey: "nav.reports",
     icon: BarChart3,
     rolesAllowed: ROLES_SETTINGS_ADMIN,
+    planFeature: FEATURES.EXPORT_PDF,
   },
   {
     href: ROUTES.export,
     i18nKey: "nav.export",
     icon: FileSpreadsheet,
     rolesAllowed: ROLES_SETTINGS_ADMIN,
+    planFeature: FEATURES.EXPORT_PDF,
   },
   {
     href: ROUTES.pay,
@@ -216,6 +221,7 @@ export const SIDEBAR_ROUTE_DEFS: SidebarRouteDef[] = [
     i18nKey: "nav.payslips",
     icon: FileText,
     rolesAllowed: ROLES_PAYROLL,
+    planFeature: FEATURES.PAYROLL_SLIPS,
   },
   {
     href: ROUTES.settings,
@@ -251,6 +257,7 @@ export const SIDEBAR_ROUTE_DEFS: SidebarRouteDef[] = [
     icon: Database,
     rolesAllowed: ROLES_SETTINGS_ADMIN,
     showAdminBadge: true,
+    planFeature: FEATURES.AUTO_BACKUP,
   },
 ];
 

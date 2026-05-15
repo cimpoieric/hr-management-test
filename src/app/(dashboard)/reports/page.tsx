@@ -12,6 +12,7 @@ import {
   FileText,
   Globe,
   Loader2,
+  Lock,
   Printer,
   Search,
   Shield,
@@ -19,7 +20,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { UpgradeModal } from "@/components/plan/UpgradeModal";
+import { usePlan } from "@/hooks/use-plan";
 import { useTranslation } from "@/hooks/useTranslation";
+import { FEATURES, type PlanFeature } from "@/lib/plan-features";
 import type { TFunction } from "i18next";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -106,10 +110,19 @@ function cloneDefaultColumns(): ColumnOption[] {
   return DEFAULT_COLUMN_SELECTION.map((c) => ({ ...c }));
 }
 
+function featureForReportType(type: ReportType): PlanFeature {
+  if (type === "lista") return FEATURES.EXPORT_PDF;
+  return FEATURES.ADVANCED_REPORTS;
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function ReportsPage() {
   const { t, currentLanguage } = useTranslation();
+  const { canUseFeature } = usePlan();
+  const [upgradeFeature, setUpgradeFeature] = useState<PlanFeature | null>(
+    null,
+  );
   const localeTag = currentLanguage === "ro" ? "ro-RO" : "en-GB";
   const emDash = t("common.emDash");
 
@@ -235,6 +248,13 @@ export default function ReportsPage() {
 
   async function handleGenerate() {
     if (!reportType || generating) return;
+
+    const requiredFeature = featureForReportType(reportType);
+    if (!canUseFeature(requiredFeature)) {
+      setUpgradeFeature(requiredFeature);
+      return;
+    }
+
     setGenerating(true);
     setError("");
 
@@ -319,7 +339,7 @@ export default function ReportsPage() {
         generatedAt: new Date().toISOString(),
       });
 
-      const pdfRes = await fetch(data.downloadUrl);
+      const pdfRes = await fetch(data.downloadUrl, { credentials: "same-origin" });
       if (pdfRes.ok) {
         const blob = await pdfRes.blob();
         const url = URL.createObjectURL(blob);
@@ -393,8 +413,22 @@ export default function ReportsPage() {
 
   // ═══ Render ═════════════════════════════════════════════════════════════════
 
+  const generateFeature = reportType
+    ? featureForReportType(reportType)
+    : FEATURES.EXPORT_PDF;
+  const generateLocked = reportType
+    ? !canUseFeature(generateFeature)
+    : false;
+
   return (
     <div className="space-y-6">
+      <UpgradeModal
+        open={upgradeFeature != null}
+        onOpenChange={(open) => {
+          if (!open) setUpgradeFeature(null);
+        }}
+        feature={upgradeFeature ?? FEATURES.EXPORT_PDF}
+      />
       <div className="flex items-center gap-3">
         <BarChart3 size={24} className="text-gray-400" />
         <div>
@@ -414,7 +448,9 @@ export default function ReportsPage() {
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {REPORT_TYPE_METAS.map((rt) => (
+            {REPORT_TYPE_METAS.map((rt) => {
+              const typeLocked = !canUseFeature(featureForReportType(rt.type));
+              return (
               <button
                 key={rt.type}
                 onClick={() => selectReportType(rt.type)}
@@ -433,12 +469,21 @@ export default function ReportsPage() {
                     {t(`pages.reportsWizard.types.${rt.type}.description`)}
                   </p>
                 </div>
-                <ChevronRight
-                  size={18}
-                  className="text-gray-300 group-hover:text-blue-400 ml-auto shrink-0 mt-1"
-                />
+                {typeLocked ? (
+                  <Lock
+                    size={16}
+                    className="text-amber-500 ml-auto shrink-0 mt-1"
+                    aria-hidden
+                  />
+                ) : (
+                  <ChevronRight
+                    size={18}
+                    className="text-gray-300 group-hover:text-blue-400 ml-auto shrink-0 mt-1"
+                  />
+                )}
               </button>
-            ))}
+            );
+            })}
           </div>
 
           <div className="flex items-start gap-3 bg-blue-50 rounded-xl p-4 text-sm text-blue-800">
@@ -752,12 +797,22 @@ export default function ReportsPage() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={handleGenerate}
-              disabled={generating}
+              onClick={() => {
+                if (generateLocked) {
+                  setUpgradeFeature(generateFeature);
+                  return;
+                }
+                void handleGenerate();
+              }}
+              disabled={generating && !generateLocked}
               aria-busy={generating || undefined}
-              className="inline-flex min-w-[11.5rem] items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 disabled:opacity-70 disabled:cursor-wait transition-colors"
+              className={`inline-flex min-w-[11.5rem] items-center justify-center gap-2 px-6 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                generateLocked
+                  ? "bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200"
+                  : "bg-slate-900 text-white hover:bg-slate-800 disabled:opacity-70 disabled:cursor-wait"
+              }`}
             >
-              {generating ? (
+              {generating && !generateLocked ? (
                 <>
                   <Loader2
                     size={16}
@@ -768,7 +823,11 @@ export default function ReportsPage() {
                 </>
               ) : (
                 <>
-                  <FileText size={16} className="shrink-0" aria-hidden />
+                  {generateLocked ? (
+                    <Lock size={16} className="shrink-0" aria-hidden />
+                  ) : (
+                    <FileText size={16} className="shrink-0" aria-hidden />
+                  )}
                   <span>{t("pages.reportsWizard.generatePdf")}</span>
                 </>
               )}

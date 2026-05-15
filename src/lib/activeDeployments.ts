@@ -22,7 +22,9 @@ function dayBounds(at: Date) {
  * - status === `ACTIVE`, sau
  * - a început până la sfârșitul zilei de referință și încă nu s-a încheiat (endDate null sau endDate ≥ începutul zilei).
  */
-export function activeDeploymentKpiWhere(at: Date = new Date()): Prisma.DeploymentWhereInput {
+export function activeDeploymentKpiWhere(
+  at: Date = new Date(),
+): Prisma.DeploymentWhereInput {
   const { startOfDay, endOfDay } = dayBounds(at);
   return {
     NOT: { status: "CANCELLED" },
@@ -39,7 +41,7 @@ export function activeDeploymentKpiWhere(at: Date = new Date()): Prisma.Deployme
 /** Număr detașări active (același `where` ca KPI / stats). */
 export async function getActiveDeploymentsCount(
   prisma: DeploymentCountPrisma,
-  at: Date = new Date()
+  at: Date = new Date(),
 ): Promise<number> {
   return prisma.deployment.count({ where: activeDeploymentKpiWhere(at) });
 }

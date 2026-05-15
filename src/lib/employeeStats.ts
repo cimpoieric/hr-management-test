@@ -43,7 +43,7 @@ export async function getEmployeeStats(): Promise<EmployeeKpiStats> {
       sumRon += equivalentMonthlyGrossToRon(
         sumAmount,
         g.salaryType != null ? String(g.salaryType) : null,
-        g.salaryCurrency
+        g.salaryCurrency,
       );
     }
 

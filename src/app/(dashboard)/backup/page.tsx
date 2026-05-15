@@ -1,6 +1,9 @@
 "use client";
 
+import { FeatureGate } from "@/components/plan/FeatureGate";
+import { UpgradePrompt } from "@/components/plan/UpgradePrompt";
 import { useTranslation } from "@/hooks/useTranslation";
+import { FEATURES } from "@/lib/plan-features";
 import type { SupportedLng } from "@/i18n/config";
 import {
   AlertCircle,
@@ -209,6 +212,23 @@ export default function BackupPage() {
   // ═══ Render ═════════════════════════════════════════════════════════════════
 
   return (
+    <FeatureGate
+      feature={FEATURES.AUTO_BACKUP}
+      fallback={
+        <div className="space-y-6">
+          <div className="flex items-center gap-3">
+            <Database size={24} className="text-gray-400" />
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {t("pages.backup.title")}
+              </h1>
+              <p className="text-sm text-gray-500">{t("pages.backup.subtitle")}</p>
+            </div>
+          </div>
+          <UpgradePrompt feature={FEATURES.AUTO_BACKUP} />
+        </div>
+      }
+    >
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3">
@@ -639,6 +659,7 @@ export default function BackupPage() {
           <p className="text-gray-500">{t("pages.backup.autoBackupCron")}</p>
         </div>
       </div>
-    </div>
+      </div>
+    </FeatureGate>
   );
 }

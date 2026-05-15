@@ -58,7 +58,8 @@ export type AuditAction =
   | "IMPORT_REJECT"
   | "BACKUP"
   | "PASSWORD_CHANGE"
-  | "SETTINGS_CHANGE";
+  | "SETTINGS_CHANGE"
+  | "ADMIN_UNBLOCK_LOGIN_RATE";
 
 export type EntityType =
   | "Employee"
@@ -91,6 +92,7 @@ export const MANUAL_ONLY_ACTIONS: AuditAction[] = [
   "BACKUP",
   "PASSWORD_CHANGE",
   "SETTINGS_CHANGE",
+  "ADMIN_UNBLOCK_LOGIN_RATE",
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════

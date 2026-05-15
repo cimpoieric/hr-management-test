@@ -85,9 +85,23 @@ export function DeploymentList({
     setPage(1);
   }, [countryFilter, statusFilter, employeeId]);
 
+  const syncDetachedOnce = useCallback(async () => {
+    try {
+      await fetch("/api/deployments/sync-detached", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+    } catch {
+      // optional sync — list still loads
+    }
+  }, []);
+
   const fetchDeployments = useCallback(async () => {
     setLoading(true);
     try {
+      if (!employeeId && page === 1) {
+        await syncDetachedOnce();
+      }
       const params = new URLSearchParams();
       params.set("page", String(page));
       params.set("limit", String(limit));
@@ -117,7 +131,7 @@ export function DeploymentList({
     } finally {
       setLoading(false);
     }
-  }, [employeeId, statusFilter, countryFilter, page, limit]);
+  }, [employeeId, statusFilter, countryFilter, page, limit, syncDetachedOnce]);
 
   useEffect(() => {
     void fetchDeployments();

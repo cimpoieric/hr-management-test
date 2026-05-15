@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { getTenantRequestContext } from "@/lib/tenantRequestStorage";
 
 export const APP_SETTING_KEYS = {
   companyName: "APP_COMPANY_NAME",
@@ -61,7 +62,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   standardWeeklyHours: 40,
 
   dateFormat: "DD.MM.YYYY",
-  language: "ro",
+  language: "en",
   timezone: "Europe/Bucharest",
 
   alertExpiredDocumentsDays: 30,
@@ -69,80 +70,87 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   inAppNotificationsEnabled: true,
 };
 
-const KEY_TO_FIELD: Record<string, keyof AppSettings> = {
-  [APP_SETTING_KEYS.companyName]: "companyName",
-  [APP_SETTING_KEYS.companyCuiReg]: "companyCuiReg",
-  [APP_SETTING_KEYS.companyAddress]: "companyAddress",
-  [APP_SETTING_KEYS.legalRepName]: "legalRepName",
-  [APP_SETTING_KEYS.legalRepRole]: "legalRepRole",
-  [APP_SETTING_KEYS.companyIban]: "companyIban",
-  [APP_SETTING_KEYS.companyBank]: "companyBank",
-  [APP_SETTING_KEYS.salaryDefaultCurrency]: "salaryDefaultCurrency",
-  [APP_SETTING_KEYS.salaryDefaultType]: "salaryDefaultType",
-  [APP_SETTING_KEYS.standardMonthlyHours]: "standardMonthlyHours",
-  [APP_SETTING_KEYS.standardWeeklyHours]: "standardWeeklyHours",
-  [APP_SETTING_KEYS.dateFormat]: "dateFormat",
-  [APP_SETTING_KEYS.language]: "language",
-  [APP_SETTING_KEYS.timezone]: "timezone",
-  [APP_SETTING_KEYS.alertExpiredDocumentsDays]: "alertExpiredDocumentsDays",
-  [APP_SETTING_KEYS.alertExpiringDeploymentsDays]: "alertExpiringDeploymentsDays",
-  [APP_SETTING_KEYS.inAppNotificationsEnabled]: "inAppNotificationsEnabled",
-};
-
-export async function getAppSettings(): Promise<AppSettings> {
-  const records = await prisma.systemConfig.findMany({
-    where: { key: { in: Object.values(APP_SETTING_KEYS) } },
-  });
-
-  const out: AppSettings = { ...DEFAULT_APP_SETTINGS };
-  for (const rec of records) {
-    const field = KEY_TO_FIELD[rec.key];
-    if (!field) continue;
-    if (
-      field === "standardMonthlyHours" ||
-      field === "standardWeeklyHours" ||
-      field === "alertExpiredDocumentsDays" ||
-      field === "alertExpiringDeploymentsDays"
-    ) {
-      const n = Number(rec.value);
-      if (!Number.isNaN(n)) (out[field] as number) = n;
-      continue;
-    }
-    if (field === "inAppNotificationsEnabled") {
-      out.inAppNotificationsEnabled = rec.value === "true";
-      continue;
-    }
-    (out[field] as string) = rec.value;
+function resolveOrganizationId(organizationId?: string): string {
+  const orgId = organizationId ?? getTenantRequestContext()?.organizationId;
+  if (!orgId) {
+    throw new Error("organizationId is required for organization settings");
   }
-  return out;
+  return orgId;
 }
 
-export async function saveAppSettings(settings: AppSettings): Promise<void> {
-  const entries: Array<{ key: string; value: string }> = [
-    { key: APP_SETTING_KEYS.companyName, value: settings.companyName },
-    { key: APP_SETTING_KEYS.companyCuiReg, value: settings.companyCuiReg },
-    { key: APP_SETTING_KEYS.companyAddress, value: settings.companyAddress },
-    { key: APP_SETTING_KEYS.legalRepName, value: settings.legalRepName },
-    { key: APP_SETTING_KEYS.legalRepRole, value: settings.legalRepRole },
-    { key: APP_SETTING_KEYS.companyIban, value: settings.companyIban },
-    { key: APP_SETTING_KEYS.companyBank, value: settings.companyBank },
-    { key: APP_SETTING_KEYS.salaryDefaultCurrency, value: settings.salaryDefaultCurrency },
-    { key: APP_SETTING_KEYS.salaryDefaultType, value: settings.salaryDefaultType },
-    { key: APP_SETTING_KEYS.standardMonthlyHours, value: String(settings.standardMonthlyHours) },
-    { key: APP_SETTING_KEYS.standardWeeklyHours, value: String(settings.standardWeeklyHours) },
-    { key: APP_SETTING_KEYS.dateFormat, value: settings.dateFormat },
-    { key: APP_SETTING_KEYS.language, value: settings.language },
-    { key: APP_SETTING_KEYS.timezone, value: settings.timezone },
-    { key: APP_SETTING_KEYS.alertExpiredDocumentsDays, value: String(settings.alertExpiredDocumentsDays) },
-    { key: APP_SETTING_KEYS.alertExpiringDeploymentsDays, value: String(settings.alertExpiringDeploymentsDays) },
-    { key: APP_SETTING_KEYS.inAppNotificationsEnabled, value: String(settings.inAppNotificationsEnabled) },
-  ];
-
-  for (const item of entries) {
-    await prisma.systemConfig.upsert({
-      where: { key: item.key },
-      update: { value: item.value },
-      create: { key: item.key, value: item.value },
-    });
+function parsePreferencesJson(
+  json: string | null | undefined,
+): Partial<AppSettings> {
+  if (!json) return {};
+  try {
+    return JSON.parse(json) as Partial<AppSettings>;
+  } catch {
+    return {};
   }
+}
+
+function normalizeLanguage(value: string | null | undefined): AppSettings["language"] {
+  return value === "en" ? "en" : "ro";
+}
+
+function mergeAppSettings(
+  stored: Partial<AppSettings>,
+  language: string | null | undefined,
+): AppSettings {
+  const merged: AppSettings = {
+    ...DEFAULT_APP_SETTINGS,
+    ...stored,
+    language: normalizeLanguage(language ?? stored.language),
+  };
+
+  merged.standardMonthlyHours =
+    Number(merged.standardMonthlyHours) ||
+    DEFAULT_APP_SETTINGS.standardMonthlyHours;
+  merged.standardWeeklyHours =
+    Number(merged.standardWeeklyHours) ||
+    DEFAULT_APP_SETTINGS.standardWeeklyHours;
+  merged.alertExpiredDocumentsDays =
+    Number(merged.alertExpiredDocumentsDays) ||
+    DEFAULT_APP_SETTINGS.alertExpiredDocumentsDays;
+  merged.alertExpiringDeploymentsDays =
+    Number(merged.alertExpiringDeploymentsDays) ||
+    DEFAULT_APP_SETTINGS.alertExpiringDeploymentsDays;
+  merged.inAppNotificationsEnabled = merged.inAppNotificationsEnabled !== false;
+
+  return merged;
+}
+
+export async function getAppSettings(
+  organizationId?: string,
+): Promise<AppSettings> {
+  const orgId = resolveOrganizationId(organizationId);
+  const row = await prisma.settings.findUnique({
+    where: { organizationId: orgId },
+  });
+
+  return mergeAppSettings(
+    parsePreferencesJson(row?.preferencesJson),
+    row?.language,
+  );
+}
+
+export async function saveAppSettings(
+  settings: AppSettings,
+  organizationId?: string,
+): Promise<void> {
+  const orgId = resolveOrganizationId(organizationId);
+  const language = normalizeLanguage(settings.language);
+
+  await prisma.settings.upsert({
+    where: { organizationId: orgId },
+    create: {
+      organizationId: orgId,
+      language,
+      preferencesJson: JSON.stringify(settings),
+    },
+    update: {
+      language,
+      preferencesJson: JSON.stringify(settings),
+    },
+  });
 }

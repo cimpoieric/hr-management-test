@@ -16,6 +16,12 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { TimesheetForm } from "@/components/forms/TimesheetForm";
+import {
+  fetchEmployerDetailsForPayslip,
+  generateWeeklyPayslip,
+  mapPayslipApiResponseToPayslipData,
+} from "@/components/payroll/WeeklyPayslipPDF";
+import { preventWheelOnFocusedNumberInput } from "@/lib/numericInput";
 import { ROUTES } from "@/lib/routes";
 import {
   ROLES_EMPLOYEES_RW,
@@ -54,6 +60,10 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/hooks/useAuth";
 import { useTranslation } from "@/hooks/useTranslation";
+import {
+  formatPeriodRangeDisplay,
+  parseToIsoDateInput,
+} from "@/lib/paymentPeriod";
 import { broadcastTimesheetHoursForPayrollSync } from "@/lib/timesheetPayrollSync";
 import type { EmployeeOption, Pagination, TimesheetRow } from "@/types";
 
@@ -63,15 +73,6 @@ function statusBadgeClass(status: string): string {
   if (s === "SUBMITTED") return "bg-blue-50 text-blue-700";
   if (s === "REJECTED") return "bg-red-50 text-red-700";
   return "bg-gray-100 text-gray-700";
-}
-
-function fmtPeriod(start: string, end: string, locale: string, dash: string): string {
-  const s = new Date(start);
-  const e = new Date(end);
-  const fmt = (d: Date) =>
-    d.toLocaleDateString(locale, { day: "2-digit", month: "2-digit" });
-  if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return dash;
-  return `${fmt(s)}-${fmt(e)}`;
 }
 
 function fmtDiurnaEur(
@@ -335,7 +336,26 @@ export function TimesheetsTableClient({
   async function doGeneratePayslip(id: number) {
     setBusy(id, true);
     try {
-      await postJson(`/api/payroll/generate`, { timesheetId: id });
+      const created = await postJson(`/api/payroll/generate`, { timesheetId: id });
+      const payslipId =
+        typeof created === "object" &&
+        created !== null &&
+        "id" in created &&
+        typeof (created as { id: unknown }).id === "number"
+          ? (created as { id: number }).id
+          : null;
+      const [detail, employer] = await Promise.all([
+        payslipId != null
+          ? fetch(`/api/payroll/${payslipId}`, {
+              credentials: "same-origin",
+              cache: "no-store",
+            }).then((res) => res.json())
+          : Promise.resolve(created),
+        fetchEmployerDetailsForPayslip(),
+      ]);
+      generateWeeklyPayslip(
+        mapPayslipApiResponseToPayslipData(detail, employer),
+      );
       toast.success(t("components.toast.timesheetPayslipGenerated"));
       router.push(ROUTES.payslips);
       router.refresh();
@@ -439,16 +459,8 @@ export function TimesheetsTableClient({
         setEditWeekNumber(Number(data.weekNumber));
         setEditYear(Number(data.year));
         // date inputs expect yyyy-mm-dd
-        const toDateInputString = (v: unknown): string => {
-          const d = new Date(String(v));
-          if (Number.isNaN(d.getTime())) return "";
-          const yyyy = d.getFullYear();
-          const mm = String(d.getMonth() + 1).padStart(2, "0");
-          const dd = String(d.getDate()).padStart(2, "0");
-          return `${yyyy}-${mm}-${dd}`;
-        };
-        setEditStartDate(toDateInputString(data.startDate));
-        setEditEndDate(toDateInputString(data.endDate));
+        setEditStartDate(parseToIsoDateInput(data.startDate));
+        setEditEndDate(parseToIsoDateInput(data.endDate));
         setEditHoursWorked(String(data.hoursWorked ?? ""));
         setEditStandardHours(String(data.standardHours ?? "40"));
         setEditDailyBreakdown(String(data.dailyBreakdown ?? ""));
@@ -466,7 +478,7 @@ export function TimesheetsTableClient({
     return () => {
       cancelled = true;
     };
-  }, [editOpen, editingId]);
+  }, [editOpen, editingId, t]);
 
   async function saveEdit() {
     if (editingId == null) return;
@@ -726,16 +738,22 @@ export function TimesheetsTableClient({
                     </Link>
                   </TableCell>
                   <TableCell className="w-[100px] p-2 text-center whitespace-nowrap">
-                    {String(row.weekNumber).padStart(2, "0")}/{row.year}
+                    {row.type === "monthly" || (row.month != null && row.month > 0)
+                      ? `Luna ${String(row.month ?? 1).padStart(2, "0")}/${row.monthYear ?? row.year}`
+                      : `S${String(row.weekNumber).padStart(2, "0")}/${row.year}`}
                   </TableCell>
                   <TableCell className="w-[120px] p-2 text-center whitespace-nowrap">
-                    {fmtPeriod(row.startDate, row.endDate, locale, dash)}
+                    {formatPeriodRangeDisplay(
+                      row.startDate,
+                      row.endDate,
+                      locale,
+                      dash,
+                    )}
                   </TableCell>
                   <TableCell className="w-[80px] p-2 text-center whitespace-nowrap">
                     <ReadOnlyField
-                      type="number"
+                      type="text"
                       inputMode="decimal"
-                      step="0.01"
                       min={0}
                       className="w-[72px] rounded-md text-center tabular-nums"
                       value={
@@ -1027,11 +1045,15 @@ export function TimesheetsTableClient({
                       type="number"
                       min={1}
                       max={52}
-                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm tabular-nums"
+                      onWheel={preventWheelOnFocusedNumberInput}
                       value={editWeekNumber}
-                      onChange={(e) =>
-                        setEditWeekNumber(Number(e.target.value || "1"))
-                      }
+                      onChange={(e) => {
+                        const n = Number.parseInt(e.target.value, 10);
+                        if (e.target.value !== "" && Number.isFinite(n)) {
+                          setEditWeekNumber(n);
+                        }
+                      }}
                     />
                   </div>
                   <div>
@@ -1042,15 +1064,15 @@ export function TimesheetsTableClient({
                       type="number"
                       min={2024}
                       max={2030}
-                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm tabular-nums"
+                      onWheel={preventWheelOnFocusedNumberInput}
                       value={editYear}
-                      onChange={(e) =>
-                        setEditYear(
-                          Number(
-                            e.target.value || String(new Date().getFullYear()),
-                          ),
-                        )
-                      }
+                      onChange={(e) => {
+                        const n = Number.parseInt(e.target.value, 10);
+                        if (e.target.value !== "" && Number.isFinite(n)) {
+                          setEditYear(n);
+                        }
+                      }}
                     />
                   </div>
                   <div>
@@ -1080,10 +1102,10 @@ export function TimesheetsTableClient({
                       {t("pages.attendance.hoursWorked")}
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       min="0"
-                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm tabular-nums"
                       value={editHoursWorked}
                       onChange={(e) => setEditHoursWorked(e.target.value)}
                       placeholder={t("pages.attendance.hoursWorkedPh")}
@@ -1094,10 +1116,10 @@ export function TimesheetsTableClient({
                       {t("pages.attendance.standardHours")}
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       min="0"
-                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm tabular-nums"
                       value={editStandardHours}
                       onChange={(e) => setEditStandardHours(e.target.value)}
                       placeholder={t("pages.attendance.standardHoursPh")}
@@ -1108,10 +1130,10 @@ export function TimesheetsTableClient({
                       {t("pages.attendance.travelAllowanceEur")}
                     </label>
                     <input
-                      type="number"
-                      step="0.01"
+                      type="text"
+                      inputMode="decimal"
                       min="0"
-                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm tabular-nums"
                       value={editTravelAllowance}
                       onChange={(e) => setEditTravelAllowance(e.target.value)}
                       placeholder="0.00"

@@ -11,11 +11,15 @@ export function parseSalaryTypeInput(value: unknown): SalaryTypeCode | null {
 }
 
 /** Sumă brută opțională: invalidă → null (nu blochează salvarea restului câmpurilor). */
-export function parseSalaryAmountDecimal(value: unknown): Prisma.Decimal | null {
+export function parseSalaryAmountDecimal(
+  value: unknown,
+): Prisma.Decimal | null {
   if (value === null || value === undefined || value === "") return null;
   try {
     const normalized: Prisma.Decimal.Value =
-      typeof value === "string" ? value.trim().replace(",", ".") : (value as Prisma.Decimal.Value);
+      typeof value === "string"
+        ? value.trim().replace(",", ".")
+        : (value as Prisma.Decimal.Value);
     const d = new Prisma.Decimal(normalized);
     if (d.isNegative()) return null;
     return d;
@@ -79,7 +83,7 @@ export function weeklyPaySalaryDataComplete(emp: {
 export function computeWeeklyPayTotal(
   salaryType: unknown,
   units: number,
-  salaryAmountRaw: unknown
+  salaryAmountRaw: unknown,
 ): number | null {
   if (!Number.isFinite(units) || units < 0) return null;
   const base = salaryAmountToJson(salaryAmountRaw);
@@ -98,20 +102,21 @@ export function computeWeeklyPayTotal(
  */
 export function parseWeeklyPayUnitsFromRequest(
   raw: unknown,
-  salaryType: unknown
+  salaryType: unknown,
 ): number {
   const t = parseSalaryTypeInput(String(salaryType ?? ""));
   const toNum = (v: unknown): number => {
     if (typeof v === "number" && Number.isFinite(v)) return v;
     if (typeof v === "string" && v.trim() !== "") {
       const n = Number(v.replace(",", "."));
-      return Number.isFinite(n) ? n : NaN;
+      return Number.isFinite(n) ? n : Number.NaN;
     }
-    return NaN;
+    return Number.NaN;
   };
   const n = toNum(raw);
   if (t === "LUNAR") {
-    if (raw === undefined || raw === null || raw === "") return LUNAR_WORKING_DAYS_NORM;
+    if (raw === undefined || raw === null || raw === "")
+      return LUNAR_WORKING_DAYS_NORM;
     if (Number.isFinite(n) && n >= 0) return n;
     return LUNAR_WORKING_DAYS_NORM;
   }

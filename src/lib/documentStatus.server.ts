@@ -7,9 +7,9 @@ import "server-only";
  * Funcții pure sunt în documentStatus.ts
  */
 
-import { prisma } from "@/lib/prisma";
 import { calculateStatus } from "@/lib/documentStatus";
 import { documentsWhereVisible } from "@/lib/documentVisibility";
+import { prisma } from "@/lib/prisma";
 
 /**
  * Actualizează statusurile tuturor documentelor din DB.
@@ -100,5 +100,11 @@ export async function getDocumentStatusSummary(): Promise<{
     }),
   ]);
 
-  return { valid, expiringSoon, expired, pending, total: valid + expiringSoon + expired + pending };
+  return {
+    valid,
+    expiringSoon,
+    expired,
+    pending,
+    total: valid + expiringSoon + expired + pending,
+  };
 }

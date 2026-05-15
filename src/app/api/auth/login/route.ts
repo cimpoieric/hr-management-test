@@ -4,53 +4,20 @@
  * Autentificare cu email + parola.
  * - Verifică credențialele în DB
  * - Generează JWT + setează httpOnly cookie
- * - Rate limiting simplu: contor eșecuri în memorie (5 încercări / IP / 15 min)
+ * - Rate limiting simplu: contor în memorie (5 încercări / email+IP / 15 min)
  * - NU returnează niciodată passwordHash
  */
 
 import { getClientIp, logAuditFF } from "@/lib/audit";
 import { generateToken, setAuthCookie, verifyPassword } from "@/lib/auth";
+import {
+  checkLoginRateLimit,
+  clearLoginRateLimit,
+  makeLoginRateLimitKey,
+} from "@/lib/loginRateLimit";
 import { prismaBase as prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-
-// ─── Rate Limiting (memorie simplă) ──────────────────────────────────────────
-
-type AttemptEntry = {
-  count: number;
-  firstAttempt: number;
-};
-
-const attemptStore = new Map<string, AttemptEntry>();
-const MAX_ATTEMPTS = 5;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minute
-
-function checkRateLimit(ip: string): boolean {
-  const now = Date.now();
-  const entry = attemptStore.get(ip);
-
-  if (!entry) {
-    attemptStore.set(ip, { count: 1, firstAttempt: now });
-    return true;
-  }
-
-  // Reset dacă a trecut fereastra
-  if (now - entry.firstAttempt > WINDOW_MS) {
-    attemptStore.set(ip, { count: 1, firstAttempt: now });
-    return true;
-  }
-
-  if (entry.count >= MAX_ATTEMPTS) {
-    return false;
-  }
-
-  entry.count++;
-  return true;
-}
-
-function clearAttempts(ip: string): void {
-  attemptStore.delete(ip);
-}
 
 // ─── POST /api/auth/login ────────────────────────────────────────────────────
 
@@ -60,8 +27,14 @@ const loginSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  let body: unknown;
   try {
-    const body = await request.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
+  }
+
+  try {
     const parsed = loginSchema.safeParse(body);
 
     if (!parsed.success) {
@@ -73,9 +46,10 @@ export async function POST(request: NextRequest) {
 
     const { email, password } = parsed.data;
 
-    // 1. Rate limiting
+    // 1. Rate limiting (email + IP — nu blochează alte conturi pe același IP)
     const clientIp = getClientIp(request);
-    if (!checkRateLimit(clientIp)) {
+    const rateKey = makeLoginRateLimitKey(email, clientIp);
+    if (!checkLoginRateLimit(rateKey)) {
       return NextResponse.json(
         { error: "Prea multe încercări. Încearcă din nou peste 15 minute." },
         { status: 429 },
@@ -114,6 +88,14 @@ export async function POST(request: NextRequest) {
     // 3. Verifică parola
     const valid = await verifyPassword(password, user.password);
     if (!valid) {
+      try {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { failedAttempts: { increment: 1 } },
+        });
+      } catch {
+        // ignore if column missing in old deploy
+      }
       // Audit: login eșuat (parolă greșită)
       logAuditFF({
         action: "LOGIN_FAILED",
@@ -132,7 +114,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Autentificare reușită — curăță contorul, generează token
-    clearAttempts(clientIp);
+    clearLoginRateLimit(rateKey);
 
     const organizationId = String(user.organizationId);
 
@@ -143,14 +125,14 @@ export async function POST(request: NextRequest) {
       organizationId,
     );
 
-    // Update last login
+    // Update last login + reset failed attempts
     try {
       await prisma.user.update({
         where: { id: user.id },
-        data: { lastLoginAt: new Date() },
+        data: { lastLoginAt: new Date(), failedAttempts: 0 },
       });
     } catch {
-      // ignore
+      // ignore (e.g. schema not migrated yet)
     }
 
     // Audit: login reușit

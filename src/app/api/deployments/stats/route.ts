@@ -4,20 +4,24 @@
  * Repartizare per țară + total — `getDeploymentStats` (aceeași sursă ca panoul de control).
  */
 
-import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
 import { getDeploymentStats } from "@/lib/deploymentStats";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
     const at = new Date();
-    const { activeCount, byCountry: rawByCountry } = await getDeploymentStats(at);
+    const { activeCount, byCountry: rawByCountry } =
+      await getDeploymentStats(at);
 
     const byCountryMap: Record<string, number> = {};
     for (const row of rawByCountry) {

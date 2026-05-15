@@ -1,9 +1,12 @@
 "use client";
 
-import { CheckCircle2, AlertTriangle, XCircle, Clock } from "lucide-react";
+import {
+  type DocumentExpiryBucket,
+  getDocumentExpiryBucket,
+} from "@/lib/documentExpiryUi";
 import type { DocumentStatus } from "@/lib/documentStatus";
-import { getDocumentExpiryBucket, type DocumentExpiryBucket } from "@/lib/documentExpiryUi";
 import { tDocumentStatus } from "@/messages";
+import { AlertTriangle, CheckCircle2, Clock, XCircle } from "lucide-react";
 
 interface DocumentStatusBadgeProps {
   status: DocumentStatus | string;
@@ -52,7 +55,7 @@ export function DocumentStatusBadge({
   const bucket = getDocumentExpiryBucket(
     String(status),
     expiryDate ?? null,
-    expiringSoonDays
+    expiringSoonDays,
   );
   const c = styleByBucket[bucket];
   const Icon = c.icon;
@@ -69,15 +72,20 @@ export function DocumentStatusBadge({
   );
 }
 
-const styleByStatus: Record<string, { icon: React.ElementType; text: string }> = {
-  VALID: { icon: CheckCircle2, text: "text-green-700" },
-  EXPIRING_SOON: { icon: AlertTriangle, text: "text-amber-700" },
-  EXPIRED: { icon: XCircle, text: "text-red-700" },
-  PENDING: { icon: Clock, text: "text-gray-600" },
-};
+const styleByStatus: Record<string, { icon: React.ElementType; text: string }> =
+  {
+    VALID: { icon: CheckCircle2, text: "text-green-700" },
+    EXPIRING_SOON: { icon: AlertTriangle, text: "text-amber-700" },
+    EXPIRED: { icon: XCircle, text: "text-red-700" },
+    PENDING: { icon: Clock, text: "text-gray-600" },
+  };
 
 /** Icon-only variant pentru tabele compacte */
-export function DocumentStatusIcon({ status }: { status: DocumentStatus | string }) {
+export function DocumentStatusIcon({
+  status,
+}: {
+  status: DocumentStatus | string;
+}) {
   const c = styleByStatus[status] ?? styleByStatus["PENDING"]!;
   const Icon = c.icon;
   const label = tDocumentStatus(String(status));

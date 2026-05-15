@@ -1,7 +1,7 @@
 import {
-  parseSalaryTypeInput,
   LUNAR_WORKING_DAYS_NORM,
   computeWeeklyPayTotal,
+  parseSalaryTypeInput,
 } from "@/lib/salaryFields";
 
 export function defaultWeeklyPayUnitValue(salaryType: unknown): string {
@@ -34,7 +34,10 @@ export function getWeeklyPayInputConfig(salaryType: unknown): {
 }
 
 /** Unități numerice pentru calcul live (LUNAR gol → 21). */
-export function unitsForLiveCalculation(raw: string | undefined, salaryType: unknown): number {
+export function unitsForLiveCalculation(
+  raw: string | undefined,
+  salaryType: unknown,
+): number {
   const t = parseSalaryTypeInput(String(salaryType ?? ""));
   const s = raw !== undefined ? String(raw).trim() : "";
   if (t === "LUNAR") {
@@ -49,7 +52,7 @@ export function unitsForLiveCalculation(raw: string | undefined, salaryType: unk
 export function liveWeeklyPayTotal(
   salaryType: unknown,
   rawUnits: string | undefined,
-  salaryAmount: unknown
+  salaryAmount: unknown,
 ): number | null {
   const u = unitsForLiveCalculation(rawUnits, salaryType);
   return computeWeeklyPayTotal(salaryType, u, salaryAmount);

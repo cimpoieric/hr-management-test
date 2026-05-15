@@ -11,13 +11,13 @@
 
 import { getAppSettings } from "@/lib/appSettings";
 import { logAuditFF } from "@/lib/audit";
-import { requireRole } from "@/lib/auth";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { decrypt } from "@/lib/encryption";
 import {
   addSettingsLogo,
   registerPdfFontWithFallback,
 } from "@/lib/pdf/jsPdfBranding";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { prismaTyped } from "@/lib/prisma";
 import { salaryAmountToJson } from "@/lib/salaryFields";
 import { jsPDF } from "jspdf";
@@ -44,16 +44,11 @@ function safeDecrypt(value: string | null | undefined): string {
 // ─── POST handler ────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_SETTINGS_ADMIN,
-  );
-  if (authError || !user) {
-    return (
-      authError ??
-      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
-    );
-  }
+  const planCheck = await checkPlan(request, FEATURES.EXPORT_PDF, {
+    roles: ROLES_SETTINGS_ADMIN,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
 
   try {
     const body = await request.json();

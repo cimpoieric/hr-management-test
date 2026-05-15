@@ -1,6 +1,7 @@
 "use client";
 
 import { EmployeeForm } from "@/components/employees/EmployeeForm";
+import { EmployeeLimitOverlay } from "@/components/plan/EmployeeLimitOverlay";
 import { useTranslation } from "@/hooks/useTranslation";
 
 export default function NouAngajatPage() {
@@ -17,7 +18,9 @@ export default function NouAngajatPage() {
         </p>
       </div>
 
-      <EmployeeForm />
+      <EmployeeLimitOverlay>
+        <EmployeeForm />
+      </EmployeeLimitOverlay>
     </div>
   );
 }

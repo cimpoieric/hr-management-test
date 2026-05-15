@@ -1,48 +1,67 @@
 /**
  * GET    /api/employees/[id]  — Detalii complete angajat
  * PUT    /api/employees/[id]  — Actualizare angajat
- * DELETE /api/employees/[id]  — Soft delete (status → TERMINATED)
+ * DELETE /api/employees/[id]           — Soft delete (status → TERMINATED)
+ * DELETE /api/employees/[id]?permanent=true — Ștergere definitivă (CASCADE în DB)
  *
  * CNP/IBAN decriptate doar pentru rolurile cu permisiune.
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
+import { logAudit, logAuditFF } from "@/lib/audit";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
+import { decrypt, encrypt, hashSha256 } from "@/lib/encryption";
 import {
-  canEditEmployee,
   canDeleteEmployee,
-  canViewSensitiveData,
+  canEditEmployee,
   canViewIban,
+  canViewSensitiveData,
 } from "@/lib/permissions";
-import {
-  validateCNP,
-  validateIBAN,
-  validateEmail,
-  validatePhone,
-  maskCNP,
-  maskIBAN,
-} from "@/lib/validation";
-import { encrypt, decrypt, hashSha256 } from "@/lib/encryption";
-import { logAuditFF } from "@/lib/audit";
+import { prisma } from "@/lib/prisma";
 import {
   parseSalaryAmountDecimal,
   parseSalaryTypeInput,
   salaryAmountToJson,
 } from "@/lib/salaryFields";
+import {
+  maskCNP,
+  maskIBAN,
+  validateCNP,
+  validateEmail,
+  validateIBAN,
+  validatePhone,
+} from "@/lib/validation";
+import { Prisma } from "@prisma/client";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
-function prismaErrorToRomanianMessage(error: unknown): { status: number; message: string } | null {
+function prismaErrorToRomanianMessage(
+  error: unknown,
+): { status: number; message: string } | null {
   if (error instanceof z.ZodError) {
-    return { status: 400, message: error.issues[0]?.message ?? "Date invalide" };
+    return {
+      status: 400,
+      message: error.issues[0]?.message ?? "Date invalide",
+    };
   }
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2002") {
-      const target = Array.isArray((error.meta as any)?.target) ? (error.meta as any).target.join(", ") : String((error.meta as any)?.target ?? "");
-      if (target.includes("email")) return { status: 409, message: "Email deja folosit de un alt angajat." };
-      if (target.includes("cnp")) return { status: 409, message: "CNP deja folosit de un alt angajat." };
-      return { status: 409, message: "Există deja un angajat cu aceste date unice (duplicat)." };
+      const meta = error.meta as { target?: string | string[] } | undefined;
+      const rawTarget = meta?.target;
+      const target = Array.isArray(rawTarget)
+        ? rawTarget.join(", ")
+        : String(rawTarget ?? "");
+      if (target.includes("email"))
+        return {
+          status: 409,
+          message: "Email deja folosit de un alt angajat.",
+        };
+      if (target.includes("cnp"))
+        return { status: 409, message: "CNP deja folosit de un alt angajat." };
+      return {
+        status: 409,
+        message: "Există deja un angajat cu aceste date unice (duplicat).",
+      };
     }
     if (error.code === "P2025") {
       return { status: 404, message: "Angajat negăsit." };
@@ -50,12 +69,19 @@ function prismaErrorToRomanianMessage(error: unknown): { status: number; message
     return { status: 400, message: `Eroare bază de date (${error.code}).` };
   }
   if (error instanceof Prisma.PrismaClientValidationError) {
-    return { status: 400, message: "Date invalide pentru salvare (validare DB)." };
+    return {
+      status: 400,
+      message: "Date invalide pentru salvare (validare DB).",
+    };
   }
   if (error instanceof Error) {
     // ex: ENCRYPTION_KEY invalid / lipsă
     if (error.message.toLowerCase().includes("encryption_key")) {
-      return { status: 500, message: "Configurare server invalidă: ENCRYPTION_KEY lipsește sau este invalid." };
+      return {
+        status: 500,
+        message:
+          "Configurare server invalidă: ENCRYPTION_KEY lipsește sau este invalid.",
+      };
     }
     return { status: 500, message: error.message };
   }
@@ -77,7 +103,7 @@ function getClientIp(request: NextRequest): string {
 // Next.js 15: params is a Promise in dynamic route handlers
 async function getId(params: Promise<{ id: string }>): Promise<number> {
   const { id } = await params;
-  const num = parseInt(id, 10);
+  const num = Number.parseInt(id, 10);
   if (isNaN(num)) throw new Error("ID invalid");
   return num;
 }
@@ -88,11 +114,14 @@ async function getId(params: Promise<{ id: string }>): Promise<number> {
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
@@ -102,13 +131,23 @@ export async function GET(
       where: { id: employeeId },
       include: {
         company: { select: { id: true, name: true, taxCode: true } },
-        country: { select: { id: true, name: true, code: true, phoneCode: true } },
+        country: {
+          select: { id: true, name: true, code: true, phoneCode: true },
+        },
         documents: {
           where: { deletedAt: null },
           select: { id: true, type: true, fileName: true, uploadedAt: true },
         },
         deployments: {
-          select: { id: true, country: true, city: true, startDate: true, endDate: true, status: true, notes: true },
+          select: {
+            id: true,
+            country: true,
+            city: true,
+            startDate: true,
+            endDate: true,
+            status: true,
+            notes: true,
+          },
         },
       },
     });
@@ -140,6 +179,7 @@ export async function GET(
       salaryAmount: salaryAmountToJson(employee.salaryAmount),
       salaryCurrency: employee.salaryCurrency,
       salaryStartDate: employee.salaryStartDate,
+      paymentFrequency: employee.paymentFrequency,
       company: employee.company,
       hiredAt: employee.hiredAt,
       createdAt: employee.createdAt,
@@ -235,7 +275,10 @@ const updateSchema = z.object({
     .union([z.number(), z.string(), z.literal(""), z.null(), z.undefined()])
     .optional(),
   salaryCurrency: z.string().max(10).nullable().optional(),
-  salaryStartDate: z.union([z.string(), z.literal(""), z.null(), z.undefined()]).optional(),
+  salaryStartDate: z
+    .union([z.string(), z.literal(""), z.null(), z.undefined()])
+    .optional(),
+  paymentFrequency: z.enum(["weekly", "monthly"]).optional(),
   companyId: z.number().int().positive().optional(),
 });
 
@@ -247,9 +290,12 @@ function parseSalaryStartDate(value: string | null | undefined): Date | null {
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -264,7 +310,7 @@ export async function PUT(
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Date invalide", issues: parsed.error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -299,12 +345,20 @@ export async function PUT(
       }
     }
 
-    if (data.email !== undefined && data.email !== null && String(data.email).trim() !== "") {
+    if (
+      data.email !== undefined &&
+      data.email !== null &&
+      String(data.email).trim() !== ""
+    ) {
       if (!validateEmail(data.email)) {
         softWarnings.push("Email cu format neobișnuit — salvat.");
       }
     }
-    if (data.phone !== undefined && data.phone !== null && String(data.phone).trim() !== "") {
+    if (
+      data.phone !== undefined &&
+      data.phone !== null &&
+      String(data.phone).trim() !== ""
+    ) {
       if (!validatePhone(data.phone)) {
         softWarnings.push("Telefon cu format neobișnuit — salvat.");
       }
@@ -334,7 +388,8 @@ export async function PUT(
       }
     }
     if (data.status !== undefined) updateData.status = data.status;
-    if (data.observations !== undefined) updateData.observations = data.observations;
+    if (data.observations !== undefined)
+      updateData.observations = data.observations;
     if (data.salaryType !== undefined) {
       updateData.salaryType =
         data.salaryType === "" || data.salaryType === null
@@ -344,13 +399,19 @@ export async function PUT(
     if (data.salaryAmount !== undefined) {
       const dec = parseSalaryAmountDecimal(data.salaryAmount);
       updateData.salaryAmount =
-        dec === null ? null : (dec.toString() as Prisma.EmployeeUpdateInput["salaryAmount"]);
+        dec === null
+          ? null
+          : (dec.toString() as Prisma.EmployeeUpdateInput["salaryAmount"]);
     }
     if (data.salaryCurrency !== undefined) {
-      updateData.salaryCurrency = data.salaryCurrency?.trim().toUpperCase() || "RON";
+      updateData.salaryCurrency =
+        data.salaryCurrency?.trim().toUpperCase() || "RON";
     }
     if (data.salaryStartDate !== undefined) {
       updateData.salaryStartDate = parseSalaryStartDate(data.salaryStartDate);
+    }
+    if (data.paymentFrequency !== undefined) {
+      updateData.paymentFrequency = data.paymentFrequency;
     }
     if (data.companyId !== undefined) {
       updateData.company = { connect: { id: data.companyId } };
@@ -380,7 +441,7 @@ export async function PUT(
       userRole: user.role,
       ipAddress: getClientIp(request),
       oldValues: Object.fromEntries(
-        Object.entries(data).filter(([, v]) => v !== undefined)
+        Object.entries(data).filter(([, v]) => v !== undefined),
       ),
       newValues: updateData,
     });
@@ -400,20 +461,27 @@ export async function PUT(
   } catch (error) {
     console.error("[EMPLOYEE_PUT]", error);
     const mapped = prismaErrorToRomanianMessage(error);
-    if (mapped) return NextResponse.json({ error: mapped.message }, { status: mapped.status });
+    if (mapped)
+      return NextResponse.json(
+        { error: mapped.message },
+        { status: mapped.status },
+      );
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });
   }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// DELETE (soft delete)
+// DELETE (soft: status TERMINATED | hard: ?permanent=true → prisma.employee.delete)
 // ══════════════════════════════════════════════════════════════════════════════
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canDeleteEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -421,12 +489,39 @@ export async function DELETE(
 
   try {
     const employeeId = await getId(params);
+    const permanent = request.nextUrl.searchParams.get("permanent") === "true";
 
     const existing = await prisma.employee.findUnique({
       where: { id: employeeId },
     });
     if (!existing) {
       return NextResponse.json({ error: "Angajat negăsit" }, { status: 404 });
+    }
+
+    if (permanent) {
+      // await înainte de delete: logAudit folosește entityId → Employee (FK valid doar cât există rândul)
+      await logAudit({
+        action: "DELETE",
+        entity: "Employee",
+        entityId: employeeId,
+        userId: user.userId,
+        userRole: user.role,
+        ipAddress: getClientIp(request),
+        oldValues: {
+          id: existing.id,
+          firstName: existing.firstName,
+          lastName: existing.lastName,
+          status: existing.status,
+        },
+        newValues: { permanent: true },
+      });
+
+      await prisma.employee.delete({ where: { id: employeeId } });
+
+      return NextResponse.json({
+        success: true,
+        message: "Angajat și toate datele asociate au fost șterse",
+      });
     }
 
     // Soft delete: setează status TERMINATED
@@ -454,6 +549,12 @@ export async function DELETE(
     });
   } catch (error) {
     console.error("[EMPLOYEE_DELETE]", error);
+    const mapped = prismaErrorToRomanianMessage(error);
+    if (mapped)
+      return NextResponse.json(
+        { error: mapped.message },
+        { status: mapped.status },
+      );
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });
   }
 }

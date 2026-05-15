@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   try {
@@ -34,4 +34,3 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });
   }
 }
-

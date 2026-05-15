@@ -13,6 +13,8 @@ const PUBLIC_API_EXACT = new Set([
   "/api/auth/login",
   "/api/auth/register",
   "/api/auth/register-organization",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
   "/api/setup",
   "/api/stripe/webhook",
   "/api/webhooks/stripe",
@@ -23,6 +25,15 @@ const PUBLIC_API_PREFIXES = ["/api/auth/register/"] as const;
 export function isPublicApiPath(pathname: string): boolean {
   if (PUBLIC_API_EXACT.has(pathname)) return true;
   return PUBLIC_API_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+/** Paths where Prisma tenant isolation must not require organizationId yet. */
+export function isPublicTenantBypassPath(pathname: string): boolean {
+  if (pathname === "/setup") return true;
+  if (pathname.startsWith("/api/auth/")) return true;
+  if (pathname === "/api/setup") return true;
+  if (pathname === "/login" || pathname.startsWith("/register")) return true;
+  return false;
 }
 
 export type WhereInput = Record<string, unknown>;

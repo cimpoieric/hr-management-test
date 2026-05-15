@@ -18,7 +18,7 @@ export type DocumentStatus = "VALID" | "EXPIRING_SOON" | "EXPIRED" | "PENDING";
  * Funcție pură — poate fi folosită în client sau server.
  */
 export function calculateStatus(
-  expiryDate: Date | null | undefined
+  expiryDate: Date | null | undefined,
 ): DocumentStatus {
   if (!expiryDate) return "PENDING";
 

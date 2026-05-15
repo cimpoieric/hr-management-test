@@ -20,10 +20,11 @@ export function tAuditEntity(entity: string): string {
 export function formatAuditActivityDetail(
   entity: string,
   entityId: number | null | undefined,
-  userName: string | null | undefined
+  userName: string | null | undefined,
 ): string {
   const e = tAuditEntity(entity);
-  const idPart = entityId != null && entityId !== undefined ? ` #${entityId}` : "";
+  const idPart =
+    entityId != null && entityId !== undefined ? ` #${entityId}` : "";
   const userPart = userName ? ` · ${userName}` : "";
   return `${e}${idPart}${userPart}`;
 }

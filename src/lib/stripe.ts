@@ -1,5 +1,6 @@
 import "server-only";
 
+import { resolveAppBaseUrl } from "@/lib/appUrl";
 import Stripe from "stripe";
 
 type StripeClient = InstanceType<typeof Stripe>;
@@ -29,13 +30,7 @@ export function getStripe(): Stripe {
 }
 
 export function getAppBaseUrl(): string {
-  const url = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!url) {
-    throw new Error(
-      "NEXT_PUBLIC_APP_URL is not set (e.g. http://localhost:3000).",
-    );
-  }
-  return url.replace(/\/$/, "");
+  return resolveAppBaseUrl();
 }
 
 export function getStripeWebhookSecret(): string {

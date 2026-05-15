@@ -1,31 +1,32 @@
 /**
  * POST /api/backup/create — Creează backup ZIP (ADMIN only)
  *
- * Returnează: { filename, size, password }
- * AuditLog: BACKUP action
+ * Export în memorie → R2: firm/{organizationId}/backup/{timestamp}.zip
  */
 
 import { getClientIp, logAuditFF } from "@/lib/audit";
-import { requireRole } from "@/lib/auth";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
-import { cleanupOldBackups, createBackup } from "@/lib/backup";
+import {
+  buildBackupDownloadPath,
+  cleanupOldBackups,
+  createBackup,
+  resolveBackupPublicUrl,
+} from "@/lib/backup";
+import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_SETTINGS_ADMIN,
-  );
-  if (authError || !user) return authError!;
+  const planCheck = await checkPlan(request, FEATURES.AUTO_BACKUP, {
+    roles: ROLES_SETTINGS_ADMIN,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
 
   try {
-    // Cleanup backup-uri vechi (>30 zile)
-    await cleanupOldBackups(30);
+    await cleanupOldBackups(user.organizationId, 30);
 
-    // Creează backup
-    const backup = await createBackup();
+    const backup = await createBackup(user.organizationId);
 
-    // Audit log
     logAuditFF({
       action: "BACKUP",
       entity: "System",
@@ -36,12 +37,18 @@ export async function POST(request: NextRequest) {
       newValues: { filename: backup.filename, size: backup.size },
     });
 
+    const downloadUrl =
+      backup.downloadUrl ??
+      resolveBackupPublicUrl(user.organizationId, backup.filename) ??
+      buildBackupDownloadPath(backup.filename);
+
     return NextResponse.json({
       success: true,
       filename: backup.filename,
       size: backup.size,
       sizeFormatted: formatBytes(backup.size),
       password: backup.password,
+      downloadUrl,
     });
   } catch (error) {
     console.error("[BACKUP_CREATE]", error);

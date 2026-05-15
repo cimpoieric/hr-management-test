@@ -8,6 +8,7 @@ import { PrismaClient } from "@prisma/client";
 import { hashPassword } from "../src/lib/auth";
 import { calculateStatus } from "../src/lib/documentStatus";
 import { encrypt, hashSha256 } from "../src/lib/encryption";
+import { resolvePlanIdByKey, seedPlans } from "../src/lib/planCatalog";
 
 const prisma = new PrismaClient();
 
@@ -246,7 +247,11 @@ function buildSeedEmployees(): SeedEmployee[] {
 async function main() {
   console.info("🌱 Seeding database...\n");
 
+  await seedPlans(prisma);
+  console.info("[0/5] Planuri: STARTER, BUSINESS, ENTERPRISE, CUSTOM");
+
   const hashedPassword = await hashPassword(ADMIN_PASSWORD);
+  const starterPlanId = await resolvePlanIdByKey(prisma, "starter");
 
   const organization = await prisma.organization.upsert({
     where: { slug: "seed-demo-org" },
@@ -255,6 +260,11 @@ async function main() {
       name: "Seed Organization",
       slug: "seed-demo-org",
       defaultLanguage: "ro",
+      planId: starterPlanId,
+      employeeCount: 0,
+      subscriptionStatus: "active",
+      status: "active",
+      trialEndsAt: null,
     },
   });
 
@@ -431,6 +441,14 @@ async function main() {
       }
     }
   }
+
+  const employeeTotal = await prisma.employee.count({
+    where: { organizationId: organization.id },
+  });
+  await prisma.organization.update({
+    where: { id: organization.id },
+    data: { employeeCount: employeeTotal },
+  });
 
   console.info("\n✅ Seeding complet!");
   console.info(`   Login: ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`);

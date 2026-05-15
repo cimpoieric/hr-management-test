@@ -13,23 +13,20 @@
  *   5. Actualizează EmailImport status
  */
 
-import path from "path";
+import {
+  ensureImportDir,
+  writeEmailImportAttachment,
+} from "@/lib/importStorage";
 import { extractFields } from "@/lib/parsers/fieldExtractor";
 import { extractTextFromImage } from "@/lib/parsers/ocrParser";
 import { extractTextFromPDF } from "@/lib/parsers/pdfParser";
 import { prisma, prismaBase } from "@/lib/prisma";
 import { UserRole } from "@/lib/roles";
 import { runWithTenantContext } from "@/lib/tenantRequestStorage";
-import fs from "fs/promises";
 import { markAsSeen } from "./imapClient";
 import type { EmailAttachment, EmailMessage } from "./imapClient";
 import { ALLOWED_EXTENSIONS, getMimeType } from "./storage";
-
-const IMPORT_BASE_DIR = "./data/import";
-
-async function ensureDir(dir: string) {
-  await fs.mkdir(dir, { recursive: true });
-}
+import path from "path";
 
 async function resolveDefaultOrganizationIdForEmailCron(): Promise<string> {
   const o = await prismaBase.organization.findFirst({
@@ -98,8 +95,7 @@ async function processEmailCore(
     },
   });
 
-  const emailDir = path.join(IMPORT_BASE_DIR, "email", String(emailImport.id));
-  await ensureDir(emailDir);
+  await ensureImportDir(`email/${emailImport.id}`);
 
   let pendingCount = 0;
 
@@ -111,7 +107,6 @@ async function processEmailCore(
     try {
       const result = await processAttachment(
         emailImport.id,
-        emailDir,
         attachment,
         i,
         message,
@@ -157,7 +152,6 @@ async function processEmailCore(
  */
 async function processAttachment(
   emailImportId: number,
-  emailDir: string,
   attachment: EmailAttachment,
   index: number,
   message: EmailMessage,
@@ -165,16 +159,16 @@ async function processAttachment(
 ): Promise<boolean> {
   const ext = path.extname(attachment.filename).toLowerCase();
 
-  // Verifică extensie
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
     return false;
   }
 
-  // Salvează pe disk
-  const safeName = attachment.filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const fileName = `${Date.now()}_${index}_${safeName}`;
-  const filePath = path.join(emailDir, fileName);
-  await fs.writeFile(filePath, attachment.content);
+  const { storedPath } = await writeEmailImportAttachment(
+    emailImportId,
+    attachment.content,
+    attachment.filename,
+    index,
+  );
 
   // Extrage text
   let rawText = "";
@@ -207,7 +201,7 @@ async function processAttachment(
       organizationId,
       sourceType: "EMAIL",
       fileName: attachment.filename,
-      filePath: filePath,
+      filePath: storedPath,
       mimeType: attachment.contentType || getMimeType(attachment.filename),
       fileSize: attachment.size,
       rawText,

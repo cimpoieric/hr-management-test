@@ -9,20 +9,21 @@
  * POST /api/deployments — Creare cu validare overlap
  */
 
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import { activeDeploymentKpiWhere } from "@/lib/activeDeployments";
-import { requireAuth, WRITE_ROLES } from "@/lib/auth";
-import { canEditEmployee } from "@/lib/permissions";
+import { requireAuth, requireRole } from "@/lib/auth";
+import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import {
-  isValidCountryCode,
-  isValidDeploymentStatus,
-  getCountryName,
   DEPLOYMENT_COUNTRIES,
   DEPLOYMENT_STATUSES,
+  getCountryName,
+  isValidCountryCode,
+  isValidDeploymentStatus,
 } from "@/lib/countries";
+import { canEditEmployee } from "@/lib/permissions";
+import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
+import { type NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -30,7 +31,7 @@ async function logAudit(
   action: string,
   entityId: number,
   newValues: unknown,
-  ipAddress?: string
+  ipAddress?: string,
 ) {
   try {
     await prisma.auditLog.create({
@@ -64,7 +65,7 @@ async function checkOverlap(
   startDate: Date,
   endDate: Date | null,
   status: string,
-  excludeId?: number
+  excludeId?: number,
 ): Promise<string | null> {
   // Doar ACTIVE blochează overlap
   if (status !== "ACTIVE") return null;
@@ -88,7 +89,7 @@ async function checkOverlap(
     // Overlap: [start1, end1] intersectează [start2, end2]
     if (startDate <= depEnd && dep.startDate <= newEnd) {
       return `Angajatul are deja o detașare ACTIVE în ${getCountryName(
-        dep.country
+        dep.country,
       )} (${new Date(dep.startDate).toLocaleDateString("ro-RO")} – ${
         dep.endDate
           ? new Date(dep.endDate).toLocaleDateString("ro-RO")
@@ -105,7 +106,10 @@ async function checkOverlap(
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
@@ -117,12 +121,14 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get("status");
     const active = searchParams.get("active"); // "true" = același criteriu ca dashboard / stats (activeDeploymentKpiWhere)
 
-    const usePagination =
-      searchParams.has("page") || searchParams.has("limit");
-    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
+    const usePagination = searchParams.has("page") || searchParams.has("limit");
+    const page = Math.max(
+      1,
+      Number.parseInt(searchParams.get("page") ?? "1", 10),
+    );
     const limit = Math.min(
       200,
-      Math.max(1, parseInt(searchParams.get("limit") ?? "50", 10))
+      Math.max(1, Number.parseInt(searchParams.get("limit") ?? "50", 10)),
     );
     const skip = (page - 1) * limit;
 
@@ -130,7 +136,7 @@ export async function GET(request: NextRequest) {
     const filters: Prisma.DeploymentWhereInput[] = [];
 
     if (employeeIdRaw) {
-      const eid = parseInt(employeeIdRaw, 10);
+      const eid = Number.parseInt(employeeIdRaw, 10);
       if (!Number.isNaN(eid)) {
         filters.push({ employeeId: eid });
       }
@@ -159,7 +165,11 @@ export async function GET(request: NextRequest) {
     }
 
     const where: Prisma.DeploymentWhereInput =
-      filters.length === 0 ? {} : filters.length === 1 ? filters[0]! : { AND: filters };
+      filters.length === 0
+        ? {}
+        : filters.length === 1
+          ? filters[0]!
+          : { AND: filters };
 
     const queryArgs = {
       where,
@@ -197,7 +207,7 @@ export async function GET(request: NextRequest) {
         limit: usePagination ? limit : total,
         totalPages,
       },
-      { status: 200 }
+      { status: 200 },
     );
   } catch (error) {
     console.error("[DEPLOYMENTS_GET]", error);
@@ -223,7 +233,10 @@ const createSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireAuth(request, WRITE_ROLES);
+  const { user, response: authError } = await requireRole(
+    request,
+    ROLES_EMPLOYEES_RW,
+  );
   if (authError || !user) return authError!;
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
@@ -236,7 +249,7 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Date invalide", issues: parsed.error.issues },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -251,7 +264,7 @@ export async function POST(request: NextRequest) {
           error: "COUNTRY_INVALID",
           message: `Țară invalidă. Valide: ${DEPLOYMENT_COUNTRIES.map((c) => c.code).join(", ")}`,
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -262,7 +275,7 @@ export async function POST(request: NextRequest) {
           error: "STATUS_INVALID",
           message: `Status invalid. Valide: ${DEPLOYMENT_STATUSES.join(", ")}`,
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -275,14 +288,14 @@ export async function POST(request: NextRequest) {
     if (!employee) {
       return NextResponse.json(
         { error: "EMPLOYEE_NOT_FOUND", message: "Angajat negăsit" },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
     if (employee.status !== "ACTIVE") {
       return NextResponse.json(
         { error: "EMPLOYEE_INACTIVE", message: "Angajatul nu mai este activ" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -297,7 +310,7 @@ export async function POST(request: NextRequest) {
           error: "DATE_INVALID",
           message: "Data de început trebuie să fie înainte de data de sfârșit",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -306,13 +319,13 @@ export async function POST(request: NextRequest) {
       data.employeeId,
       startDate,
       endDate,
-      data.status
+      data.status,
     );
 
     if (overlapError) {
       return NextResponse.json(
         { error: "OVERLAP", message: overlapError },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
@@ -348,18 +361,15 @@ export async function POST(request: NextRequest) {
         employeeId: deployment.employeeId,
         startDate: deployment.startDate,
       },
-      getClientIp(request)
+      getClientIp(request),
     );
 
-    return NextResponse.json(
-      { deployment },
-      { status: 201 }
-    );
+    return NextResponse.json({ deployment }, { status: 201 });
   } catch (error) {
     console.error("[DEPLOYMENTS_POST]", error);
     return NextResponse.json(
       { error: "Eroare server intern" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

@@ -16,6 +16,12 @@ import { encrypt, hashSha256 } from "@/lib/encryption";
 import { canEditEmployee, canViewIban } from "@/lib/permissions";
 import { prisma, prismaTyped } from "@/lib/prisma";
 import {
+  detachedEmployeeProfileWhere,
+  isEmployeeMarkedDetached,
+} from "@/lib/detachedEmployee";
+import { incrementOrganizationEmployeeCount } from "@/lib/organizationPlan";
+import { checkCanAddEmployees } from "@/lib/middleware/plan-check";
+import {
   parseSalaryAmountDecimal,
   parseSalaryTypeInput,
   salaryAmountToJson,
@@ -303,10 +309,12 @@ const employeeListSelect = {
   country: { select: { id: true, name: true, code: true } },
   hiredAt: true,
   observations: true,
+  workNorm: true,
   salaryType: true,
   salaryAmount: true,
   salaryCurrency: true,
   salaryStartDate: true,
+  paymentFrequency: true,
   createdAt: true,
   company: { select: { id: true, name: true } },
   documents: {
@@ -360,10 +368,12 @@ interface EmployeeListQueryRow {
   country: { id: number; name: string; code: string } | null;
   hiredAt: Date;
   observations: string | null;
+  workNorm: string | null;
   salaryType: "LUNAR" | "SAPTAMANAL" | "ORA" | null;
   salaryAmount: unknown;
   salaryCurrency: string;
   salaryStartDate: Date | null;
+  paymentFrequency: string;
   createdAt: Date;
   company: { id: number; name: string };
   documents: Array<{
@@ -416,6 +426,7 @@ export async function GET(request: NextRequest) {
     const hireDateFrom = searchParams.get("hireDateFrom");
     const hireDateTo = searchParams.get("hireDateTo");
     const hasAssignment = searchParams.get("hasAssignment");
+    const detachedOnly = searchParams.get("detachedOnly");
     const sortBy = searchParams.get("sortBy") ?? "createdAt";
     const sortOrder = searchParams.get("sortOrder") === "asc" ? "asc" : "desc";
 
@@ -481,6 +492,11 @@ export async function GET(request: NextRequest) {
       if (hireDateFrom) hiredAtFilter.gte = new Date(hireDateFrom);
       if (hireDateTo) hiredAtFilter.lte = new Date(hireDateTo);
       andConditions.push({ hiredAt: hiredAtFilter });
+    }
+
+    // ─── Profil marcat detasare (workNorm / position / observations) ──
+    if (detachedOnly === "true") {
+      andConditions.push(detachedEmployeeProfileWhere);
     }
 
     // ─── Has active assignment ────────────────────────────────
@@ -593,10 +609,20 @@ export async function GET(request: NextRequest) {
           country: e.country,
           hiredAt: e.hiredAt,
           observations: e.observations,
+          workNorm: e.workNorm,
+          isMarkedDetached: isEmployeeMarkedDetached({
+            workNorm: e.workNorm,
+            position: e.position,
+            observations: e.observations,
+          }),
+          hasActiveDeployment: (e.deployments ?? []).some(
+            (d) => d.status === "ACTIVE",
+          ),
           salaryType: e.salaryType,
           salaryAmount: salaryAmountToJson(e.salaryAmount),
           salaryCurrency: e.salaryCurrency,
           salaryStartDate: e.salaryStartDate,
+          paymentFrequency: e.paymentFrequency?.trim() || "weekly",
           company: e.company,
           documents: e.documents,
           deployments: e.deployments,
@@ -629,11 +655,12 @@ function parseSalaryStartDate(value: string | null | undefined): Date | null {
 }
 
 export async function POST(request: NextRequest) {
-  const { user, response: authError } = await requireRole(
-    request,
-    ROLES_EMPLOYEES_RW,
-  );
-  if (authError || !user) return authError!;
+  const planCheck = await checkCanAddEmployees(request, 1, {
+    roles: ROLES_EMPLOYEES_RW,
+  });
+  if (!planCheck.allowed) return planCheck.response;
+  const { user } = planCheck;
+
   if (!canEditEmployee(user.role)) {
     return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
   }
@@ -786,6 +813,11 @@ export async function POST(request: NextRequest) {
       data: createData,
       include: employeeCreateInclude,
     });
+
+    await incrementOrganizationEmployeeCount(
+      prismaTyped,
+      user.organizationId,
+    );
 
     await logAudit(
       "CREATE",

@@ -17,13 +17,13 @@ export function validateCNP(cnp: string): boolean {
   if (!/^\d{13}$/.test(cnp)) return false;
 
   // Prima cifră: sex + secol (1-8)
-  const sex = parseInt(cnp.charAt(0), 10);
+  const sex = Number.parseInt(cnp.charAt(0), 10);
   if (sex < 1 || sex > 8) return false;
 
   // Extrage și validează data nașterii
-  const yearShort = parseInt(cnp.substring(1, 3), 10);
-  const month = parseInt(cnp.substring(3, 5), 10);
-  const day = parseInt(cnp.substring(5, 7), 10);
+  const yearShort = Number.parseInt(cnp.substring(1, 3), 10);
+  const month = Number.parseInt(cnp.substring(3, 5), 10);
+  const day = Number.parseInt(cnp.substring(5, 7), 10);
 
   if (month < 1 || month > 12) return false;
   if (day < 1 || day > 31) return false;
@@ -42,28 +42,28 @@ export function validateCNP(cnp: string): boolean {
   }
 
   // Județ: 01-52 (sau coduri speciale)
-  const county = parseInt(cnp.substring(7, 9), 10);
+  const county = Number.parseInt(cnp.substring(7, 9), 10);
   if (county < 1 || county > 52) return false;
 
   // Checksum
   let sum = 0;
   for (let i = 0; i < 12; i++) {
-    sum += parseInt(cnp.charAt(i), 10) * CNP_WEIGHTS[i]!;
+    sum += Number.parseInt(cnp.charAt(i), 10) * CNP_WEIGHTS[i]!;
   }
   const remainder = sum % 11;
   const checksum = remainder < 10 ? remainder : 1;
 
-  return checksum === parseInt(cnp.charAt(12), 10);
+  return checksum === Number.parseInt(cnp.charAt(12), 10);
 }
 
 /** Extrage data nașterii din CNP. Returnează null dacă CNP invalid. */
 export function extractBirthDateFromCNP(cnp: string): Date | null {
   if (!validateCNP(cnp)) return null;
 
-  const sex = parseInt(cnp.charAt(0), 10);
-  const yearShort = parseInt(cnp.substring(1, 3), 10);
-  const month = parseInt(cnp.substring(3, 5), 10) - 1;
-  const day = parseInt(cnp.substring(5, 7), 10);
+  const sex = Number.parseInt(cnp.charAt(0), 10);
+  const yearShort = Number.parseInt(cnp.substring(1, 3), 10);
+  const month = Number.parseInt(cnp.substring(3, 5), 10) - 1;
+  const day = Number.parseInt(cnp.substring(5, 7), 10);
 
   let fullYear: number;
   if (sex === 1 || sex === 2) fullYear = 1900 + yearShort;
@@ -106,13 +106,13 @@ export function validateIBAN(iban: string): boolean {
   let segment = numeric.slice(0, 9);
   let idx = 9;
   while (idx < numeric.length) {
-    const remainder = parseInt(segment, 10) % 97;
+    const remainder = Number.parseInt(segment, 10) % 97;
     const nextDigits = Math.min(7, numeric.length - idx);
     segment = String(remainder) + numeric.substring(idx, idx + nextDigits);
     idx += nextDigits;
   }
 
-  return parseInt(segment, 10) % 97 === 1;
+  return Number.parseInt(segment, 10) % 97 === 1;
 }
 
 /** Maschează IBAN: primele 4 + **** + ultimele 4 */

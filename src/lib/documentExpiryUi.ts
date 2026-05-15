@@ -3,7 +3,11 @@
  * Folosește miezul zilei local pentru comparații calendaristice.
  */
 
-export type DocumentExpiryBucket = "expired" | "expiring_soon" | "valid" | "pending";
+export type DocumentExpiryBucket =
+  | "expired"
+  | "expiring_soon"
+  | "valid"
+  | "pending";
 
 function startOfLocalDay(d: Date): number {
   const x = new Date(d);
@@ -21,7 +25,7 @@ function parseExpiryMs(expiryIso: string | null | undefined): number | null {
 export function isDocumentExpired(
   status: string,
   expiryIso: string | null | undefined,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): boolean {
   const exp = parseExpiryMs(expiryIso);
   if (exp != null && startOfLocalDay(new Date(exp)) < startOfLocalDay(now)) {
@@ -35,7 +39,7 @@ export function isDocumentExpiringSoon(
   status: string,
   expiryIso: string | null | undefined,
   expiringSoonDays: number,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): boolean {
   if (isDocumentExpired(status, expiryIso, now)) return false;
   const exp = parseExpiryMs(expiryIso);
@@ -53,7 +57,7 @@ export function getDocumentExpiryBucket(
   status: string,
   expiryIso: string | null | undefined,
   expiringSoonDays: number,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): DocumentExpiryBucket {
   if (isDocumentExpired(status, expiryIso, now)) return "expired";
   if (status === "PENDING") return "pending";
@@ -65,7 +69,11 @@ export function getDocumentExpiryBucket(
 
 export function countExpiryInDocuments<
   T extends { status: string; expiryDate: string | null },
->(docs: T[], expiringSoonDays: number, now: Date = new Date()): {
+>(
+  docs: T[],
+  expiringSoonDays: number,
+  now: Date = new Date(),
+): {
   expired: number;
   expiringSoon: number;
   valid: number;
@@ -80,7 +88,7 @@ export function countExpiryInDocuments<
       d.status,
       d.expiryDate,
       expiringSoonDays,
-      now
+      now,
     );
     if (b === "expired") expired++;
     else if (b === "expiring_soon") expiringSoon++;

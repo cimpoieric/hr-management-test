@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { getDeploymentStats } from "@/lib/deploymentStats";
+import { prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
 
 /**
  * GET /api/dashboard/overview
@@ -11,29 +11,33 @@ import { getDeploymentStats } from "@/lib/deploymentStats";
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
     const now = new Date();
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-    const [{ byCountry: deploymentsByCountry }, recentAuditRaw] = await Promise.all([
-      getDeploymentStats(now),
-      prisma.auditLog.findMany({
-        where: { createdAt: { gte: sevenDaysAgo } },
-        orderBy: { createdAt: "desc" },
-        take: 8,
-        select: {
-          id: true,
-          action: true,
-          entity: true,
-          userName: true,
-          createdAt: true,
-          entityId: true,
-        },
-      }),
-    ]);
+    const [{ byCountry: deploymentsByCountry }, recentAuditRaw] =
+      await Promise.all([
+        getDeploymentStats(now),
+        prisma.auditLog.findMany({
+          where: { createdAt: { gte: sevenDaysAgo } },
+          orderBy: { createdAt: "desc" },
+          take: 8,
+          select: {
+            id: true,
+            action: true,
+            entity: true,
+            userName: true,
+            createdAt: true,
+            entityId: true,
+          },
+        }),
+      ]);
 
     const recentActivity = recentAuditRaw.map((item) => ({
       id: item.id,

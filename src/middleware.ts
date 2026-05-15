@@ -16,9 +16,16 @@ import {
 } from "@/middleware/tenant";
 import {
   ADMIN_PAGE_DENY_PATH,
+  isSuperAdminRole,
   resolveAdminApiAccess,
   resolveAdminPageAccess,
 } from "@/middleware/adminAccess";
+import {
+  HEADER_TRIAL_ENDING,
+  isSubscriptionExemptApi,
+  isSubscriptionExemptPage,
+  subscriptionExpiredJson,
+} from "@/middleware/subscriptionGate";
 import { verifyToken } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -26,12 +33,16 @@ import type { NextRequest } from "next/server";
 const PUBLIC_PREFIXES = [
   "/login",
   "/register",
+  "/forgot-password",
+  "/reset-password",
   "/setup",
   "/pricing",
   "/privacy",
   "/terms",
   "/api/auth/login",
   "/api/auth/register",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
   "/api/setup",
 ];
 
@@ -49,16 +60,73 @@ function jsonError(status: number, message: string) {
   return NextResponse.json({ error: message }, { status });
 }
 
+function nextWithPath(request: NextRequest, pathname: string) {
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-pathname", pathname);
+  return NextResponse.next({
+    request: { headers: requestHeaders },
+  });
+}
+
+async function applySubscriptionGate(
+  request: NextRequest,
+  pathname: string,
+  role: string,
+): Promise<NextResponse | null> {
+  if (isSuperAdminRole(role)) return null;
+  if (pathname.startsWith("/api/") && isSubscriptionExemptApi(pathname)) {
+    return null;
+  }
+  if (!pathname.startsWith("/api/") && isSubscriptionExemptPage(pathname)) {
+    return null;
+  }
+
+  const gateUrl = new URL("/api/internal/subscription-gate", request.url);
+  const cookie = request.cookies.get("auth-token")?.value;
+  if (!cookie) return null;
+
+  try {
+    const gateRes = await fetch(gateUrl, {
+      headers: { cookie: `auth-token=${cookie}` },
+      cache: "no-store",
+    });
+    if (!gateRes.ok) return null;
+
+    const data = (await gateRes.json()) as {
+      blocked?: boolean;
+      trialEnding?: boolean;
+    };
+
+    if (data.blocked) {
+      if (pathname.startsWith("/api/")) {
+        return new NextResponse(subscriptionExpiredJson().body, {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return NextResponse.redirect(new URL("/pricing", request.url));
+    }
+
+    const res = nextWithPath(request, pathname);
+    if (data.trialEnding) {
+      res.headers.set(HEADER_TRIAL_ENDING, "true");
+    }
+    return res;
+  } catch {
+    return null;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Rute API (inclusiv /api/auth/*)
   if (pathname.startsWith("/api/")) {
     if (STATIC_PATTERN.test(pathname)) {
-      return NextResponse.next();
+      return nextWithPath(request, pathname);
     }
     if (isPublicApiPath(pathname)) {
-      return NextResponse.next();
+      return nextWithPath(request, pathname);
     }
 
     const token = request.cookies.get("auth-token")?.value;
@@ -70,7 +138,18 @@ export async function middleware(request: NextRequest) {
       if (resolveAdminApiAccess(pathname, payload.role) === "deny") {
         return jsonError(403, "Forbidden");
       }
-      const res = NextResponse.next();
+      const gated = await applySubscriptionGate(
+        request,
+        pathname,
+        payload.role,
+      );
+      if (gated) {
+        gated.headers.set(HEADER_USER_ID, String(payload.userId));
+        gated.headers.set(HEADER_USER_ROLE, payload.role);
+        gated.headers.set(HEADER_ORGANIZATION_ID, payload.organizationId);
+        return gated;
+      }
+      const res = nextWithPath(request, pathname);
       res.headers.set(HEADER_USER_ID, String(payload.userId));
       res.headers.set(HEADER_USER_ROLE, payload.role);
       res.headers.set(HEADER_ORGANIZATION_ID, payload.organizationId);
@@ -81,7 +160,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (STATIC_PATTERN.test(pathname)) {
-    return NextResponse.next();
+    return nextWithPath(request, pathname);
   }
 
   // Setup gate (fără Prisma în Edge middleware).
@@ -98,7 +177,7 @@ export async function middleware(request: NextRequest) {
         if (!pathname.startsWith("/setup")) {
           return NextResponse.redirect(new URL("/setup", request.url));
         }
-        return NextResponse.next();
+        return nextWithPath(request, pathname);
       }
 
       if (pathname.startsWith("/setup")) {
@@ -110,7 +189,7 @@ export async function middleware(request: NextRequest) {
   }
 
   if (isPublicPath(pathname)) {
-    return NextResponse.next();
+    return nextWithPath(request, pathname);
   }
 
   const token = request.cookies.get("auth-token")?.value;
@@ -128,7 +207,15 @@ export async function middleware(request: NextRequest) {
       return NextResponse.redirect(new URL(ADMIN_PAGE_DENY_PATH, request.url));
     }
 
-    const response = NextResponse.next();
+    const gated = await applySubscriptionGate(request, pathname, payload.role);
+    if (gated) {
+      gated.headers.set(HEADER_USER_ID, String(payload.userId));
+      gated.headers.set(HEADER_USER_ROLE, payload.role);
+      gated.headers.set(HEADER_ORGANIZATION_ID, payload.organizationId);
+      return gated;
+    }
+
+    const response = nextWithPath(request, pathname);
     response.headers.set(HEADER_USER_ID, String(payload.userId));
     response.headers.set(HEADER_USER_ROLE, payload.role);
     response.headers.set(HEADER_ORGANIZATION_ID, payload.organizationId);

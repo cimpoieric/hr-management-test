@@ -1,5 +1,14 @@
 "use client";
 
+import {
+  currentPeriodDefaults,
+  isoWeekRangeLocal,
+  monthRangeLocal,
+  resolveTimesheetFrequencyForEmployee,
+  toIsoDateInput,
+  type PaymentFrequency,
+} from "@/lib/paymentPeriod";
+import { preventWheelOnFocusedNumberInput } from "@/lib/numericInput";
 import { broadcastTimesheetHoursForPayrollSync } from "@/lib/timesheetPayrollSync";
 import { ChevronsUpDown, Plus, Search, X } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -8,57 +17,10 @@ import { toast } from "sonner";
 import { z } from "zod";
 import type { EmployeeOption } from "@/types";
 
-function isoDate(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-/**
- * ISO week range (Mon..Sun) for (year, week).
- * Works for ISO-8601 week numbers (1-53). UI limits 1-52.
- */
-function isoWeekRange(year: number, week: number): { start: Date; end: Date } {
-  // ISO week 1 is the week with Jan 4.
-  const jan4 = new Date(Date.UTC(year, 0, 4));
-  const day = jan4.getUTCDay() || 7; // 1..7 (Mon..Sun)
-  const mondayWeek1 = new Date(jan4);
-  mondayWeek1.setUTCDate(jan4.getUTCDate() - (day - 1));
-
-  const start = new Date(mondayWeek1);
-  start.setUTCDate(mondayWeek1.getUTCDate() + (week - 1) * 7);
-
-  const end = new Date(start);
-  end.setUTCDate(start.getUTCDate() + 6);
-
-  // return as local dates (keeping same calendar day)
-  return {
-    start: new Date(
-      start.getUTCFullYear(),
-      start.getUTCMonth(),
-      start.getUTCDate(),
-    ),
-    end: new Date(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()),
-  };
-}
-
-function currentIsoWeek(): { year: number; week: number } {
-  const now = new Date();
-  // ISO week algorithm
-  const d = new Date(
-    Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()),
-  );
-  const day = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - day); // nearest Thursday
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((+d - +yearStart) / 86400000 + 1) / 7);
-  return { year: d.getUTCFullYear(), week };
-}
-
-const formSchema = z
+const weeklyFormSchema = z
   .object({
     employeeId: z.number().int().positive(),
+    type: z.literal("weekly"),
     weekNumber: z.number().int().min(1).max(52),
     year: z.number().int().min(2024).max(2030),
     startDate: z.string().min(1),
@@ -69,7 +31,42 @@ const formSchema = z
     dailyBreakdown: z.string().optional(),
     notes: z.string().optional(),
   })
-  .refine((v) => new Date(v.startDate) < new Date(v.endDate), {
+  .refine((v) => {
+    const s = new Date(v.startDate);
+    const e = new Date(v.endDate);
+    return (
+      !Number.isNaN(s.getTime()) &&
+      !Number.isNaN(e.getTime()) &&
+      s < e
+    );
+  }, {
+    message: "startDate trebuie să fie înainte de endDate",
+    path: ["endDate"],
+  });
+
+const monthlyFormSchema = z
+  .object({
+    employeeId: z.number().int().positive(),
+    type: z.literal("monthly"),
+    month: z.number().int().min(1).max(12),
+    monthYear: z.number().int().min(2024).max(2030),
+    startDate: z.string().min(1),
+    endDate: z.string().min(1),
+    hoursWorked: z.number().min(0.5).max(250),
+    standardHours: z.number().min(0).max(250).default(168),
+    travelAllowance: z.number().min(0).max(1_000_000).default(0),
+    dailyBreakdown: z.string().optional(),
+    notes: z.string().optional(),
+  })
+  .refine((v) => {
+    const s = new Date(v.startDate);
+    const e = new Date(v.endDate);
+    return (
+      !Number.isNaN(s.getTime()) &&
+      !Number.isNaN(e.getTime()) &&
+      s < e
+    );
+  }, {
     message: "startDate trebuie să fie înainte de endDate",
     path: ["endDate"],
   });
@@ -80,27 +77,39 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { year: currentYear, week: currentWeek } = useMemo(
-    () => currentIsoWeek(),
+  const weeklyDefaults = useMemo(
+    () => currentPeriodDefaults("weekly"),
     [],
   );
+  const currentYear = weeklyDefaults.year;
+  const currentWeek = weeklyDefaults.weekNumber;
 
   const [employees, setEmployees] = useState<EmployeeOption[]>([]);
   const [employeeQuery, setEmployeeQuery] = useState("");
   const [employeeDropdownOpen, setEmployeeDropdownOpen] = useState(false);
   const [employeeId, setEmployeeId] = useState<number | null>(null);
 
-  const [weekNumber, setWeekNumber] = useState<number>(
-    Math.min(52, Math.max(1, currentWeek)),
-  );
+  const initialWeek = Math.min(52, Math.max(1, currentWeek));
+  const [weekNumber, setWeekNumber] = useState<number>(initialWeek);
+  const [weekInput, setWeekInput] = useState(String(initialWeek));
   const [year, setYear] = useState<number>(currentYear);
+  const [yearInput, setYearInput] = useState(String(currentYear));
+  const nowMonth = new Date().getMonth() + 1;
+  const [month, setMonth] = useState<number>(nowMonth);
+  const [monthInput, setMonthInput] = useState(String(nowMonth));
   const [startDate, setStartDate] = useState<string>(() => {
-    const r = isoWeekRange(currentYear, Math.min(52, Math.max(1, currentWeek)));
-    return isoDate(r.start);
+    const r = isoWeekRangeLocal(
+      currentYear,
+      Math.min(52, Math.max(1, currentWeek)),
+    );
+    return toIsoDateInput(r.start);
   });
   const [endDate, setEndDate] = useState<string>(() => {
-    const r = isoWeekRange(currentYear, Math.min(52, Math.max(1, currentWeek)));
-    return isoDate(r.end);
+    const r = isoWeekRangeLocal(
+      currentYear,
+      Math.min(52, Math.max(1, currentWeek)),
+    );
+    return toIsoDateInput(r.end);
   });
   const [hoursWorked, setHoursWorked] = useState<string>("40");
   const [standardHours, setStandardHours] = useState<string>("40");
@@ -108,12 +117,78 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
   const [dailyBreakdown, setDailyBreakdown] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // Auto-calc dates when year/week changes
-  useEffect(() => {
-    const r = isoWeekRange(year, weekNumber);
-    setStartDate(isoDate(r.start));
-    setEndDate(isoDate(r.end));
-  }, [year, weekNumber]);
+  function clampWeek(n: number): number {
+    return Math.min(52, Math.max(1, n));
+  }
+
+  function clampYear(n: number): number {
+    return Math.min(2030, Math.max(2024, n));
+  }
+
+  /** Recalculeaza Start/End doar dupa commit (blur), nu la fiecare cifra. */
+  function applyWeekYear(nextWeek: number, nextYear: number) {
+    const w = clampWeek(nextWeek);
+    const y = clampYear(nextYear);
+    setWeekNumber(w);
+    setYear(y);
+    setWeekInput(String(w));
+    setYearInput(String(y));
+    const r = isoWeekRangeLocal(y, w);
+    setStartDate(toIsoDateInput(r.start));
+    setEndDate(toIsoDateInput(r.end));
+  }
+
+  function commitWeekInput() {
+    const raw = weekInput.trim();
+    if (raw === "") {
+      setWeekInput(String(weekNumber));
+      return;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+      setWeekInput(String(weekNumber));
+      return;
+    }
+    applyWeekYear(parsed, year);
+  }
+
+  function commitYearInput() {
+    const raw = yearInput.trim();
+    if (raw === "") {
+      setYearInput(String(year));
+      return;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+      setYearInput(String(year));
+      return;
+    }
+    if (isMonthly) {
+      applyMonthYear(month, parsed);
+    } else {
+      applyWeekYear(weekNumber, parsed);
+    }
+  }
+
+  function commitWeekYearDrafts() {
+    let w = weekNumber;
+    let y = year;
+    const weekRaw = weekInput.trim();
+    if (weekRaw !== "") {
+      const parsedWeek = Number.parseInt(weekRaw, 10);
+      if (Number.isFinite(parsedWeek)) w = parsedWeek;
+    }
+    const yearRaw = yearInput.trim();
+    if (yearRaw !== "") {
+      const parsedYear = Number.parseInt(yearRaw, 10);
+      if (Number.isFinite(parsedYear)) y = parsedYear;
+    }
+    if (isMonthly) {
+      applyMonthYear(month, y);
+    } else {
+      applyWeekYear(w, y);
+    }
+  }
 
   // Load employees when opening modal
   useEffect(() => {
@@ -150,6 +225,15 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
                 r.position === null || r.position === undefined
                   ? null
                   : String(r.position),
+              paymentFrequency:
+                r.paymentFrequency === null ||
+                r.paymentFrequency === undefined
+                  ? null
+                  : String(r.paymentFrequency),
+              salaryType:
+                r.salaryType === null || r.salaryType === undefined
+                  ? null
+                  : String(r.salaryType),
             };
           })
           .filter(
@@ -191,15 +275,66 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
     [employees, employeeId],
   );
 
+  const paymentFreq: PaymentFrequency = useMemo(
+    () => resolveTimesheetFrequencyForEmployee(selectedEmployee),
+    [selectedEmployee],
+  );
+  const isWeekly = paymentFreq === "weekly";
+  const isMonthly = !isWeekly;
+
+  function switchEmployeePeriodMode(emp: EmployeeOption) {
+    const freq = resolveTimesheetFrequencyForEmployee(emp);
+    if (freq === "monthly") {
+      applyMonthYear(nowMonth, year);
+    } else {
+      const w = Math.min(52, Math.max(1, currentWeek));
+      applyWeekYear(w, currentYear);
+      setHoursWorked("40");
+      setStandardHours("40");
+    }
+  }
+
+  useEffect(() => {
+    if (!employeeId || !selectedEmployee) return;
+    switchEmployeePeriodMode(selectedEmployee);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- doar la schimbarea angajatului
+  }, [employeeId]);
+
+  function applyMonthYear(m: number, y: number) {
+    const mo = Math.min(12, Math.max(1, m));
+    const yr = Math.min(2030, Math.max(2024, y));
+    setMonth(mo);
+    setMonthInput(String(mo));
+    setYear(yr);
+    setYearInput(String(yr));
+    const r = monthRangeLocal(yr, mo);
+    setStartDate(toIsoDateInput(r.start));
+    setEndDate(toIsoDateInput(r.end));
+    setHoursWorked("168");
+    setStandardHours("168");
+  }
+
+  function commitMonthInput() {
+    const parsed = Number(monthInput);
+    if (!Number.isFinite(parsed)) {
+      setMonthInput(String(month));
+      return;
+    }
+    applyMonthYear(parsed, year);
+  }
+
   function resetForm() {
     setEmployeeId(null);
     setEmployeeQuery("");
     setEmployeeDropdownOpen(false);
-    setWeekNumber(Math.min(52, Math.max(1, currentWeek)));
+    const w = Math.min(52, Math.max(1, currentWeek));
+    setWeekNumber(w);
+    setWeekInput(String(w));
     setYear(currentYear);
-    const r = isoWeekRange(currentYear, Math.min(52, Math.max(1, currentWeek)));
-    setStartDate(isoDate(r.start));
-    setEndDate(isoDate(r.end));
+    setYearInput(String(currentYear));
+    const r = isoWeekRangeLocal(currentYear, w);
+    setStartDate(toIsoDateInput(r.start));
+    setEndDate(toIsoDateInput(r.end));
     setHoursWorked("40");
     setStandardHours("40");
     setTravelAllowance("0.00");
@@ -210,21 +345,38 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
 
   async function onSubmit() {
     setError(null);
-    const payload = {
+    if (isMonthly) {
+      commitMonthInput();
+    } else {
+      commitWeekYearDrafts();
+    }
+
+    const base = {
       employeeId: employeeId ?? 0,
-      weekNumber,
-      year,
       startDate,
       endDate,
       hoursWorked: Number(hoursWorked),
-      standardHours: Number(standardHours || "40"),
       travelAllowance:
         Number(String(travelAllowance).replace(",", ".") || "0") || 0,
       dailyBreakdown: dailyBreakdown.trim() ? dailyBreakdown.trim() : undefined,
       notes: notes.trim() ? notes.trim() : undefined,
     };
 
-    const parsed = formSchema.safeParse(payload);
+    const parsed = isMonthly
+      ? monthlyFormSchema.safeParse({
+          ...base,
+          type: "monthly" as const,
+          month,
+          monthYear: year,
+          standardHours: Number(standardHours || "168"),
+        })
+      : weeklyFormSchema.safeParse({
+          ...base,
+          type: "weekly" as const,
+          weekNumber,
+          year,
+          standardHours: Number(standardHours || "40"),
+        });
     if (!parsed.success) {
       const msg = parsed.error.issues[0]?.message ?? "Date invalide";
       setError(msg);
@@ -234,7 +386,7 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
 
     setLoading(true);
     try {
-      const res = await fetch("/api/attendance", {
+      const res = await fetch("/api/timesheets", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
@@ -249,10 +401,12 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
       }
 
       toast.success("Pontaj creat");
-      broadcastTimesheetHoursForPayrollSync(
-        parsed.data.year,
-        parsed.data.weekNumber,
-      );
+      if (parsed.data.type === "weekly") {
+        broadcastTimesheetHoursForPayrollSync(
+          parsed.data.year,
+          parsed.data.weekNumber,
+        );
+      }
       setOpen(false);
       resetForm();
       onSuccess?.();
@@ -296,8 +450,18 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
                   Pontaj Nou
                 </h2>
                 <p className="mt-1 text-sm text-gray-500">
-                  Completează pontajul săptămânal.
+                  {isWeekly
+                    ? "Completează pontajul săptămânal."
+                    : "Completează pontajul lunar."}
                 </p>
+                {selectedEmployee && (
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    Tip plată:{" "}
+                    <span className="font-medium text-slate-700">
+                      {isWeekly ? "Săptămânal" : "Lunar"}
+                    </span>
+                  </p>
+                )}
               </div>
               <button
                 className="rounded-lg border bg-white p-2 hover:bg-gray-50 disabled:opacity-50"
@@ -356,6 +520,7 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
                               setEmployeeId(e.id);
                               setEmployeeDropdownOpen(false);
                               setEmployeeQuery("");
+                              switchEmployeePeriodMode(e);
                             }}
                           >
                             <div className="font-medium text-gray-900">
@@ -376,40 +541,86 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
                   )}
                 </div>
 
-                <div>
-                  <label className="text-xs font-medium text-gray-600">
-                    Săptămâna
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={52}
-                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                    value={weekNumber}
-                    onChange={(e) =>
-                      setWeekNumber(
-                        Math.min(
-                          52,
-                          Math.max(1, Number(e.target.value || "1")),
-                        ),
-                      )
-                    }
-                  />
-                </div>
+                {isWeekly ? (
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">
+                      Saptamana
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      className="mt-1 w-full rounded-lg border px-3 py-2 text-sm tabular-nums"
+                      value={weekInput}
+                      onChange={(e) =>
+                        setWeekInput(e.target.value.replace(/[^\d]/g, ""))
+                      }
+                      onBlur={commitWeekInput}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                        if (e.key === "Escape") {
+                          setWeekInput(String(weekNumber));
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                      }}
+                      onWheel={preventWheelOnFocusedNumberInput}
+                      placeholder="1-52"
+                      aria-label="Saptamana"
+                    />
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs font-medium text-gray-600">
+                      Luna
+                    </label>
+                    <select
+                      className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                      value={month}
+                      onChange={(e) =>
+                        applyMonthYear(Number(e.target.value), year)
+                      }
+                      aria-label="Luna"
+                    >
+                      {Array.from({ length: 12 }, (_, i) => {
+                        const m = i + 1;
+                        return (
+                          <option key={m} value={m}>
+                            {String(m).padStart(2, "0")}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="text-xs font-medium text-gray-600">
                     An
                   </label>
                   <input
-                    type="number"
-                    min={2024}
-                    max={2030}
-                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                    value={year}
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm tabular-nums"
+                    value={yearInput}
                     onChange={(e) =>
-                      setYear(Number(e.target.value || String(currentYear)))
+                      setYearInput(e.target.value.replace(/[^\d]/g, ""))
                     }
+                    onBlur={commitYearInput}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        (e.currentTarget as HTMLInputElement).blur();
+                      }
+                      if (e.key === "Escape") {
+                        setYearInput(String(year));
+                        (e.currentTarget as HTMLInputElement).blur();
+                      }
+                    }}
+                    onWheel={preventWheelOnFocusedNumberInput}
+                    placeholder="2024–2030"
+                    aria-label="An"
                   />
                 </div>
 
@@ -460,16 +671,16 @@ export function TimesheetForm({ onSuccess }: { onSuccess?: () => void }) {
                     type="number"
                     step="0.01"
                     min="0"
-                    className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
-                    value={standardHours}
-                    onChange={(e) => setStandardHours(e.target.value)}
-                    placeholder="40"
+                    readOnly
+                    className="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2 text-sm tabular-nums"
+                    value={isWeekly ? "40" : "168"}
+                    aria-readonly
                   />
                 </div>
 
                 <div>
                   <label className="text-xs font-medium text-gray-600">
-                    Diurnă (EUR)
+                    Diurna (EUR)
                   </label>
                   <input
                     type="number"

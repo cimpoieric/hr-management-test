@@ -1,29 +1,59 @@
 /**
- * Rute UI canonice — folosite în Link-uri și redirect-uri.
- * Rutele vechi (/dashboard, /importuri-in-asteptare) rămân valide prin redirect.
+ * Rute UI canonice (engleză). Rutele vechi (RO) rămân valide prin redirect în `next.config.ts`.
  */
 export const ROUTES = {
-  dashboard: "/",
+  dashboard: "/dashboard",
+  employees: "/employees",
+  employeesNew: "/employees/new",
+  documents: "/documents",
+  deployments: "/deployments",
+  imports: "/imports",
+  importsPending: "/imports/pending",
+  importManual: "/imports/manual",
+  importEmail: "/imports/email",
+  reports: "/reports",
+  export: "/export",
+  pay: "/pay",
+  timesheets: "/attendance",
+  payslips: "/payroll",
+  settings: "/settings",
+  settingsAudit: "/settings/audit",
+  settingsEmail: "/settings/email",
+  organization: "/organization",
+  companies: "/settings/companies",
+  countries: "/settings/countries",
+  users: "/users",
+  backup: "/backup",
+  admin: "/admin",
+  adminCompanies: "/admin/companies",
+  adminUsers: "/admin/users",
+  adminCountries: "/admin/countries",
+  adminBackup: "/admin/backup",
+  adminSettings: "/admin/settings",
+  pricing: "/pricing",
+  onboarding: "/onboarding",
+  apiDocs: "/api-docs",
+} as const;
+
+/** Rute înlocuite (RO sau vechi) — active state în nav + redirect. */
+export const LEGACY_ROUTES = {
+  dashboard: "/panou-de-control",
   employees: "/angajati",
   documents: "/documente",
   deployments: "/detasari",
   imports: "/importuri",
+  importsPending: "/importuri-in-asteptare",
   importManual: "/import/manual",
   importEmail: "/import/email",
   reports: "/rapoarte",
-  export: "/export",
   pay: "/plata",
   timesheets: "/pontaj",
   payslips: "/fluturasi",
   settings: "/setari",
-  companies: "/firme",
-  countries: "/tari",
+  settingsCompanies: "/setari/firme",
+  settingsCountries: "/setari/tari",
+  settingsAudit: "/setari/audit",
   users: "/utilizatori",
-  backup: "/backup",
-} as const;
-
-/** Rute înlocuite; păstrate doar pentru redirect. */
-export const LEGACY_ROUTES = {
-  dashboard: "/panou-de-control",
-  importsList: "/importuri-in-asteptare",
+  firme: "/firme",
+  tari: "/tari",
 } as const;

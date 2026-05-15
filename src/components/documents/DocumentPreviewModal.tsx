@@ -1,7 +1,7 @@
 "use client";
 
+import { Download, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Download, Loader2 } from "lucide-react";
 
 export type DocumentPreviewModalDocument = {
   id: number;
@@ -53,7 +53,8 @@ export function DocumentPreviewModal({
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const blobUrlRef = useRef<string | null>(null);
 
-  const needsAssetLoader = doc != null && (isPdf(doc) || isPreviewableImage(doc));
+  const needsAssetLoader =
+    doc != null && (isPdf(doc) || isPreviewableImage(doc));
 
   useEffect(() => {
     revokeRefUrl(blobUrlRef);
@@ -78,9 +79,14 @@ export function DocumentPreviewModal({
 
     void (async () => {
       try {
-        const res = await fetch(doc.url, { credentials: "same-origin", cache: "no-store" });
+        const res = await fetch(doc.url, {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
         if (!res.ok) {
-          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
           if (!cancelled) {
             setLoadError(data.error ?? `Eroare la încărcare (${res.status})`);
             setAssetLoaded(true);
@@ -116,7 +122,10 @@ export function DocumentPreviewModal({
     if (!doc) return;
     const url = doc.downloadUrl ?? `/api/documents/${doc.id}/download`;
     try {
-      const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+      const res = await fetch(url, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         alert(data.error ?? "Eroare la descărcare");
@@ -138,7 +147,8 @@ export function DocumentPreviewModal({
 
   if (!doc) return null;
 
-  const showSpinner = needsAssetLoader && (!previewSrc || (!assetLoaded && !loadError));
+  const showSpinner =
+    needsAssetLoader && (!previewSrc || (!assetLoaded && !loadError));
 
   return (
     <div
@@ -161,7 +171,8 @@ export function DocumentPreviewModal({
               {doc.fileName}
             </h2>
             <p className="mt-0.5 text-xs text-gray-500">
-              Angajat: <span className="text-gray-700">{employeeLabel(doc)}</span>
+              Angajat:{" "}
+              <span className="text-gray-700">{employeeLabel(doc)}</span>
             </p>
           </div>
           <button
@@ -182,7 +193,9 @@ export function DocumentPreviewModal({
               aria-live="polite"
             >
               <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-              <span className="text-sm text-gray-600">Se încarcă fișierul…</span>
+              <span className="text-sm text-gray-600">
+                Se încarcă fișierul…
+              </span>
             </div>
           )}
 
@@ -212,7 +225,9 @@ export function DocumentPreviewModal({
               }}
               onError={() => {
                 setAssetLoaded(true);
-                setLoadError("Nu s-a putut încărca imaginea. Încercați descărcarea.");
+                setLoadError(
+                  "Nu s-a putut încărca imaginea. Încercați descărcarea.",
+                );
               }}
             />
           )}
@@ -230,7 +245,9 @@ export function DocumentPreviewModal({
               }}
               onError={() => {
                 setAssetLoaded(true);
-                setLoadError("Nu s-a putut încărca PDF-ul. Încercați descărcarea.");
+                setLoadError(
+                  "Nu s-a putut încărca PDF-ul. Încercați descărcarea.",
+                );
               }}
             />
           )}

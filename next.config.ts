@@ -143,7 +143,12 @@ const hrNextConfig: NextConfig = {
   },
 
   /** pdf-parse încearcă să încarce fișiere de test la bundling — rămâne modul Node nativ */
-  serverExternalPackages: ["pdf-parse"],
+  serverExternalPackages: [
+    "pdf-parse",
+    "ws",
+    "@neondatabase/serverless",
+    "@prisma/adapter-neon",
+  ],
 
   images: {
     formats: ["image/avif", "image/webp"],

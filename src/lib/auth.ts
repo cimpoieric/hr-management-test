@@ -61,6 +61,47 @@ export async function verifyPassword(
   return bcrypt.compare(password, hash);
 }
 
+const PASSWORD_RESET_PURPOSE = "password-reset";
+
+export async function generatePasswordResetToken(
+  userId: string,
+  email: string,
+): Promise<string> {
+  return new SignJWT({
+    purpose: PASSWORD_RESET_PURPOSE,
+    userId,
+    email,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("1h")
+    .setAudience("hr-management")
+    .setIssuer("hr-management-api")
+    .sign(getJwtSecretKey());
+}
+
+export async function verifyPasswordResetToken(
+  token: string,
+): Promise<{ userId: string; email: string }> {
+  const { payload } = await jwtVerify(token, getJwtSecretKey(), {
+    audience: "hr-management",
+    issuer: "hr-management-api",
+  });
+
+  if (payload.purpose !== PASSWORD_RESET_PURPOSE) {
+    throw new Error("JWT invalid: token de resetare parola invalid");
+  }
+
+  const userId = String(payload.userId ?? "").trim();
+  const email = String(payload.email ?? "").trim().toLowerCase();
+
+  if (!userId || !email) {
+    throw new Error("JWT invalid: token de resetare parola incomplet");
+  }
+
+  return { userId, email };
+}
+
 export async function generateToken(
   userId: string,
   email: string,

@@ -1,305 +1,347 @@
 /**
- * Sistem Backup/Restore pentru aplicația HR Management.
- *
- * - Creează arhive ZIP ale întregii aplicații: DB, documente, setări (adm-zip — Windows/Linux/macOS)
- * - Listează, descarcă, șterge backup-uri
- * - Restore din arhivă uploadată (cu backup automat pre-restore)
- * - Cleanup automat backup-uri vechi (>30 zile, configurabil)
- *
- * Cum configurezi backup automat:
- *   Windows Task Scheduler: rulează `curl -X POST http://localhost:3000/api/backup/create`
- *   Linux cron: `0 2 * * * curl -X POST http://localhost:3000/api/backup/create`
- *   Sau folosește setInterval în aplicație (dacă rulează 24/7)
+ * Backup organizație (multi-tenant): export Prisma → ZIP în memorie → R2/S3.
+ * Cheie: firm/{organizationId}/backup/{timestamp}.zip
  */
 
+import "server-only";
+
 import AdmZip from "adm-zip";
-import { readdir, stat, rm } from "fs/promises";
-import { existsSync, mkdirSync } from "fs";
-import { join, resolve } from "path";
+import { prisma } from "@/lib/prisma";
+import {
+  buildBackupFilename,
+  buildBackupS3Key,
+  deleteOrganizationBackup,
+  getOrganizationBackupBuffer,
+  listAllStoredBackups,
+  listOrganizationBackups,
+  putOrganizationBackup,
+  sanitizeBackupFilename,
+  type StoredBackupObject,
+} from "@/lib/organizationBackupStorage";
+import { s3PublicUrlForKey } from "@/lib/s3ObjectStorage";
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const DATA_DIR = join(process.cwd(), "data");
-const BACKUPS_DIR = join(DATA_DIR, "backups");
-const DB_PATH = join(DATA_DIR, "app.db");
-const DOCS_DIR = join(DATA_DIR, "documents");
-const SETTINGS_DIR = join(DATA_DIR, "settings");
-
+const BACKUP_FORMAT_VERSION = 1;
 const DEFAULT_RETENTION_DAYS = 30;
-
-// ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface BackupInfo {
   filename: string;
   size: number;
   createdAt: Date;
   sizeFormatted: string;
+  downloadUrl?: string | null;
 }
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  return (
+    Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
+  );
 }
 
-function sanitizeFilename(name: string): string {
-  // Prevent path traversal
-  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
-}
-
-/** Asigură `data/backups` (la fel ca în setup.js / start.js). */
-function ensureBackupsDir(): void {
-  if (!existsSync(BACKUPS_DIR)) {
-    mkdirSync(BACKUPS_DIR, { recursive: true });
-  }
-}
-
-/**
- * Creează ZIP la outputPath: app.db la rădăcină, apoi `documents/`, `settings/`.
- * Fișierele de la rădăcina `data/` urmează pattern-ul addLocalFile; folderele cu addLocalFolder.
- */
-function writeApplicationZip(outputPath: string): void {
-  const zip = new AdmZip();
-  const filesToBackup = ["app.db"];
-
-  for (const file of filesToBackup) {
-    const filePath = join(DATA_DIR, file);
-    if (existsSync(filePath)) {
-      zip.addLocalFile(filePath, "", file);
-    }
-  }
-  if (existsSync(DOCS_DIR)) {
-    zip.addLocalFolder(DOCS_DIR, "documents");
-  }
-  if (existsSync(SETTINGS_DIR)) {
-    zip.addLocalFolder(SETTINGS_DIR, "settings");
-  }
-
-  zip.writeZip(outputPath);
-}
-
-function zipListsAppDb(paths: string[]): boolean {
-  return paths.some((p) => /(^|\/)app\.db$/i.test(p));
-}
-
-function zipHasDocumentsFolder(paths: string[]): boolean {
-  return paths.some((p) => p === "documents" || p.startsWith("documents/"));
-}
-
-function readZipEntryPaths(zipPath: string): string[] {
-  const zip = new AdmZip(zipPath);
-  return zip.getEntries().map((e) => e.entryName.replace(/\\/g, "/"));
-}
-
-// ─── Core Functions ──────────────────────────────────────────────────────────
-
-/**
- * Creează un backup ZIP.
- * Include: database, documents, settings.
- * Parola returnată este goală — arhiva este ZIP standard (compatibil Windows). Backup-uri vechi cu parolă (zip CLI) rămân restabile cu aceeași funcție restore.
- */
-export async function createBackup(): Promise<{
-  filename: string;
-  path: string;
-  size: number;
-  password: string;
-}> {
-  ensureBackupsDir();
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const filename = `backup_${timestamp}.zip`;
-  const outputPath = join(BACKUPS_DIR, filename);
-
-  const hasSomething =
-    existsSync(DB_PATH) || existsSync(DOCS_DIR) || existsSync(SETTINGS_DIR);
-
-  if (!hasSomething) {
-    throw new Error("Niciun fișier de backup găsit");
-  }
-
-  await writeApplicationZip(outputPath);
-
-  const stats = await stat(outputPath);
-
+function toBackupInfo(entry: StoredBackupObject): BackupInfo {
   return {
-    filename,
-    path: outputPath,
-    size: stats.size,
-    password: "",
+    filename: entry.filename,
+    size: entry.size,
+    createdAt: entry.createdAt,
+    sizeFormatted: formatBytes(entry.size),
   };
 }
 
-/**
- * Listează toate backup-urile disponibile.
- */
-export async function listBackups(): Promise<BackupInfo[]> {
-  if (!existsSync(BACKUPS_DIR)) return [];
-
-  const files = await readdir(BACKUPS_DIR);
-  const backups: BackupInfo[] = [];
-
-  for (const filename of files) {
-    if (!filename.endsWith(".zip")) continue;
-    const filePath = join(BACKUPS_DIR, filename);
-    try {
-      const stats = await stat(filePath);
-      backups.push({
-        filename,
-        size: stats.size,
-        createdAt: stats.mtime,
-        sizeFormatted: formatBytes(stats.size),
-      });
-    } catch {
-      // skip files that can't be stat'd
+function serializeForBackup(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (value instanceof Date) return value.toISOString();
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toJSON" in value &&
+    typeof (value as { toJSON: () => unknown }).toJSON === "function"
+  ) {
+    return (value as { toJSON: () => unknown }).toJSON();
+  }
+  if (Array.isArray(value)) {
+    return value.map(serializeForBackup);
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value)) {
+      out[key] = serializeForBackup(val);
     }
+    return out;
+  }
+  return value;
+}
+
+async function exportOrganizationSnapshot(organizationId: string) {
+  const employeeIds = (
+    await prisma.employee.findMany({
+      where: { organizationId },
+      select: { id: true },
+    })
+  ).map((e) => e.id);
+
+  const [
+    organization,
+    settings,
+    companies,
+    employees,
+    users,
+    documents,
+    timesheets,
+    payslips,
+    pendingImports,
+    deployments,
+    salaryCalculations,
+    employeeHistory,
+  ] = await Promise.all([
+    prisma.organization.findUnique({ where: { id: organizationId } }),
+    prisma.settings.findUnique({ where: { organizationId } }),
+    prisma.company.findMany({ where: { organizationId } }),
+    prisma.employee.findMany({ where: { organizationId } }),
+    prisma.user.findMany({
+      where: { organizationId },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        isActive: true,
+        mustChangePassword: true,
+        lastLoginAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    }),
+    prisma.document.findMany({ where: { organizationId } }),
+    prisma.timesheet.findMany({ where: { organizationId } }),
+    prisma.payslip.findMany({
+      where: { organizationId },
+      include: { items: true },
+    }),
+    prisma.pendingImport.findMany({ where: { organizationId } }),
+    employeeIds.length > 0
+      ? prisma.deployment.findMany({
+          where: { employeeId: { in: employeeIds } },
+        })
+      : Promise.resolve([]),
+    employeeIds.length > 0
+      ? prisma.salaryCalculation.findMany({
+          where: { employeeId: { in: employeeIds } },
+        })
+      : Promise.resolve([]),
+    employeeIds.length > 0
+      ? prisma.employeeHistory.findMany({
+          where: { employeeId: { in: employeeIds } },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  if (!organization) {
+    throw new Error("Organizația nu a fost găsită");
   }
 
-  // Sort by date desc
-  return backups.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return serializeForBackup({
+    version: BACKUP_FORMAT_VERSION,
+    exportedAt: new Date().toISOString(),
+    organizationId,
+    organization,
+    settings,
+    companies,
+    employees,
+    users,
+    documents,
+    timesheets,
+    payslips,
+    pendingImports,
+    deployments,
+    salaryCalculations,
+    employeeHistory,
+  });
+}
+
+function buildZipBufferFromSnapshot(snapshot: unknown): Buffer {
+  const zip = new AdmZip();
+  const manifest = JSON.stringify(
+    {
+      version: BACKUP_FORMAT_VERSION,
+      format: "hr-management-organization-backup",
+      exportedAt: new Date().toISOString(),
+    },
+    null,
+    2,
+  );
+  const data = JSON.stringify(snapshot, null, 2);
+
+  zip.addFile("manifest.json", Buffer.from(manifest, "utf8"));
+  zip.addFile("organization-backup.json", Buffer.from(data, "utf8"));
+
+  return zip.toBuffer();
 }
 
 /**
- * Returnează calea absolută către un fișier backup.
- * Verifică path traversal.
+ * Creează backup ZIP în memorie și îl salvează în R2 (sau disc local în dev).
  */
-export function getBackupPath(filename: string): string {
-  const sanitized = sanitizeFilename(filename);
-  const fullPath = resolve(join(BACKUPS_DIR, sanitized));
+export async function createBackup(organizationId: string): Promise<{
+  filename: string;
+  size: number;
+  password: string;
+  downloadUrl: string | null;
+  storageKey: string;
+}> {
+  const snapshot = await exportOrganizationSnapshot(organizationId);
+  const buffer = buildZipBufferFromSnapshot(snapshot);
 
-  // Path traversal check: ensure the resolved path is within BACKUPS_DIR
-  const resolvedBackupsDir = resolve(BACKUPS_DIR);
-  const normalizedFull = fullPath.replace(/\\/g, "/");
-  const normalizedDir = (resolvedBackupsDir + "/").replace(/\\/g, "/");
-  if (!normalizedFull.startsWith(normalizedDir) && normalizedFull.replace(/\/$/, "") !== resolvedBackupsDir.replace(/\\/g, "/")) {
-    throw new Error("Path traversal detectat");
+  if (buffer.length === 0) {
+    throw new Error("Backup gol — nicio dată de exportat");
   }
 
-  if (!existsSync(fullPath)) {
-    throw new Error("Backup negasit");
-  }
+  const filename = buildBackupFilename();
+  const stored = await putOrganizationBackup(organizationId, filename, buffer);
 
-  return fullPath;
+  return {
+    filename: sanitizeBackupFilename(filename),
+    size: buffer.length,
+    password: "",
+    downloadUrl: stored.downloadUrl,
+    storageKey: stored.key,
+  };
+}
+
+export async function listBackups(organizationId: string): Promise<BackupInfo[]> {
+  const entries = await listOrganizationBackups(organizationId);
+  return entries.map(toBackupInfo);
+}
+
+export async function getBackupBuffer(
+  organizationId: string,
+  filename: string,
+): Promise<Buffer> {
+  return getOrganizationBackupBuffer(organizationId, filename);
+}
+
+export async function deleteBackup(
+  organizationId: string,
+  filename: string,
+): Promise<void> {
+  await deleteOrganizationBackup(organizationId, filename);
+}
+
+export async function createSafetyBackup(organizationId: string): Promise<string> {
+  const snapshot = await exportOrganizationSnapshot(organizationId);
+  const buffer = buildZipBufferFromSnapshot(snapshot);
+  const filename = buildBackupFilename("pre-restore_");
+  await putOrganizationBackup(organizationId, filename, buffer);
+  return sanitizeBackupFilename(filename);
 }
 
 /**
- * Șterge un backup.
+ * Restaurare din arhivă uploadată (buffer în memorie).
+ * Format nou: JSON organizație. Format vechi (app.db): respins pe PostgreSQL.
  */
-export async function deleteBackup(filename: string): Promise<void> {
-  const path = getBackupPath(filename);
-  await rm(path);
-}
-
-/**
- * Creează un backup de siguranță înainte de restore.
- */
-export async function createSafetyBackup(): Promise<string> {
-  ensureBackupsDir();
-
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const filename = `pre-restore_${timestamp}.zip`;
-  const outputPath = join(BACKUPS_DIR, filename);
-
-  const hasSomething =
-    existsSync(DB_PATH) || existsSync(DOCS_DIR) || existsSync(SETTINGS_DIR);
-
-  if (!hasSomething) {
-    throw new Error("Niciun fișier de backupat");
-  }
-
-  writeApplicationZip(outputPath);
-
-  return filename;
-}
-
-/**
- * Restaurează dintr-un fișier ZIP uploadat.
- * Creează automat un safety backup înainte.
- */
-export async function restoreFromBackup(zipPath: string): Promise<{
+export async function restoreFromBackupBuffer(
+  organizationId: string,
+  zipBuffer: Buffer,
+): Promise<{
   safetyBackup: string;
   restored: string[];
 }> {
-  const safetyBackup = await createSafetyBackup();
+  const safetyBackup = await createSafetyBackup(organizationId);
+  const zip = new AdmZip(zipBuffer);
+  const entryNames = zip
+    .getEntries()
+    .map((e) => e.entryName.replace(/\\/g, "/"));
 
-  const paths = readZipEntryPaths(zipPath);
-
-  const hasDb = zipListsAppDb(paths);
-  const hasDocs = zipHasDocumentsFolder(paths);
-
-  if (!hasDb) {
-    throw new Error("Arhiva nu contine baza de date (app.db)");
+  const hasLegacyDb = entryNames.some((p) => /(^|\/)app\.db$/i.test(p));
+  if (hasLegacyDb) {
+    throw new Error(
+      "Arhiva conține app.db (format vechi SQLite). Restaurarea automată nu este disponibilă pe baza PostgreSQL. Descărcați datele manual sau contactați suportul.",
+    );
   }
 
-  const zip = new AdmZip(zipPath);
-  zip.extractAllTo(DATA_DIR, true);
+  const dataEntry = zip.getEntry("organization-backup.json");
+  if (!dataEntry) {
+    throw new Error(
+      "Arhiva nu conține organization-backup.json (format backup curent).",
+    );
+  }
 
-  const restored: string[] = ["Baza de date"];
-  if (hasDocs) restored.push("Documente");
-  restored.push("Setări");
+  const raw = dataEntry.getData().toString("utf8");
+  const parsed = JSON.parse(raw) as { organizationId?: string };
+  if (parsed.organizationId && parsed.organizationId !== organizationId) {
+    throw new Error(
+      "Backup-ul aparține altei organizații și nu poate fi restaurat aici.",
+    );
+  }
 
-  return { safetyBackup, restored };
+  throw new Error(
+    "Restaurarea automată din backup cloud nu este încă activată. Backup-urile pot fi descărcate pentru arhivare; un safety backup a fost creat înainte de această încercare.",
+  );
 }
 
-/**
- * Șterge backup-uri mai vechi de retentionDays.
- */
 export async function cleanupOldBackups(
-  retentionDays: number = DEFAULT_RETENTION_DAYS
+  organizationId: string,
+  retentionDays: number = DEFAULT_RETENTION_DAYS,
 ): Promise<{ deleted: number; freed: number }> {
-  if (!existsSync(BACKUPS_DIR)) return { deleted: 0, freed: 0 };
-
-  const files = await readdir(BACKUPS_DIR);
-  const now = Date.now();
+  const backups = await listOrganizationBackups(organizationId);
   const maxAge = retentionDays * 24 * 60 * 60 * 1000;
+  const now = Date.now();
 
   let deleted = 0;
   let freed = 0;
 
-  for (const filename of files) {
-    if (!filename.endsWith(".zip")) continue;
-    const filePath = join(BACKUPS_DIR, filename);
-    try {
-      const stats = await stat(filePath);
-      if (now - stats.mtimeMs > maxAge) {
-        freed += stats.size;
-        await rm(filePath);
-        deleted++;
-      }
-    } catch {
-      // skip
+  for (const backup of backups) {
+    if (now - backup.createdAt.getTime() > maxAge) {
+      await deleteOrganizationBackup(organizationId, backup.filename);
+      freed += backup.size;
+      deleted++;
     }
   }
 
   return { deleted, freed };
 }
 
-/**
- * Returnează statistici despre backup-uri.
- */
-export async function getBackupStats(): Promise<{
+export async function getBackupStats(organizationId?: string): Promise<{
   totalCount: number;
   totalSize: number;
   oldestBackup: Date | null;
   latestBackup: Date | null;
 }> {
-  const backups = await listBackups();
+  const backups = organizationId
+    ? await listOrganizationBackups(organizationId)
+    : await listAllStoredBackups();
 
   if (backups.length === 0) {
-    return { totalCount: 0, totalSize: 0, oldestBackup: null, latestBackup: null };
+    return {
+      totalCount: 0,
+      totalSize: 0,
+      oldestBackup: null,
+      latestBackup: null,
+    };
   }
 
-  const first = backups[0];
-  const last = backups[backups.length - 1];
+  const sorted = [...backups].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+  );
+
   return {
     totalCount: backups.length,
     totalSize: backups.reduce((sum, b) => sum + b.size, 0),
-    oldestBackup: last?.createdAt ?? null,
-    latestBackup: first?.createdAt ?? null,
+    latestBackup: sorted[0]?.createdAt ?? null,
+    oldestBackup: sorted[sorted.length - 1]?.createdAt ?? null,
   };
+}
+
+export function buildBackupDownloadPath(filename: string): string {
+  return `/api/backup/download?filename=${encodeURIComponent(sanitizeBackupFilename(filename))}`;
+}
+
+export function resolveBackupPublicUrl(
+  organizationId: string,
+  filename: string,
+): string | null {
+  return s3PublicUrlForKey(buildBackupS3Key(organizationId, filename));
 }
 
 /**
@@ -322,6 +364,8 @@ export function generateTempPassword(): string {
     pass += all[Math.floor(Math.random() * all.length)];
   }
 
-  // Shuffle
-  return pass.split("").sort(() => Math.random() - 0.5).join("");
+  return pass
+    .split("")
+    .sort(() => Math.random() - 0.5)
+    .join("");
 }

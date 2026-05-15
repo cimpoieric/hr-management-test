@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ro">
   <head>
     <meta charset="UTF-8" />
@@ -15,8 +15,18 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-        background: linear-gradient(160deg, #0f172a 0%, #1e293b 45%, #0f172a 100%);
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+        background: linear-gradient(
+          160deg,
+          #0f172a 0%,
+          #1e293b 45%,
+          #0f172a 100%
+        );
         color: #e2e8f0;
       }
       .card {
@@ -63,7 +73,9 @@
     <div class="card">
       <div class="spinner" aria-hidden="true"></div>
       <h1>HR Management</h1>
-      <p>Pornește serverul aplicației. Poate dura câteva secunde la prima rulare.</p>
+      <p>
+        Pornește serverul aplicației. Poate dura câteva secunde la prima rulare.
+      </p>
       <p class="status" id="status">Se așteaptă…</p>
     </div>
     <script>

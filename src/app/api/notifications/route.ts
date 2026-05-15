@@ -1,31 +1,41 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/auth";
 import { getAppSettings } from "@/lib/appSettings";
+import { requireAuth } from "@/lib/auth";
 import { documentsWhereVisible } from "@/lib/documentVisibility";
+import { prisma } from "@/lib/prisma";
+import { type NextRequest, NextResponse } from "next/server";
 
 type NotificationType = "warning" | "info" | "success";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
     const now = new Date();
-    const settings = await getAppSettings();
+    const settings = await getAppSettings(user.organizationId);
     if (!settings.inAppNotificationsEnabled) {
       return NextResponse.json({ data: [], unreadCount: 0 });
     }
     const inDocAlertDays = new Date(
-      now.getTime() + settings.alertExpiredDocumentsDays * 24 * 60 * 60 * 1000
+      now.getTime() + settings.alertExpiredDocumentsDays * 24 * 60 * 60 * 1000,
     );
     const inDeploymentAlertDays = new Date(
-      now.getTime() + settings.alertExpiringDeploymentsDays * 24 * 60 * 60 * 1000
+      now.getTime() +
+        settings.alertExpiringDeploymentsDays * 24 * 60 * 60 * 1000,
     );
 
-    const [expiredDocs, expiringDocs, expiringDeployments, pendingImports, recentAudit] = await Promise.all([
+    const [
+      expiredDocs,
+      expiringDocs,
+      expiringDeployments,
+      pendingImports,
+      recentAudit,
+    ] = await Promise.all([
       prisma.document.count({
         where: documentsWhereVisible({ expiryDate: { not: null, lt: now } }),
       }),

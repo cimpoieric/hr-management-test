@@ -1,9 +1,9 @@
 import "server-only";
 
-import nodemailer from "nodemailer";
-import { prismaTyped as prisma } from "@/lib/prisma";
 import { decrypt } from "@/lib/encryption";
-import { generatePayslipPdf } from "@/lib/services/payslipPdf";
+import { prismaTyped as prisma } from "@/lib/prisma";
+import { buildPayslipPdfBufferForEmail } from "@/lib/services/payslipPdf";
+import nodemailer from "nodemailer";
 
 export type EmailSettingsRow = {
   smtpHost: string;
@@ -46,7 +46,10 @@ const SMTP_KEYS = {
   secure: "smtp.secure",
 } as const;
 
-function pick(records: Array<{ key: string; value: string }>, key: string): string | undefined {
+function pick(
+  records: Array<{ key: string; value: string }>,
+  key: string,
+): string | undefined {
   return records.find((r) => r.key === key)?.value;
 }
 
@@ -59,7 +62,45 @@ function decryptSafe(value: string): string {
   }
 }
 
+export function getSMTPConfigFromEnv(): SMTPConfig | null {
+  const host = process.env.SMTP_HOST?.trim();
+  const user = process.env.SMTP_USER?.trim();
+  const pass = process.env.SMTP_PASS?.trim();
+  const fromEmail = (process.env.FROM_EMAIL?.trim() || user || "").trim();
+  const fromName = (process.env.FROM_NAME?.trim() || "HR Management").trim();
+  const port = Number(process.env.SMTP_PORT?.trim() || "587");
+
+  if (!host || !user || !pass || !fromEmail) return null;
+  if (!Number.isFinite(port) || port <= 0) return null;
+
+  return {
+    host,
+    port,
+    secure: port === 465,
+    user,
+    pass,
+    fromEmail,
+    fromName,
+  };
+}
+
+export async function isSmtpConfigured(): Promise<boolean> {
+  if (getSMTPConfigFromEnv()) return true;
+  try {
+    await getSMTPConfig();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function getSMTPConfig(): Promise<SMTPConfig> {
+  const fromEnv = getSMTPConfigFromEnv();
+  if (fromEnv) {
+    console.log("[SMTP] Using env config:", fromEnv.host, "port", fromEnv.port);
+    return fromEnv;
+  }
+
   // Prefer EmailSettings table (new), fallback to legacy SystemConfig.
   const row = await prisma.emailSettings.findFirst({
     where: { isActive: true },
@@ -84,10 +125,12 @@ export async function getSMTPConfig(): Promise<SMTPConfig> {
     const secure = port === 465;
 
     if (!host) throw new Error("SMTP host missing (EmailSettings.smtpHost)");
-    if (!Number.isFinite(port) || port <= 0) throw new Error("SMTP port invalid (EmailSettings.smtpPort)");
+    if (!Number.isFinite(port) || port <= 0)
+      throw new Error("SMTP port invalid (EmailSettings.smtpPort)");
     if (!user) throw new Error("SMTP user missing (EmailSettings.smtpUser)");
     if (!pass) throw new Error("SMTP pass missing (EmailSettings.smtpPass)");
-    if (!fromEmail) throw new Error("SMTP fromEmail missing (EmailSettings.fromEmail)");
+    if (!fromEmail)
+      throw new Error("SMTP fromEmail missing (EmailSettings.fromEmail)");
 
     return { host, port, secure, user, pass, fromEmail, fromName };
   }
@@ -103,7 +146,9 @@ export async function getSMTPConfig(): Promise<SMTPConfig> {
   const user = (pick(records, SMTP_KEYS.user) ?? "").trim();
   const passRaw = (pick(records, SMTP_KEYS.pass) ?? "").trim();
   const fromEmail = (pick(records, SMTP_KEYS.fromEmail) ?? user ?? "").trim();
-  const fromName = (pick(records, SMTP_KEYS.fromName) ?? "HR Management").trim();
+  const fromName = (
+    pick(records, SMTP_KEYS.fromName) ?? "HR Management"
+  ).trim();
   const secureRaw = (pick(records, SMTP_KEYS.secure) ?? "false").trim();
 
   const port = Number(portRaw);
@@ -111,10 +156,12 @@ export async function getSMTPConfig(): Promise<SMTPConfig> {
   const pass = passRaw ? decryptSafe(passRaw) : "";
 
   if (!host) throw new Error("SMTP host missing (SystemConfig: smtp.host)");
-  if (!Number.isFinite(port) || port <= 0) throw new Error("SMTP port invalid (SystemConfig: smtp.port)");
+  if (!Number.isFinite(port) || port <= 0)
+    throw new Error("SMTP port invalid (SystemConfig: smtp.port)");
   if (!user) throw new Error("SMTP user missing (SystemConfig: smtp.user)");
   if (!pass) throw new Error("SMTP pass missing (SystemConfig: smtp.pass)");
-  if (!fromEmail) throw new Error("SMTP fromEmail missing (SystemConfig: smtp.fromEmail)");
+  if (!fromEmail)
+    throw new Error("SMTP fromEmail missing (SystemConfig: smtp.fromEmail)");
 
   return { host, port, secure, user, pass, fromEmail, fromName };
 }
@@ -135,7 +182,10 @@ export type SendPayslipEmailArgs = {
 };
 
 function money(n: unknown, currency: string): string {
-  const v = typeof n === "object" && n !== null && "toString" in n ? Number(String(n)) : Number(n);
+  const v =
+    typeof n === "object" && n !== null && "toString" in n
+      ? Number(String(n))
+      : Number(n);
   const value = Number.isFinite(v) ? v : 0;
   return `${value.toLocaleString("ro-RO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency}`;
 }
@@ -147,7 +197,9 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
   const payslip = await prisma.payslip.findUnique({
     where: { id: args.payslipId },
     include: {
-      employee: { select: { id: true, firstName: true, lastName: true, email: true } },
+      employee: {
+        select: { id: true, firstName: true, lastName: true, email: true },
+      },
       company: { select: { id: true, name: true, address: true } },
       timesheet: { select: { id: true, hoursWorked: true, status: true } },
       items: { orderBy: { sortOrder: "asc" } },
@@ -157,7 +209,8 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
   if (!payslip) throw new Error("Payslip not found");
 
   const toAddress = (args.toEmail ?? payslip.employee.email ?? "").trim();
-  if (!toAddress) throw new Error("Destinatar lipsă (employee.email sau toEmail)");
+  if (!toAddress)
+    throw new Error("Destinatar lipsă (employee.email sau toEmail)");
 
   const cfg = await getSMTPConfig();
   await testSMTPConfig(cfg);
@@ -169,17 +222,24 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
     auth: { user: cfg.user, pass: cfg.pass },
   });
 
-  const pdf = await generatePayslipPdf(payslip.id);
+  const pdf = await buildPayslipPdfBufferForEmail(payslip.id);
 
   const currency = (payslip.currency || "EUR").toUpperCase();
-  const netSalary = payslip.items.find((i) => i.type === "NET_SALARY")?.amount ?? 0;
-  const travel = payslip.items.find((i) => i.type === "TRAVEL_ALLOWANCE")?.amount ?? 0;
-  const holiday = payslip.items.find((i) => i.type === "HOLIDAY_MONEY")?.amount ?? 0;
+  const netSalary =
+    payslip.items.find((i) => i.type === "NET_SALARY")?.amount ?? 0;
+  const travel =
+    payslip.items.find((i) => i.type === "TRAVEL_ALLOWANCE")?.amount ?? 0;
+  const holiday =
+    payslip.items.find((i) => i.type === "HOLIDAY_MONEY")?.amount ?? 0;
 
-  const subject = `Fluturaș salariu - Săptămâna ${payslip.weekNumber}/${payslip.year}`;
+  const periodLabel =
+    payslip.type === "monthly" && payslip.month
+      ? `luna ${String(payslip.month).padStart(2, "0")}/${payslip.monthYear ?? payslip.year}`
+      : `saptamana ${Math.max(1, payslip.weekNumber)}/${payslip.year}`;
+  const subject = `Fluturas salariu - ${periodLabel}`;
   const bodyText =
-    `Bună,\n\n` +
-    `Atașat găsești fluturașul de salariu pentru săptămâna ${payslip.weekNumber}/${payslip.year}.\n\n` +
+    `Buna,\n\n` +
+    `Atasat gasesti fluturasul de salariu pentru ${periodLabel}.\n\n` +
     `Ore lucrate: ${String(payslip.timesheet.hoursWorked)}\n` +
     `Salariu net: ${money(netSalary, currency)}\n` +
     `Travel allowance: ${money(travel, currency)}\n` +
@@ -191,12 +251,14 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
   const emailLog = await prisma.emailLog.create({
     data: {
       toAddress,
-      toName: `${payslip.employee.firstName} ${payslip.employee.lastName}`.trim() || null,
+      toName:
+        `${payslip.employee.firstName} ${payslip.employee.lastName}`.trim() ||
+        null,
       employeeId: payslip.employeeId,
       subject,
       body: bodyText,
       templateKey: "PAYSLIP",
-      attachmentPath: pdf.relativePath,
+      attachmentPath: null,
       attachmentName: pdf.fileName,
       status: "SENDING",
       sentAt: null,
@@ -215,7 +277,7 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
       attachments: [
         {
           filename: pdf.fileName,
-          content: Buffer.from(pdf.pdfBytes),
+          content: pdf.buffer,
           contentType: "application/pdf",
         },
       ],
@@ -227,7 +289,7 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
     }
     if (!String(info.messageId ?? "").trim()) {
       throw new Error(
-        `SMTP nu a confirmat trimiterea (${String(info.response ?? "").slice(0, 300) || "fără răspuns"})`
+        `SMTP nu a confirmat trimiterea (${String(info.response ?? "").slice(0, 300) || "fără răspuns"})`,
       );
     }
 
@@ -238,7 +300,11 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
       }),
       prisma.payslip.update({
         where: { id: payslip.id },
-        data: { emailSent: true, emailSentAt: new Date(), emailLogId: emailLog.id },
+        data: {
+          emailSent: true,
+          emailSentAt: new Date(),
+          emailLogId: emailLog.id,
+        },
       }),
     ]);
 
@@ -258,4 +324,3 @@ export async function sendPayslipEmail(args: SendPayslipEmailArgs): Promise<{
     throw new Error(`Trimitere email eșuată: ${msg}`);
   }
 }
-

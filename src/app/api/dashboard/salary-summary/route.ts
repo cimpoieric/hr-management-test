@@ -1,12 +1,15 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 import { equivalentMonthlyGrossToRon } from "@/lib/salaryCostRon";
+import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(request: NextRequest) {
   const { user, response: authError } = await requireAuth(request);
   if (authError || !user) {
-    return authError ?? NextResponse.json({ error: "Neautentificat" }, { status: 401 });
+    return (
+      authError ??
+      NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
   }
 
   try {
@@ -23,9 +26,9 @@ export async function GET(request: NextRequest) {
         equivalentMonthlyGrossToRon(
           e.salaryAmount,
           e.salaryType != null ? String(e.salaryType) : null,
-          e.salaryCurrency
+          e.salaryCurrency,
         ),
-      0
+      0,
     );
 
     return NextResponse.json({

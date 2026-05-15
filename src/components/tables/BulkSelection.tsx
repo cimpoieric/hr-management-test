@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "@/hooks/useTranslation";
 import { FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 import { useState } from "react";
 
@@ -16,6 +17,7 @@ export function BulkSelectionBar({
   onClear,
   onSelectAllResults,
 }: BulkSelectionProps) {
+  const { t } = useTranslation();
   const [exporting, setExporting] = useState<"excel" | "pdf" | null>(null);
 
   if (selectedIds.length === 0) return null;
@@ -23,10 +25,21 @@ export function BulkSelectionBar({
   async function handleExport(type: "excel" | "pdf") {
     setExporting(type);
     try {
-      const endpoint = type === "excel" ? "/api/export/excel" : "/api/export/pdf";
+      const endpoint =
+        type === "excel" ? "/api/export/excel" : "/api/export/pdf";
       const body = {
         employeeIds: selectedIds,
-        columns: ["id", "firstName", "lastName", "cnp", "email", "phone", "status", "position", "company"],
+        columns: [
+          "id",
+          "firstName",
+          "lastName",
+          "cnp",
+          "email",
+          "phone",
+          "status",
+          "position",
+          "company",
+        ],
         format: type,
       };
 
@@ -38,23 +51,22 @@ export function BulkSelectionBar({
 
       if (!res.ok) {
         const d = await res.json();
-        alert(d.error ?? "Eroare la export");
+        alert((d.error as string) ?? t("components.bulkSelection.exportError"));
         setExporting(null);
         return;
       }
 
-      // Download fișier
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `export-angajati-${type === "excel" ? "xlsx" : "pdf"}.${type === "excel" ? "xlsx" : "pdf"}`;
+      a.download = `employees-export-${type === "excel" ? "xlsx" : "pdf"}.${type === "excel" ? "xlsx" : "pdf"}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch {
-      alert("Eroare la export");
+      alert(t("components.bulkSelection.exportError"));
     } finally {
       setExporting(null);
     }
@@ -64,21 +76,25 @@ export function BulkSelectionBar({
     <div className="sticky top-0 z-30 bg-slate-900 text-white rounded-xl px-4 py-3 shadow-lg flex items-center justify-between">
       <div className="flex items-center gap-3">
         <span className="text-sm font-medium">
-          {selectedIds.length} angajați selectați
+          {t("components.bulkSelection.selectedCount", {
+            count: selectedIds.length,
+          })}
         </span>
         {selectedIds.length < totalResults && (
           <button
             onClick={onSelectAllResults}
             className="text-xs text-slate-300 hover:text-white underline"
           >
-            Selectează toți {totalResults} rezultatele
+            {t("components.bulkSelection.selectAllResults", {
+              count: totalResults,
+            })}
           </button>
         )}
         <button
           onClick={onClear}
           className="text-xs text-slate-400 hover:text-white"
         >
-          Anulează selecția
+          {t("components.bulkSelection.clearSelection")}
         </button>
       </div>
 
@@ -93,7 +109,7 @@ export function BulkSelectionBar({
           ) : (
             <FileSpreadsheet size={14} />
           )}
-          Excel
+          {t("components.bulkSelection.excel")}
         </button>
         <button
           onClick={() => handleExport("pdf")}
@@ -105,7 +121,7 @@ export function BulkSelectionBar({
           ) : (
             <FileText size={14} />
           )}
-          PDF
+          {t("components.bulkSelection.pdf")}
         </button>
       </div>
     </div>

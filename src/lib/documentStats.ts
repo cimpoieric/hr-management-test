@@ -1,9 +1,11 @@
-import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
 import { documentsWhereVisible } from "@/lib/documentVisibility";
+import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 
 /** Aceeași definiție ca `GET /api/documents?status=expired` (status EXPIRED sau dată expirată). */
-export function expiredDocumentsWhere(at: Date = new Date()): Prisma.DocumentWhereInput {
+export function expiredDocumentsWhere(
+  at: Date = new Date(),
+): Prisma.DocumentWhereInput {
   return {
     OR: [
       { status: "EXPIRED" },
@@ -25,10 +27,10 @@ export type DocumentKpiStats = {
  */
 export async function getDocumentStats(
   at: Date,
-  alertExpiredDocumentsDays: number
+  alertExpiredDocumentsDays: number,
 ): Promise<DocumentKpiStats> {
   const expiringLimit = new Date(
-    at.getTime() + alertExpiredDocumentsDays * 24 * 60 * 60 * 1000
+    at.getTime() + alertExpiredDocumentsDays * 24 * 60 * 60 * 1000,
   );
 
   const [expiredDocuments, expiringSoonDocuments] = await Promise.all([

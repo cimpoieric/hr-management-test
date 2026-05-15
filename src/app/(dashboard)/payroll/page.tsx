@@ -1,3 +1,4 @@
+import { PayrollPlanGate } from "@/components/plan/PayrollPlanGate";
 import { PayslipsTableClient } from "@/components/payroll/PayslipsTableClient";
 import { prisma } from "@/lib/prisma";
 import { getInternalRequestOrigin } from "@/lib/request-origin";
@@ -109,11 +110,13 @@ export default async function PayrollPage({
   ]);
 
   return (
-    <PayslipsTableClient
-      items={payslips.items}
-      pagination={payslips.pagination}
-      employees={employees}
-      filters={{ employeeId, year, weekNumber, emailSent }}
-    />
+    <PayrollPlanGate>
+      <PayslipsTableClient
+        items={payslips.items}
+        pagination={payslips.pagination}
+        employees={employees}
+        filters={{ employeeId, year, weekNumber, emailSent }}
+      />
+    </PayrollPlanGate>
   );
 }
