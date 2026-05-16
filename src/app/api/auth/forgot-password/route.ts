@@ -1,7 +1,7 @@
 /**
  * POST /api/auth/forgot-password
  *
- * Trimite link de resetare parola prin SMTP (Gmail sau alt server).
+ * Trimite link de resetare parola (Resend API sau SMTP).
  * Raspuns generic daca contul nu exista (nu dezvaluim existenta emailului).
  */
 
@@ -9,6 +9,10 @@ import { resolveAppBaseUrl } from "@/lib/appUrl";
 import { getClientIp, logAuditFF } from "@/lib/audit";
 import { generatePasswordResetToken } from "@/lib/auth";
 import { sendEmail } from "@/lib/email";
+import {
+  getActiveEmailProvider,
+  isTransactionalEmailConfigured,
+} from "@/lib/mail/transactional";
 import { prismaBase as prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -34,27 +38,21 @@ function resolveResetOrigin(request: NextRequest): string {
   }
 }
 
-function logSmtpEnvDiagnostics(): void {
+function logEmailEnvDiagnostics(): void {
+  const provider = getActiveEmailProvider();
+  console.log("[AUTH_FORGOT_PASSWORD] email provider:", provider ?? "NONE");
+  console.log(
+    "[AUTH_FORGOT_PASSWORD] RESEND_API_KEY:",
+    process.env.RESEND_API_KEY?.trim() ? "EXISTS" : "MISSING",
+  );
   console.log(
     "[AUTH_FORGOT_PASSWORD] SMTP_USER:",
     process.env.SMTP_USER?.trim() ? "EXISTS" : "MISSING",
   );
-  console.log(
-    "[AUTH_FORGOT_PASSWORD] SMTP_PASS:",
-    process.env.SMTP_PASS?.trim() ? "EXISTS" : "MISSING",
-  );
-  console.log(
-    "[AUTH_FORGOT_PASSWORD] SMTP_HOST:",
-    process.env.SMTP_HOST?.trim() || "(default smtp.gmail.com)",
-  );
-  console.log(
-    "[AUTH_FORGOT_PASSWORD] FROM_EMAIL:",
-    process.env.FROM_EMAIL?.trim() || process.env.SMTP_USER?.trim() || "MISSING",
-  );
 }
 
 export async function POST(request: NextRequest) {
-  logSmtpEnvDiagnostics();
+  logEmailEnvDiagnostics();
 
   let body: unknown;
   try {
@@ -78,26 +76,13 @@ export async function POST(request: NextRequest) {
       "Daca exista un cont activ cu acest email, vei primi un link de resetare in cateva minute.",
   });
 
-  const smtpFromEnv =
-    Boolean(process.env.SMTP_USER?.trim()) &&
-    Boolean(process.env.SMTP_PASS?.trim());
-  let smtpFromDb = false;
-  if (!smtpFromEnv) {
-    try {
-      const { getSMTPConfig } = await import("@/lib/services/email");
-      await getSMTPConfig();
-      smtpFromDb = true;
-    } catch {
-      smtpFromDb = false;
-    }
-  }
-  if (!smtpFromEnv && !smtpFromDb) {
-    console.error("[AUTH_FORGOT_PASSWORD] SMTP not configured");
+  if (!(await isTransactionalEmailConfigured())) {
+    console.error("[AUTH_FORGOT_PASSWORD] Email not configured");
     return NextResponse.json(
       {
         success: false,
         error:
-          "Serviciul de email nu este configurat (SMTP_USER / SMTP_PASS in Vercel).",
+          "Serviciul de email nu este configurat (RESEND_API_KEY sau SMTP pe Vercel).",
       },
       { status: 503 },
     );
@@ -145,7 +130,10 @@ export async function POST(request: NextRequest) {
       toName: displayName,
     });
 
-    console.log("[AUTH_FORGOT_PASSWORD] SMTP sent, ids:", result.messageIds);
+    console.log(
+      "[AUTH_FORGOT_PASSWORD] sent, ids:",
+      result.messageIds,
+    );
 
     logAuditFF({
       action: "PASSWORD_CHANGE",
@@ -173,13 +161,16 @@ export async function POST(request: NextRequest) {
 
     if (
       message.includes("SMTP") ||
+      message.includes("Resend") ||
       message.includes("not configured") ||
-      message.includes("Failed to send")
+      message.includes("Failed to send") ||
+      message.includes("Email send failed")
     ) {
       return NextResponse.json(
         {
           success: false,
-          error: "Nu s-a putut trimite emailul de resetare. Verifica configurarea SMTP.",
+          error:
+            "Nu s-a putut trimite emailul de resetare. Verifica RESEND_API_KEY sau SMTP pe Vercel.",
           detail: process.env.NODE_ENV === "development" ? message : undefined,
         },
         { status: 503 },

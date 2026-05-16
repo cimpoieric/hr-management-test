@@ -1,45 +1,11 @@
 import "server-only";
 
 import { logAuditFF } from "@/lib/audit";
+import { sendTransactionalEmail } from "@/lib/mail/transactional";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import { buildPayslipPdfBufferForEmail } from "@/lib/services/payslipPdf";
-import { getSMTPConfig, testSMTPConfig } from "@/lib/services/email";
-import nodemailer from "nodemailer";
 
 type Attachment = { filename: string; content: Buffer; contentType: string };
-
-/** Răspuns minim nodemailer după sendMail — folosit pentru validare livrare */
-type NodemailerSendInfo = {
-  messageId?: string;
-  response?: string;
-  rejected?: string[];
-  accepted?: string[];
-  pending?: string[];
-};
-
-/**
- * Aruncă dacă SMTP raportează destinatari respinsi sau lipsește confirmarea (messageId).
- * Evită „succes” în UI când serverul nu acceptă mesajul.
- */
-function assertSendMailAccepted(info: NodemailerSendInfo): void {
-  const rejected = info.rejected ?? [];
-  if (rejected.length > 0) {
-    throw new Error(
-      `SMTP a respins destinatarul: ${rejected.join(", ")}. Verificați adresa și politica serverului de mail.`,
-    );
-  }
-  const mid = String(info.messageId ?? "").trim();
-  if (!mid) {
-    const resp = String(info.response ?? "")
-      .trim()
-      .slice(0, 400);
-    throw new Error(
-      resp
-        ? `SMTP nu a întors messageId de confirmare. Răspuns server: ${resp}`
-        : "SMTP nu a întors messageId — mesajul poate să nu fi fost acceptat. Verificați setările SMTP și logurile serverului.",
-    );
-  }
-}
 
 function toArray(to: string | string[]): string[] {
   return (Array.isArray(to) ? to : [to])
@@ -479,18 +445,6 @@ export async function sendEmail({
   if (recipients.length === 0) throw new Error("Recipient missing");
   if (!String(subject ?? "").trim()) throw new Error("Subject missing");
 
-  const cfg = await getSMTPConfig();
-  console.log("[EMAIL] Sending to:", recipients.join(", "));
-  console.log("[EMAIL] SMTP host:", cfg.host, "port:", cfg.port);
-  await testSMTPConfig(cfg);
-
-  const transporter = nodemailer.createTransport({
-    host: cfg.host,
-    port: cfg.port,
-    secure: cfg.secure,
-    auth: { user: cfg.user, pass: cfg.pass },
-  });
-
   const safeHtml = String(html ?? "");
   const text = stripHtml(safeHtml) || safeHtml;
 
@@ -515,22 +469,46 @@ export async function sendEmail({
     emailLogIds.push(emailLog.id);
 
     try {
-      const info = await transporter.sendMail({
-        from: `"${cfg.fromName}" <${cfg.fromEmail}>`,
-        to: toAddress,
-        subject: String(subject),
-        html: safeHtml,
-        text,
-        attachments: (attachments ?? []).map((a) => ({
-          filename: a.filename,
-          content: a.content,
-          contentType: a.contentType,
-        })),
-      });
-
-      assertSendMailAccepted(info as NodemailerSendInfo);
-
-      messageIds.push(String(info.messageId ?? "").trim());
+      if (attachments?.length) {
+        const { getSMTPConfig, testSMTPConfig } = await import(
+          "@/lib/services/email"
+        );
+        const nodemailer = await import("nodemailer");
+        const cfg = await getSMTPConfig();
+        console.log("[EMAIL] Attachments via SMTP:", cfg.host);
+        await testSMTPConfig(cfg);
+        const transporter = nodemailer.default.createTransport({
+          host: cfg.host,
+          port: cfg.port,
+          secure: cfg.secure,
+          auth: { user: cfg.user, pass: cfg.pass },
+        });
+        const info = await transporter.sendMail({
+          from: `"${cfg.fromName}" <${cfg.fromEmail}>`,
+          to: toAddress,
+          subject: String(subject),
+          html: safeHtml,
+          text,
+          attachments: attachments.map((a) => ({
+            filename: a.filename,
+            content: a.content,
+            contentType: a.contentType,
+          })),
+        });
+        const mid = String(info.messageId ?? "").trim();
+        if (!mid) throw new Error("SMTP attachment send: no messageId");
+        messageIds.push(mid);
+      } else {
+        console.log("[EMAIL] Sending to:", toAddress);
+        const sent = await sendTransactionalEmail({
+          to: toAddress,
+          subject: String(subject),
+          html: safeHtml,
+          text,
+        });
+        console.log("[EMAIL] Provider:", sent.provider, "id:", sent.messageId);
+        messageIds.push(sent.messageId);
+      }
 
       await prisma.emailLog.update({
         where: { id: emailLog.id },
