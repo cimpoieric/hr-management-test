@@ -94,7 +94,7 @@ type OrganizationWithListInclude = {
   subscriptionStatus: string;
   trialEndsAt: Date | null;
   employeeCount: number;
-  plan: { name: string };
+  subscriptionPlan: { name: string };
   email: string | null;
   createdAt: Date;
   users: Array<{ email: string; name: string | null }>;
@@ -146,7 +146,7 @@ export async function listAdminOrganizations(
   const organizations = await prisma.organization.findMany({
     where: {
       ...(status ? { status } : {}),
-      ...(planName ? { plan: { name: planName } } : {}),
+      ...(planName ? { subscriptionPlan: { name: planName } } : {}),
       ...(search
         ? {
             OR: [

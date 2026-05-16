@@ -38,7 +38,7 @@ const orgPlanSelect = {
   trialEndsAt: true,
   featuresOverride: true,
   status: true,
-  plan: {
+  subscriptionPlan: {
     select: {
       id: true,
       name: true,
@@ -127,11 +127,11 @@ async function loadOrganizationPlan(firmId: string) {
 export async function getPlanLimits(firmId: string): Promise<PlanLimitsInfo> {
   const org = await loadOrganizationPlan(firmId);
   const effectiveFeatures = resolveEffectiveFeatures(
-    org.plan.features,
+    org.subscriptionPlan.features,
     org.featuresOverride,
   );
   return {
-    ...org.plan,
+    ...org.subscriptionPlan,
     employeeCount: org.employeeCount,
     subscriptionStatus: org.subscriptionStatus,
     trialEndsAt: org.trialEndsAt,
@@ -176,7 +176,7 @@ export async function canUseFeature(
     const org = await loadOrganizationPlan(firmId);
     if (!isSubscriptionUsable(org)) return false;
     const effectiveFeatures = resolveEffectiveFeatures(
-      org.plan.features,
+      org.subscriptionPlan.features,
       org.featuresOverride,
     );
     return hasFeature(effectiveFeatures, feature);

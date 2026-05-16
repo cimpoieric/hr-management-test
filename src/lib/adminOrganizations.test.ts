@@ -20,7 +20,7 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findMany: prismaMocks.userFindMany,
     },
-    plan: {
+    subscriptionPlan: {
       findUnique: prismaMocks.planFindUnique,
     },
   },
@@ -77,7 +77,7 @@ describe("listAdminOrganizations", () => {
         subscriptionStatus: "active",
         trialEndsAt: null,
         employeeCount: 12,
-        plan: { name: "BUSINESS" },
+        subscriptionPlan: { name: "BUSINESS" },
         email: "contact@acme.test",
         createdAt: new Date("2026-05-13T10:00:00.000Z"),
         users: [{ email: "admin@acme.test", name: "Admin" }],
@@ -117,7 +117,7 @@ describe("listAdminOrganizations", () => {
     expect(prismaMocks.organizationFindMany).toHaveBeenCalledWith({
       where: {
         status: "trial",
-        plan: { name: "STARTER" },
+        subscriptionPlan: { name: "STARTER" },
         OR: [{ name: { contains: "acme" } }, { slug: { contains: "acme" } }],
       },
       orderBy: { createdAt: "desc" },
@@ -143,7 +143,7 @@ describe("updateAdminOrganizationPlanStatus", () => {
       subscriptionStatus: "active",
       trialEndsAt: null,
       employeeCount: 0,
-      plan: { name: "BUSINESS" },
+      subscriptionPlan: { name: "BUSINESS" },
       email: null,
       createdAt: new Date("2026-05-13T10:00:00.000Z"),
       users: [],
@@ -178,7 +178,7 @@ describe("deleteAdminOrganization", () => {
       subscriptionStatus: "trial",
       trialEndsAt: null,
       employeeCount: 0,
-      plan: { name: "STARTER" },
+      subscriptionPlan: { name: "STARTER" },
       email: null,
       createdAt: new Date("2026-05-13T10:00:00.000Z"),
       users: [],
@@ -203,7 +203,7 @@ describe("deleteAdminOrganization", () => {
       subscriptionStatus: "active",
       trialEndsAt: null,
       employeeCount: 0,
-      plan: { name: "STARTER" },
+      subscriptionPlan: { name: "STARTER" },
       email: null,
       createdAt: new Date("2026-05-13T10:00:00.000Z"),
       users: [],

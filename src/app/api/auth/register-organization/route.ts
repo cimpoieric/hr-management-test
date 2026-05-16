@@ -9,7 +9,7 @@ import {
 import { prismaBase as prisma } from "@/lib/prisma";
 import type { PricingPlanId } from "@/lib/pricingPlans";
 import { type NextRequest, NextResponse } from "next/server";
-import { UserRole } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -78,21 +78,21 @@ export async function POST(request: NextRequest) {
     await ensurePlansExist(prisma);
     const resolvedPlanId = await resolvePlanIdByKey(prisma, planKey);
 
-    const org = await prisma.organization.create({
-      data: {
-        name: d.companyName.trim(),
-        slug,
-        cui: emptyToNull(d.companyCui),
-        address: emptyToNull(d.companyAddress),
-        phone: emptyToNull(d.companyPhone),
-        email: companyEmail,
-        planId: resolvedPlanId,
-        employeeCount: 0,
-        subscriptionStatus: "trial",
-        status: "trial",
-        trialEndsAt: defaultTrialEndsAt(),
-      },
-    });
+    const orgData: Prisma.OrganizationUncheckedCreateInput = {
+      name: d.companyName.trim(),
+      slug,
+      cui: emptyToNull(d.companyCui),
+      address: emptyToNull(d.companyAddress),
+      phone: emptyToNull(d.companyPhone),
+      email: companyEmail,
+      planId: resolvedPlanId,
+      employeeCount: 0,
+      subscriptionStatus: "trial",
+      status: "trial",
+      trialEndsAt: defaultTrialEndsAt(),
+    };
+
+    const org = await prisma.organization.create({ data: orgData });
 
     await createDefaultOrganizationSettings(org.id, prisma);
 

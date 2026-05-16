@@ -29,7 +29,7 @@ const orgBillingSelect = {
   trialEndsAt: true,
   featuresOverride: true,
   planId: true,
-  plan: {
+  subscriptionPlan: {
     select: {
       id: true,
       name: true,
@@ -125,7 +125,7 @@ export async function getFirmPlanSummary(
 
   const limits = await getPlanLimits(organizationId);
   const remaining = await getRemainingEmployees(organizationId);
-  const planName = org.plan.name as PlanName;
+  const planName = org.subscriptionPlan.name as PlanName;
   const planKey = planKeyFromPlanName(planName);
 
   return {
@@ -134,9 +134,9 @@ export async function getFirmPlanSummary(
     planId: org.planId,
     planName,
     planKey,
-    priceLei: org.plan.priceLei,
-    maxEmployees: org.plan.maxEmployees,
-    features: org.plan.features,
+    priceLei: org.subscriptionPlan.priceLei,
+    maxEmployees: org.subscriptionPlan.maxEmployees,
+    features: org.subscriptionPlan.features,
     effectiveFeatures: limits.effectiveFeatures,
     employeeCount: org.employeeCount,
     remainingEmployees: remaining,

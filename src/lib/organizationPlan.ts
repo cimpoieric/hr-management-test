@@ -12,19 +12,23 @@ import type { PrismaClient } from "@prisma/client";
 export { planKeyFromPlanName, resolvePlanIdByKey, defaultTrialEndsAt };
 
 export function organizationPlanSelect() {
-  return { plan: { select: { name: true, maxEmployees: true, features: true } } };
+  return {
+    subscriptionPlan: {
+      select: { name: true, maxEmployees: true, features: true },
+    },
+  };
 }
 
 export type OrganizationWithPlan = {
   planId: string;
-  plan: { name: string; maxEmployees: number; features: string[] };
+  subscriptionPlan: { name: string; maxEmployees: number; features: string[] };
 };
 
 export function getOrganizationPlanKey(org: {
-  plan?: { name: string } | null;
+  subscriptionPlan?: { name: string } | null;
 }): PricingPlanId {
-  if (!org.plan?.name) return "starter";
-  return planKeyFromPlanName(org.plan.name);
+  if (!org.subscriptionPlan?.name) return "starter";
+  return planKeyFromPlanName(org.subscriptionPlan.name);
 }
 
 export async function buildNewOrganizationPlanData(

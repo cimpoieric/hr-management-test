@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
     const organizations = await prisma.organization.findMany({
       orderBy: { createdAt: "desc" },
       include: {
-        plan: { select: { name: true } },
+        subscriptionPlan: { select: { name: true } },
         _count: { select: { employees: true, users: true } },
       },
     });

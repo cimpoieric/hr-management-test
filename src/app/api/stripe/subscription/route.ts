@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
     where: { id: user.organizationId },
     select: {
       id: true,
-      plan: { select: { name: true } },
+      subscriptionPlan: { select: { name: true } },
       subscriptionStatus: true,
       status: true,
       trialEndsAt: true,

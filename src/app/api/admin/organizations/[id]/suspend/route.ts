@@ -42,7 +42,7 @@ export async function PATCH(
         id: true,
         name: true,
         status: true,
-        plan: { select: { name: true } },
+        subscriptionPlan: { select: { name: true } },
       },
     });
 

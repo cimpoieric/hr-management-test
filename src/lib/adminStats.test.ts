@@ -91,8 +91,8 @@ describe("getGlobalAdminStats", () => {
     prismaMocks.employeeCount.mockResolvedValue(45);
     prismaMocks.organizationFindMany
       .mockResolvedValueOnce([
-        { plan: { name: "BUSINESS" } },
-        { plan: { name: "BUSINESS" } },
+        { subscriptionPlan: { name: "BUSINESS" } },
+        { subscriptionPlan: { name: "BUSINESS" } },
       ])
       .mockResolvedValueOnce([
         {
@@ -100,7 +100,7 @@ describe("getGlobalAdminStats", () => {
           name: "Acme",
           slug: "acme",
           status: "trial",
-          plan: { name: "STARTER" },
+          subscriptionPlan: { name: "STARTER" },
           createdAt: new Date("2026-05-13T10:00:00.000Z"),
         },
       ])

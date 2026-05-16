@@ -28,7 +28,8 @@ model Organization {
   name                 String
   slug                 String    @unique // ex: firma-mea
   planId               String
-  plan                 Plan      @relation(fields: [planId], references: [id])
+  /** Relație Plan — nume `subscriptionPlan` (nu `plan`) ca să nu confunde cu vechea coloană scalară `plan`. */
+  subscriptionPlan     Plan      @relation(fields: [planId], references: [id])
   employeeCount        Int       @default(0)
   subscriptionStatus   String    @default("active") // active, trial, expired
   featuresOverride     String? // JSON pentru plan CUSTOM / override

@@ -138,7 +138,7 @@ export async function getGlobalAdminStats(): Promise<GlobalAdminStats> {
     prisma.organization.count({ where: { status: "trial" } }),
     prisma.organization.findMany({
       where: { status: { in: [...REVENUE_STATUSES] } },
-      select: { plan: { select: { name: true } } },
+      select: { subscriptionPlan: { select: { name: true } } },
     }),
     prisma.organization.findMany({
       orderBy: { createdAt: "desc" },
@@ -148,7 +148,7 @@ export async function getGlobalAdminStats(): Promise<GlobalAdminStats> {
         name: true,
         slug: true,
         status: true,
-        plan: { select: { name: true } },
+        subscriptionPlan: { select: { name: true } },
         createdAt: true,
       },
     }),
