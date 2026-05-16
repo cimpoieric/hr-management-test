@@ -38,7 +38,17 @@ const orgPlanSelect = {
   trialEndsAt: true,
   featuresOverride: true,
   status: true,
-  plan: true,
+  plan: {
+    select: {
+      id: true,
+      name: true,
+      priceLei: true,
+      maxEmployees: true,
+      features: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
 } as const;
 
 function parseFeaturesOverride(raw: string | null): string[] | null {

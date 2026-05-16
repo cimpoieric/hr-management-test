@@ -29,7 +29,15 @@ const orgBillingSelect = {
   trialEndsAt: true,
   featuresOverride: true,
   planId: true,
-  plan: true,
+  plan: {
+    select: {
+      id: true,
+      name: true,
+      priceLei: true,
+      maxEmployees: true,
+      features: true,
+    },
+  },
 } as const;
 
 export type FirmPlanSummary = {

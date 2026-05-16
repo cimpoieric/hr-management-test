@@ -1,9 +1,13 @@
 import { generateToken, hashPassword, setAuthCookie } from "@/lib/auth";
 import { createDefaultOrganizationSettings } from "@/lib/organizationSettings";
 import { resolveUniqueOrganizationSlug } from "@/lib/organizationSlug";
+import {
+  defaultTrialEndsAt,
+  ensurePlansExist,
+  resolvePlanIdByKey,
+} from "@/lib/planCatalog";
 import { prismaBase as prisma } from "@/lib/prisma";
 import type { PricingPlanId } from "@/lib/pricingPlans";
-import { buildNewOrganizationPlanData } from "@/lib/organizationPlan";
 import { type NextRequest, NextResponse } from "next/server";
 import { UserRole } from "@prisma/client";
 import { z } from "zod";
@@ -53,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
 
     const d = parsed.data;
-    const planId = d.planId as PricingPlanId;
+    const planKey = d.planId as PricingPlanId;
     const adminEmail = d.adminEmail.toLowerCase().trim();
     const companyEmail = d.companyEmail.toLowerCase().trim();
 
@@ -70,9 +74,9 @@ export async function POST(request: NextRequest) {
 
     const slug = await resolveUniqueOrganizationSlug(d.companyName);
     const passwordHash = await hashPassword(d.password);
-    const planData = await buildNewOrganizationPlanData(prisma, planId, {
-      trial: true,
-    });
+
+    await ensurePlansExist(prisma);
+    const resolvedPlanId = await resolvePlanIdByKey(prisma, planKey);
 
     const org = await prisma.organization.create({
       data: {
@@ -82,7 +86,11 @@ export async function POST(request: NextRequest) {
         address: emptyToNull(d.companyAddress),
         phone: emptyToNull(d.companyPhone),
         email: companyEmail,
-        ...planData,
+        planId: resolvedPlanId,
+        employeeCount: 0,
+        subscriptionStatus: "trial",
+        status: "trial",
+        trialEndsAt: defaultTrialEndsAt(),
       },
     });
 

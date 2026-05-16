@@ -83,6 +83,14 @@ export function defaultTrialEndsAt(from = new Date()): Date {
   return end;
 }
 
+/** Ensures Plan rows exist before organization signup (Neon / fresh DB). */
+export async function ensurePlansExist(prisma: PlanDb): Promise<void> {
+  const count = await prisma.plan.count();
+  if (count === 0) {
+    await seedPlans(prisma);
+  }
+}
+
 export async function seedPlans(prisma: PlanDb): Promise<void> {
   for (const row of SEED_PLANS) {
     await prisma.plan.upsert({
