@@ -12,6 +12,7 @@ import {
   Clock,
   Database,
   Download,
+  Building2,
   Factory,
   FileSpreadsheet,
   FileText,
@@ -285,7 +286,7 @@ export const SUPER_ADMIN_SIDEBAR_ROUTE_DEFS: SidebarRouteDef[] = [
   {
     href: ROUTES.adminOrganizationsCreate,
     i18nKey: "nav.addOrganization",
-    icon: Factory,
+    icon: Building2,
     showAdminBadge: true,
   },
   {

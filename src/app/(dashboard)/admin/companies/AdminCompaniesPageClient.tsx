@@ -2,8 +2,7 @@
 
 import { AdminOrganizationsPanel } from "@/components/admin/AdminOrganizationsPanel";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
-import { Button } from "@/components/ui/button";
-import Link from "next/link";
+import { SuperAdminAddOrganizationButton } from "@/components/admin/SuperAdminAddOrganizationButton";
 
 export default function AdminCompaniesPageClient() {
   return (
@@ -13,9 +12,7 @@ export default function AdminCompaniesPageClient() {
           title="Companies"
           description="All organizations registered on the platform."
         />
-        <Button asChild className="shrink-0 self-start">
-          <Link href="/admin/organizations/create">Adauga organizatie</Link>
-        </Button>
+        <SuperAdminAddOrganizationButton className="self-start" />
       </div>
       <AdminOrganizationsPanel showFilters />
     </div>
