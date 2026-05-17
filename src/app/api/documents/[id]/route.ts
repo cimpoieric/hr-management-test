@@ -5,6 +5,7 @@
  * Doar ADMIN și OPERATOR.
  */
 
+import { logAuditForUser } from "@/lib/auditInsert";
 import { requireAuth, requireRole } from "@/lib/auth";
 import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { employeeHasActiveDeployment } from "@/lib/deploymentGuards";
@@ -80,11 +81,10 @@ export async function DELETE(
       data: { deletedAt: new Date() },
     });
 
-    const { createSafeAuditLog } = await import("@/lib/auditInsert");
-    void createSafeAuditLog({
-      action: "DELETE",
-      entity: "Document",
-      entityId: document.employeeId,
+    logAuditForUser(user, request, {
+      action: "DOCUMENT_DELETED",
+      resource: "Document",
+      resourceId: documentId,
       oldValues: JSON.stringify({
         documentId,
         fileName: document.fileName,

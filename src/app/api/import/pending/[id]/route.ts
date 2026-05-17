@@ -406,10 +406,10 @@ export async function POST(
     void logAudit({
       userId: user.userId,
       userEmail: user.email,
-      action: "IMPORT_DATA",
-      resource: "PendingImport",
-      resourceId: importId,
-      details: { action: "APPROVE", employeeId: employee.id },
+      action: "EMPLOYEE_IMPORTED",
+      resource: "Employee",
+      resourceId: employee.id,
+      details: { source: "PENDING_IMPORT", importId },
       req: request,
     });
 

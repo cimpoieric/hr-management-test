@@ -190,12 +190,14 @@ export async function verifyAuth(
     const ctx = await verifyToken(token);
     const { enterTenantContextFromAuth } =
       await import("./tenantRequestStorage");
+    const { setAuditContext } = await import("./auditContext");
     enterTenantContextFromAuth({
       organizationId: ctx.organizationId,
       userId: ctx.userId,
       email: ctx.email,
       role: ctx.role,
     });
+    setAuditContext(request, ctx.userId, ctx.email, ctx.role);
     return ctx;
   } catch {
     return null;

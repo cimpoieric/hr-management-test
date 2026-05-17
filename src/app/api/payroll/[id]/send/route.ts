@@ -1,3 +1,4 @@
+import { logAudit } from "@/lib/audit";
 import { sendPayslipFluturasById } from "@/lib/email";
 import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { ROLES_PAYROLL } from "@/lib/roles";
@@ -31,6 +32,16 @@ export async function POST(
     }
 
     const result = await sendPayslipFluturasById(payslipId);
+    const { user } = planCheck;
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "PAYSLIP_SENT",
+      resource: "Payslip",
+      resourceId: payslipId,
+      details: { emailLogId: result.emailLogId },
+      req: request,
+    });
     return NextResponse.json({
       success: true,
       message: "Email trimis",

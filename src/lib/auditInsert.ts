@@ -1,6 +1,67 @@
 import "server-only";
 
+import type { NextRequest } from "next/server";
+import type { AuthContext } from "@/lib/auth";
+import { getClientIp } from "./auditContext";
 import { getTenantRequestContext } from "./tenantRequestStorage";
+
+/** Actions stored in AuditLog (filter dropdowns should include these). */
+export const VALID_AUDIT_ACTIONS = [
+  "LOGIN",
+  "LOGOUT",
+  "LOGIN_FAILED",
+  "CREATE",
+  "UPDATE",
+  "DELETE",
+  "VIEW",
+  "EXPORT_EXCEL",
+  "EXPORT_PDF",
+  "REPORT_GENERATE",
+  "IMPORT_APPROVE",
+  "IMPORT_REJECT",
+  "BACKUP",
+  "PASSWORD_CHANGE",
+  "SETTINGS_CHANGE",
+  "CREATE_EMPLOYEE",
+  "UPDATE_EMPLOYEE",
+  "DELETE_EMPLOYEE",
+  "VIEW_EMPLOYEE",
+  "EMPLOYEE_CREATED",
+  "EMPLOYEE_UPDATED",
+  "EMPLOYEE_DELETED",
+  "EMPLOYEE_IMPORTED",
+  "GENERATE_PAYROLL",
+  "PAYSLIP_CREATED",
+  "PAYSLIP_UPDATED",
+  "PAYSLIP_DELETED",
+  "PAYSLIP_SENT",
+  "TIMESHEET_CREATED",
+  "TIMESHEET_UPDATED",
+  "TIMESHEET_DELETED",
+  "DOCUMENT_UPLOADED",
+  "DOCUMENT_DELETED",
+  "GENERATE_REPORT",
+  "DOWNLOAD_DOCUMENT",
+  "UPLOAD_DOCUMENT",
+  "IMPORT_DATA",
+  "REGISTER_ORGANIZATION",
+] as const;
+
+export const VALID_AUDIT_ENTITIES = [
+  "Employee",
+  "Document",
+  "Deployment",
+  "User",
+  "Report",
+  "System",
+  "PendingImport",
+  "Company",
+  "Organization",
+  "Payroll",
+  "Payslip",
+  "Timesheet",
+  "Country",
+] as const;
 
 export type SafeAuditLogInput = {
   action: string;
@@ -21,6 +82,29 @@ export type SafeAuditLogInput = {
   ipAddress?: string | null;
   userAgent?: string | null;
 };
+
+export type AuthAuditInput = Omit<
+  SafeAuditLogInput,
+  "userId" | "userEmail" | "userRole" | "firmId" | "ipAddress" | "userAgent"
+>;
+
+/** Log with authenticated user + org (use in API routes after requireAuth). */
+export function logAuditForUser(
+  user: Pick<AuthContext, "userId" | "email" | "role" | "organizationId">,
+  request: NextRequest,
+  input: AuthAuditInput,
+): void {
+  void createSafeAuditLog({
+    ...input,
+    resource: input.resource ?? input.entity ?? "System",
+    userId: user.userId,
+    userEmail: user.email,
+    userRole: user.role,
+    firmId: user.organizationId,
+    ipAddress: getClientIp(request),
+    userAgent: request.headers.get("user-agent") ?? undefined,
+  });
+}
 
 /** @deprecated Employee-only FK removed; kept for callers that pass entityId. */
 export function resolveAuditEntityId(
@@ -120,8 +204,16 @@ export async function createSafeAuditLog(
 ): Promise<boolean> {
   try {
     const { prismaBase } = await import("./prisma");
-    const userId = await resolveSafeAuditUserId(input.userId);
-    const data = buildAuditLogCreateData(input);
+    const tenant = getTenantRequestContext();
+    const userId = await resolveSafeAuditUserId(
+      input.userId ?? tenant?.userId ?? null,
+    );
+    const data = buildAuditLogCreateData({
+      ...input,
+      firmId: input.firmId ?? tenant?.organizationId ?? null,
+      userEmail: input.userEmail ?? input.userName ?? tenant?.email ?? null,
+      userRole: input.userRole ?? tenant?.role ?? null,
+    });
     data.userId = userId;
 
     await prismaBase.auditLog.create({ data });
@@ -164,18 +256,16 @@ export function mapAuditLogToLegacy<T extends {
     }
   }
 
-  const entityId =
-    log.resource === "Employee" && log.resourceId
-      ? Number.parseInt(log.resourceId, 10)
-      : log.resourceId
-        ? Number.parseInt(log.resourceId, 10)
-        : null;
+  const parsedId = log.resourceId
+    ? Number.parseInt(log.resourceId, 10)
+    : Number.NaN;
+  const entityId = Number.isFinite(parsedId) ? parsedId : null;
 
   return {
     id: log.id,
     action: log.action,
     entity: log.resource,
-    entityId: Number.isFinite(entityId as number) ? entityId : null,
+    entityId,
     userId: log.userId,
     userName: log.userEmail,
     userRole,

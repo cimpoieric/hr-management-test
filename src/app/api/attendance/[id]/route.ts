@@ -1,16 +1,9 @@
 import { requireAuth, requireRole } from "@/lib/auth";
+import { logAuditForUser } from "@/lib/auditInsert";
 import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
-}
 
 export async function DELETE(
   request: NextRequest,
@@ -50,16 +43,11 @@ export async function DELETE(
 
     await prisma.timesheet.delete({ where: { id: timesheetId } });
 
-    const { createSafeAuditLog } = await import("@/lib/auditInsert");
-    void createSafeAuditLog({
-      action: "DELETE",
-      entity: "Timesheet",
-      entityId: timesheetId,
-      firmId: user.organizationId,
+    logAuditForUser(user, request, {
+      action: "TIMESHEET_DELETED",
+      resource: "Timesheet",
+      resourceId: timesheetId,
       newValues: JSON.stringify({ deleted: true, ...existing }),
-      ipAddress: getClientIp(request),
-      userId: user.userId,
-      userRole: user.role,
     });
 
     return NextResponse.json({ success: true });
@@ -193,18 +181,11 @@ export async function PUT(
       },
     });
 
-    const { createSafeAuditLog: logTimesheetUpdate } = await import(
-      "@/lib/auditInsert"
-    );
-    void logTimesheetUpdate({
-      action: "UPDATE",
-      entity: "Timesheet",
-      entityId: timesheetId,
-      firmId: user.organizationId,
+    logAuditForUser(user, request, {
+      action: "TIMESHEET_UPDATED",
+      resource: "Timesheet",
+      resourceId: timesheetId,
       newValues: JSON.stringify(updated),
-      ipAddress: getClientIp(request),
-      userId: user.userId,
-      userRole: user.role,
     });
 
     return NextResponse.json(updated);

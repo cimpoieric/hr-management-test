@@ -1,33 +1,10 @@
 import { requireAuth } from "@/lib/auth";
+import { logAuditForUser } from "@/lib/auditInsert";
 import { createTimesheetRecord } from "@/lib/timesheetCreate";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
-}
-
-async function logAudit(
-  action: "CREATE" | "UPDATE",
-  entityId: number | null,
-  newValues: unknown,
-  request: NextRequest,
-) {
-  const { createSafeAuditLog } = await import("@/lib/auditInsert");
-  void createSafeAuditLog({
-    action,
-    entity: "Timesheet",
-    entityId,
-    newValues: JSON.stringify(newValues),
-    ipAddress: getClientIp(request),
-  });
-}
 
 // Query params sunt opționali în App Router; validăm doar tipul și constrângeri simple.
 const querySchema = z.object({
@@ -296,7 +273,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
 
-    await logAudit("CREATE", result.timesheet.id, result.timesheet, request);
+    logAuditForUser(user, request, {
+      action: "TIMESHEET_CREATED",
+      resource: "Timesheet",
+      resourceId: result.timesheet.id,
+      newValues: JSON.stringify(result.timesheet),
+    });
     return NextResponse.json(result.timesheet, { status: result.status });
   } catch (error) {
     console.error("[TIMESHEETS_POST]", error);

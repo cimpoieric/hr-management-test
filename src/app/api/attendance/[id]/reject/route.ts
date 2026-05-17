@@ -1,34 +1,9 @@
 import { requireAuth, requireRole } from "@/lib/auth";
+import { logAuditForUser } from "@/lib/auditInsert";
 import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
-}
-
-async function logAudit(
-  action: "UPDATE",
-  entityId: number | null,
-  oldValues: unknown | null,
-  newValues: unknown | null,
-  request: NextRequest,
-) {
-  const { createSafeAuditLog } = await import("@/lib/auditInsert");
-  void createSafeAuditLog({
-    action,
-    entity: "Timesheet",
-    entityId,
-    oldValues: oldValues ? JSON.stringify(oldValues) : null,
-    newValues: newValues ? JSON.stringify(newValues) : null,
-    ipAddress: getClientIp(request),
-  });
-}
 
 const rejectSchema = z.object({
   notes: z.string().trim().min(1).max(2000).optional(),
@@ -81,7 +56,13 @@ export async function POST(
       },
     });
 
-    await logAudit("UPDATE", updated.id, existing, updated, request);
+    logAuditForUser(user, request, {
+      action: "TIMESHEET_UPDATED",
+      resource: "Timesheet",
+      resourceId: updated.id,
+      oldValues: JSON.stringify(existing),
+      newValues: JSON.stringify({ ...updated, event: "REJECTED" }),
+    });
 
     return NextResponse.json(updated);
   } catch (error) {

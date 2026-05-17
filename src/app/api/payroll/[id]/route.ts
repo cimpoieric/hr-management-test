@@ -3,14 +3,6 @@ import { ROLES_PAYROLL } from "@/lib/roles";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
 
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
-}
-
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -100,16 +92,12 @@ export async function DELETE(
       await tx.payslip.delete({ where: { id: payslipId } });
     });
 
-    const { createSafeAuditLog } = await import("@/lib/auditInsert");
-    void createSafeAuditLog({
-      action: "DELETE",
-      entity: "Payslip",
-      entityId: payslipId,
-      firmId: user.organizationId,
+    const { logAuditForUser } = await import("@/lib/auditInsert");
+    logAuditForUser(user, request, {
+      action: "PAYSLIP_DELETED",
+      resource: "Payslip",
+      resourceId: payslipId,
       newValues: JSON.stringify({ deleted: true, id: payslipId }),
-      ipAddress: getClientIp(request),
-      userId: user.userId,
-      userRole: user.role,
     });
 
     return NextResponse.json({ success: true });

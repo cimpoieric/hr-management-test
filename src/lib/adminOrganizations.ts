@@ -240,7 +240,10 @@ export type AdminOrganizationPlanStatusUpdateInput = z.infer<
 
 export type AdminOrganizationDeleteResult =
   | { ok: true; organization: OrganizationListRow }
-  | { ok: false; reason: "NOT_FOUND" | "TRIAL_ONLY" };
+  | {
+      ok: false;
+      reason: "NOT_FOUND" | "TRIAL_ONLY" | "PROTECTED_PLATFORM_ORG";
+    };
 
 export async function updateAdminOrganization(
   id: string,
@@ -316,6 +319,13 @@ export async function deleteAdminOrganization(
 
   if (!existing) {
     return { ok: false, reason: "NOT_FOUND" };
+  }
+
+  const { isProtectedPlatformOrganization } = await import(
+    "@/lib/protectedSuperAdmin"
+  );
+  if (isProtectedPlatformOrganization(existing)) {
+    return { ok: false, reason: "PROTECTED_PLATFORM_ORG" };
   }
 
   const organization = mapOrganizationListRow(existing);

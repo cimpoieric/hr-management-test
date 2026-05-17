@@ -289,7 +289,7 @@ export async function POST(request: NextRequest) {
     void logAudit({
       userId: user.userId,
       userEmail: user.email,
-      action: "IMPORT_DATA",
+      action: "EMPLOYEE_IMPORTED",
       resource: "Employee",
       details: stats,
       req: request,

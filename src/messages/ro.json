@@ -63,7 +63,28 @@
       "PASSWORD_CHANGE": "Schimbare parolă",
       "SETTINGS_CHANGE": "Modificare setări",
       "STATUS_CHANGE": "Schimbare status",
-      "REVIEW": "Revizuire"
+      "REVIEW": "Revizuire",
+      "CREATE_EMPLOYEE": "Angajat creat",
+      "UPDATE_EMPLOYEE": "Angajat actualizat",
+      "DELETE_EMPLOYEE": "Angajat șters",
+      "VIEW_EMPLOYEE": "Vizualizare angajat",
+      "EMPLOYEE_CREATED": "Angajat creat",
+      "EMPLOYEE_UPDATED": "Angajat actualizat",
+      "EMPLOYEE_DELETED": "Angajat șters",
+      "EMPLOYEE_IMPORTED": "Angajat importat",
+      "GENERATE_PAYROLL": "Fluturaș generat",
+      "PAYSLIP_CREATED": "Fluturaș generat",
+      "PAYSLIP_UPDATED": "Fluturaș actualizat",
+      "PAYSLIP_DELETED": "Fluturaș șters",
+      "PAYSLIP_SENT": "Fluturaș trimis",
+      "TIMESHEET_CREATED": "Pontaj creat",
+      "TIMESHEET_UPDATED": "Pontaj actualizat",
+      "TIMESHEET_DELETED": "Pontaj șters",
+      "DOCUMENT_UPLOADED": "Document încărcat",
+      "DOCUMENT_DELETED": "Document șters",
+      "UPLOAD_DOCUMENT": "Document încărcat",
+      "DOWNLOAD_DOCUMENT": "Document descărcat",
+      "IMPORT_DATA": "Import date"
     },
     "entities": {
       "Employee": "Angajat",
@@ -76,7 +97,11 @@
       "Company": "Firmă",
       "Country": "Țară",
       "AuditLog": "Jurnal audit",
-      "Unknown": "Necunoscut"
+      "Unknown": "Necunoscut",
+      "Payroll": "Fluturaș",
+      "Payslip": "Fluturaș",
+      "Timesheet": "Pontaj",
+      "Organization": "Organizație"
     }
   },
   "common": {

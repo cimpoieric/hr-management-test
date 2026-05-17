@@ -138,8 +138,8 @@ export async function POST(request: NextRequest) {
     void logAudit({
       userId: user.userId,
       userEmail: user.email,
-      action: "GENERATE_PAYROLL",
-      resource: "Payroll",
+      action: "PAYSLIP_CREATED",
+      resource: "Payslip",
       resourceId: result.payslip?.id ?? timesheetId,
       details: { timesheetId },
       req: request,

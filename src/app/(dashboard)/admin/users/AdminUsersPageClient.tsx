@@ -5,6 +5,10 @@ import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminTableSkeleton } from "@/components/admin/AdminTableSkeleton";
 import { formatDate } from "@/components/admin/adminUtils";
 import {
+  isProtectedSuperAdminUser,
+  SUPER_ADMIN_DELETE_TOOLTIP,
+} from "@/lib/protectedSuperAdminClient";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -137,7 +141,12 @@ export default function AdminUsersPage() {
       const response = await fetch(`/api/admin/users/${deleteRow.id}`, {
         method: "DELETE",
       });
-      if (!response.ok) throw new Error("Could not delete user");
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(body?.error ?? "Could not delete user");
+      }
       setDeleteRow(null);
       await load();
     } catch (deleteError) {
@@ -261,6 +270,12 @@ export default function AdminUsersPage() {
                       <Button
                         size="sm"
                         variant="destructive"
+                        disabled={isProtectedSuperAdminUser(row)}
+                        title={
+                          isProtectedSuperAdminUser(row)
+                            ? SUPER_ADMIN_DELETE_TOOLTIP
+                            : undefined
+                        }
                         onClick={() => setDeleteRow(row)}
                       >
                         Delete

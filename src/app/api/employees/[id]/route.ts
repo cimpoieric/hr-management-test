@@ -477,7 +477,7 @@ export async function PUT(
     void logAudit({
       userId: user.userId,
       userEmail: user.email,
-      action: "UPDATE_EMPLOYEE",
+      action: "EMPLOYEE_UPDATED",
       resource: "Employee",
       resourceId: employeeId,
       req: request,
@@ -597,7 +597,7 @@ export async function DELETE(
     void logAudit({
       userId: user.userId,
       userEmail: user.email,
-      action: "DELETE_EMPLOYEE",
+      action: "EMPLOYEE_DELETED",
       resource: "Employee",
       resourceId: employeeId,
       details: { soft: true, status: "TERMINATED" },

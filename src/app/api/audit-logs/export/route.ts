@@ -7,54 +7,18 @@
  * Doar ADMIN poate exporta.
  */
 
-import { createSafeAuditLog, mapAuditLogToLegacy } from "@/lib/auditInsert";
+import {
+  createSafeAuditLog,
+  mapAuditLogToLegacy,
+  VALID_AUDIT_ACTIONS,
+  VALID_AUDIT_ENTITIES,
+} from "@/lib/auditInsert";
 import { requireRole } from "@/lib/auth";
 import { isSuperAdminRole } from "@/middleware/adminAccess";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
-
-const VALID_ACTIONS = [
-  "LOGIN",
-  "LOGOUT",
-  "LOGIN_FAILED",
-  "CREATE",
-  "UPDATE",
-  "DELETE",
-  "VIEW",
-  "EXPORT_EXCEL",
-  "EXPORT_PDF",
-  "REPORT_GENERATE",
-  "IMPORT_APPROVE",
-  "IMPORT_REJECT",
-  "BACKUP",
-  "PASSWORD_CHANGE",
-  "SETTINGS_CHANGE",
-  "CREATE_EMPLOYEE",
-  "UPDATE_EMPLOYEE",
-  "DELETE_EMPLOYEE",
-  "VIEW_EMPLOYEE",
-  "GENERATE_PAYROLL",
-  "GENERATE_REPORT",
-  "DOWNLOAD_DOCUMENT",
-  "UPLOAD_DOCUMENT",
-  "IMPORT_DATA",
-  "REGISTER_ORGANIZATION",
-];
-
-const VALID_ENTITIES = [
-  "Employee",
-  "Document",
-  "Deployment",
-  "User",
-  "Report",
-  "System",
-  "PendingImport",
-  "Company",
-  "Organization",
-  "Payroll",
-];
 
 function parseDate(dateStr: string): Date | null {
   const d = new Date(dateStr);
@@ -90,10 +54,13 @@ export async function GET(request: NextRequest) {
     if (filterUserId) {
       where.userId = filterUserId;
     }
-    if (entityType && VALID_ENTITIES.includes(entityType)) {
+    if (
+      entityType &&
+      (VALID_AUDIT_ENTITIES as readonly string[]).includes(entityType)
+    ) {
       where.resource = entityType;
     }
-    if (action && VALID_ACTIONS.includes(action)) {
+    if (action && (VALID_AUDIT_ACTIONS as readonly string[]).includes(action)) {
       where.action = action;
     }
 

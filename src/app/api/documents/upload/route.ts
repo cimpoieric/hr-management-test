@@ -206,27 +206,13 @@ export async function POST(request: NextRequest) {
 
     // ─── Audit log ───────────────────────────────────────────────
 
-    const { createSafeAuditLog } = await import("@/lib/auditInsert");
-    void createSafeAuditLog({
-      action: "CREATE",
-      entity: "Document",
-      entityId: employeeId,
-      newValues: JSON.stringify({
-        documentId: document.id,
-        type,
-        employeeId,
-        fileName: file.name,
-        status,
-      }),
-    });
-
     void logAudit({
       userId: user.userId,
       userEmail: user.email,
-      action: "UPLOAD_DOCUMENT",
+      action: "DOCUMENT_UPLOADED",
       resource: "Document",
       resourceId: document.id,
-      details: { type, employeeId, fileName: file.name },
+      details: { type, employeeId, fileName: file.name, status },
       req: request,
     });
 

@@ -1,3 +1,4 @@
+import { logAudit } from "@/lib/audit";
 import { sendPayslipFluturasById } from "@/lib/email";
 import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { ROLES_PAYROLL } from "@/lib/roles";
@@ -47,6 +48,19 @@ export async function POST(request: NextRequest) {
           error: e instanceof Error ? e.message : String(e),
         });
       }
+    }
+
+    const { user } = planCheck;
+    for (const row of sent) {
+      void logAudit({
+        userId: user.userId,
+        userEmail: user.email,
+        action: "PAYSLIP_SENT",
+        resource: "Payslip",
+        resourceId: row.payslipId,
+        details: { emailLogId: row.emailLogId, bulk: true },
+        req: request,
+      });
     }
 
     return NextResponse.json({ sent, failed });

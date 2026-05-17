@@ -5,6 +5,7 @@
 
 import { getClientIp, logAuditFF } from "@/lib/audit";
 import { hashPassword, requireRole } from "@/lib/auth";
+import { superAdminDeletionForbiddenResponse } from "@/lib/protectedSuperAdminApi";
 import { ROLES_SETTINGS_ADMIN, UserRole } from "@/lib/roles";
 import { generateTempPassword } from "@/lib/backup";
 import { prisma } from "@/lib/prisma";
@@ -292,6 +293,9 @@ export async function DELETE(
     if (!assertSameOrg(adminUser, existing.organizationId)) {
       return NextResponse.json({ error: "Acces interzis" }, { status: 403 });
     }
+
+    const blocked = superAdminDeletionForbiddenResponse(existing);
+    if (blocked) return blocked;
 
     if (isDbAdminRole(existing.role)) {
       const adminCount = await prisma.user.count({

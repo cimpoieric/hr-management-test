@@ -1,34 +1,8 @@
 import { requireAuth, requireRole } from "@/lib/auth";
+import { logAuditForUser } from "@/lib/auditInsert";
 import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
-
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
-}
-
-async function logAudit(
-  action: "UPDATE" | "CREATE",
-  entity: "Timesheet" | "Payslip",
-  entityId: number | null,
-  oldValues: unknown | null,
-  newValues: unknown | null,
-  request: NextRequest,
-) {
-  const { createSafeAuditLog } = await import("@/lib/auditInsert");
-  void createSafeAuditLog({
-    action,
-    entity,
-    entityId,
-    oldValues: oldValues ? JSON.stringify(oldValues) : null,
-    newValues: newValues ? JSON.stringify(newValues) : null,
-    ipAddress: getClientIp(request),
-  });
-}
 
 export async function POST(
   request: NextRequest,
@@ -104,14 +78,13 @@ export async function POST(
       return { updatedTimesheet, createdPayslip: null as null };
     });
 
-    await logAudit(
-      "UPDATE",
-      "Timesheet",
-      result.updatedTimesheet.id,
-      existing,
-      result.updatedTimesheet,
-      request,
-    );
+    logAuditForUser(user, request, {
+      action: "TIMESHEET_UPDATED",
+      resource: "Timesheet",
+      resourceId: result.updatedTimesheet.id,
+      oldValues: JSON.stringify(existing),
+      newValues: JSON.stringify({ ...result.updatedTimesheet, event: "APPROVED" }),
+    });
 
     return NextResponse.json(result.updatedTimesheet);
   } catch (error) {

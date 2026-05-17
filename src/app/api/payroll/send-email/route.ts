@@ -1,4 +1,4 @@
-import { withAuditContext } from "@/lib/audit";
+import { logAudit, withAuditContext } from "@/lib/audit";
 import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { ROLES_PAYROLL } from "@/lib/roles";
 import { sendPayslipFluturasById } from "@/lib/email";
@@ -120,6 +120,15 @@ export async function POST(request: NextRequest) {
             email: String(payslip?.employee.email ?? "").trim(),
             payslipId,
             emailLogId: r.emailLogId,
+          });
+          void logAudit({
+            userId: planCheck.user.userId,
+            userEmail: planCheck.user.email,
+            action: "PAYSLIP_SENT",
+            resource: "Payslip",
+            resourceId: payslipId,
+            details: { emailLogId: r.emailLogId },
+            req: request,
           });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);

@@ -3,6 +3,7 @@
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/hooks/useAuth";
 import { useTranslation } from "@/hooks/useTranslation";
+import { isProtectedSuperAdminUser } from "@/lib/protectedSuperAdminClient";
 import { ROLES_SETTINGS_ADMIN, UserRole } from "@/lib/roles";
 import type { SupportedLng } from "@/i18n/config";
 import {
@@ -383,7 +384,8 @@ export default function UtilizatoriPage() {
                           >
                             <Lock size={16} />
                           </button>
-                          {u.id !== currentUserId && (
+                          {u.id !== currentUserId &&
+                            !isProtectedSuperAdminUser(u) && (
                             <button
                               onClick={() => handleDeactivate(u)}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"

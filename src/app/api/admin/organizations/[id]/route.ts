@@ -187,6 +187,15 @@ export async function DELETE(
           { status: 404 },
         );
       }
+      if (result.reason === "PROTECTED_PLATFORM_ORG") {
+        return NextResponse.json(
+          {
+            error:
+              "Organizatia platformei (super administrator) nu poate fi stearsa",
+          },
+          { status: 403 },
+        );
+      }
 
       return NextResponse.json(
         {

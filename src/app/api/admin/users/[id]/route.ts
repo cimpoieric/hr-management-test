@@ -1,4 +1,5 @@
 import { withAdminApi } from "@/lib/adminApi";
+import { superAdminDeletionForbiddenResponse } from "@/lib/protectedSuperAdminApi";
 import { prismaBase as prisma } from "@/lib/prisma";
 import { UserRole } from "@/lib/roles";
 import { type NextRequest, NextResponse } from "next/server";
@@ -139,6 +140,9 @@ export async function DELETE(
         { status: 400 },
       );
     }
+
+    const blocked = superAdminDeletionForbiddenResponse(existing);
+    if (blocked) return blocked;
 
     await prisma.user.delete({ where: { id: parsedId.data } });
     return NextResponse.json({ ok: true, deleted: true });

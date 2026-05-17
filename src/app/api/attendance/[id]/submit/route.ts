@@ -1,31 +1,7 @@
 import { requireAuth } from "@/lib/auth";
+import { logAuditForUser } from "@/lib/auditInsert";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
-
-function getClientIp(request: NextRequest): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
-}
-
-async function logAudit(
-  entityId: number,
-  oldValues: unknown,
-  newValues: unknown,
-  request: NextRequest,
-) {
-  const { createSafeAuditLog } = await import("@/lib/auditInsert");
-  void createSafeAuditLog({
-    action: "UPDATE",
-    entity: "Timesheet",
-    entityId,
-    oldValues: JSON.stringify(oldValues),
-    newValues: JSON.stringify(newValues),
-    ipAddress: getClientIp(request),
-  });
-}
 
 export async function POST(
   request: NextRequest,
@@ -66,7 +42,13 @@ export async function POST(
       },
     });
 
-    await logAudit(timesheetId, existing, updated, request);
+    logAuditForUser(user, request, {
+      action: "TIMESHEET_UPDATED",
+      resource: "Timesheet",
+      resourceId: timesheetId,
+      oldValues: JSON.stringify(existing),
+      newValues: JSON.stringify({ ...updated, event: "SUBMITTED" }),
+    });
 
     return NextResponse.json(updated);
   } catch (error) {

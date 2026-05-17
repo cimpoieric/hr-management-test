@@ -260,23 +260,6 @@ function maskEmployee(emp: Record<string, unknown>, canSeeIban: boolean) {
   };
 }
 
-async function logAudit(
-  action: string,
-  entity: string,
-  entityId: number | null,
-  newValues: unknown,
-  ipAddress?: string,
-) {
-  const { createSafeAuditLog } = await import("@/lib/auditInsert");
-  void createSafeAuditLog({
-    action,
-    entity,
-    entityId,
-    newValues: JSON.stringify(newValues),
-    ipAddress: ipAddress ?? null,
-  });
-}
-
 function getClientIp(request: NextRequest): string {
   return (
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
@@ -815,13 +798,16 @@ export async function POST(request: NextRequest) {
       user.organizationId,
     );
 
-    await logAudit(
-      "CREATE_EMPLOYEE",
-      "Employee",
-      employee.id,
-      data,
-      getClientIp(request),
-    );
+    const { logAudit } = await import("@/lib/audit");
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "EMPLOYEE_CREATED",
+      resource: "Employee",
+      resourceId: employee.id,
+      details: { firstName: data.firstName, lastName: data.lastName },
+      req: request,
+    });
 
     try {
       await syncEmployeeDeploymentByCountry({
