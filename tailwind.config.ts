@@ -45,6 +45,41 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        navy: {
+          900: "#0a0e27",
+          800: "#111840",
+          700: "#1a237e",
+        },
+        brand: {
+          blue: "#2D62FF",
+          violet: "#7B61FF",
+          teal: "#00C9A7",
+        },
+        surface: {
+          dark: "#0B1120",
+          card: "#131B2E",
+          hover: "#1a2438",
+        },
+      },
+      boxShadow: {
+        card: "0 4px 24px rgba(0, 0, 0, 0.30)",
+        "card-hover": "0 8px 40px rgba(45, 98, 255, 0.15)",
+        "glow-blue": "0 0 40px rgba(45, 98, 255, 0.3)",
+        "glow-violet": "0 0 40px rgba(123, 97, 255, 0.3)",
+      },
+      keyframes: {
+        float: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-20px)" },
+        },
+        pulseGlow: {
+          "0%, 100%": { opacity: "0.5" },
+          "50%": { opacity: "1" },
+        },
+      },
+      animation: {
+        float: "float 6s ease-in-out infinite",
+        "pulse-glow": "pulseGlow 3s ease-in-out infinite",
       },
       borderRadius: {
         lg: "var(--radius)",

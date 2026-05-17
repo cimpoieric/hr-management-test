@@ -1,13 +1,12 @@
 "use client";
 
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   PRICING_PLANS,
   type PricingPlanId,
   type StripePriceIds,
 } from "@/lib/pricingPlans";
 import { ROUTES } from "@/lib/routes";
+import { cn } from "@/lib/utils";
 import { Check, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -15,6 +14,9 @@ import { useCallback, useState } from "react";
 import { toast } from "sonner";
 
 const ADMIN_ROLES = new Set(["ORG_ADMIN", "SUPER_ADMIN"]);
+
+const DEV_CHECKOUT_FOOTNOTE =
+  "Configureaza Price ID in .env.local pentru checkout";
 
 type MeResponse = {
   user?: {
@@ -129,7 +131,7 @@ export function PricingCards(props: {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-4">
+    <div className="mt-12 grid grid-cols-1 items-start gap-6 md:grid-cols-2 lg:grid-cols-4">
       {PRICING_PLANS.map((plan) => {
         const isLoading = loadingPlan === plan.id;
         const priceId = props.stripePriceIds[plan.id]?.trim() ?? "";
@@ -138,91 +140,129 @@ export function PricingCards(props: {
         const footNote = !props.stripeCheckoutEnabled
           ? "Inregistrare gratuita, fara plata"
           : plan.preferContactWhenNoPrice
-          ? stripeReady
-            ? "Plata securizata prin Stripe Checkout"
-            : "Contact prin email sau adauga Price ID pentru checkout online"
-          : stripeReady
-            ? "Plata securizata prin Stripe Checkout"
-            : "Configureaza Price ID in .env.local pentru checkout";
+            ? stripeReady
+              ? "Plata securizata prin Stripe Checkout"
+              : "Contact prin email sau adauga Price ID pentru checkout online"
+            : stripeReady
+              ? "Plata securizata prin Stripe Checkout"
+              : DEV_CHECKOUT_FOOTNOTE;
+        const showFootNote = footNote !== DEV_CHECKOUT_FOOTNOTE;
+
+        const trialLabel =
+          props.trialDays > 0 ? (
+            <>
+              {props.trialDays} zile gratuit (trial), apoi pretul afisat
+            </>
+          ) : (
+            <>Fara trial in Stripe la checkout (trialPeriodDays = 0)</>
+          );
+
+        const priceBlock = (
+          <div className="mt-3">
+            <span
+              className={cn(
+                "font-bold gradient-text",
+                plan.recommended ? "text-5xl" : "text-4xl",
+              )}
+            >
+              {plan.priceLei}
+            </span>{" "}
+            <span className="text-sm text-gray-500">LEI/ lună</span>
+            {plan.priceUsdApprox ? (
+              <p className="mt-1 text-sm text-gray-500">{plan.priceUsdApprox}</p>
+            ) : null}
+          </div>
+        );
+
+        const featuresList = (
+          <ul className="mt-6 flex flex-1 flex-col space-y-3">
+            {plan.features.map((f) => (
+              <li key={f} className="flex gap-2">
+                <Check
+                  className="h-4 w-4 shrink-0 text-brand-teal"
+                  aria-hidden
+                />
+                <span className="text-sm text-gray-300">{f}</span>
+              </li>
+            ))}
+          </ul>
+        );
+
+        const ctaButton = (
+          <button
+            type="button"
+            disabled={isLoading}
+            onClick={() => handlePrimaryCta(plan.id)}
+            className={cn(
+              "mt-8 flex w-full items-center justify-center gap-2 rounded-xl py-3 font-semibold transition-all disabled:opacity-60",
+              plan.recommended
+                ? "bg-gradient-to-r from-brand-blue to-brand-violet text-white hover:-translate-y-0.5 hover:shadow-glow-blue"
+                : "glass text-white hover:bg-white/10",
+            )}
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Se incarca...
+              </>
+            ) : (
+              plan.cta
+            )}
+          </button>
+        );
+
+        if (plan.recommended) {
+          return (
+            <div
+              key={plan.id}
+              className="gradient-border relative rounded-2xl lg:-mt-4"
+            >
+              <div className="relative flex flex-col rounded-2xl bg-gradient-to-b from-brand-blue/10 to-brand-violet/5 p-6">
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-gradient-to-r from-brand-blue to-brand-violet px-4 py-1 text-xs font-bold text-white">
+                  RECOMANDAT
+                </div>
+                <h3 className="text-center text-lg font-semibold uppercase tracking-wider text-white">
+                  {plan.name}
+                </h3>
+                <div className="text-center">{priceBlock}</div>
+                <div className="text-center">
+                  <p className="glass mt-3 inline-block rounded-full px-3 py-1 text-xs text-gray-300">
+                    {trialLabel}
+                  </p>
+                </div>
+                {featuresList}
+                {ctaButton}
+                {showFootNote ? (
+                  <p className="mt-2 text-center text-[11px] text-gray-500">
+                    {footNote}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          );
+        }
 
         return (
           <div
             key={plan.id}
-            className={
-              plan.recommended
-                ? "relative flex flex-col rounded-2xl border-2 border-amber-400 bg-white p-6 shadow-lg ring-1 ring-amber-100"
-                : "relative flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
-            }
+            className="glass flex flex-col rounded-2xl p-6 transition-all duration-500 hover:-translate-y-2 hover:shadow-card-hover"
           >
-            {plan.recommended ? (
-              <Badge className="absolute -top-3 left-1/2 -translate-x-1/2 border-0 bg-amber-500 px-3 text-white hover:bg-amber-500">
-                RECOMANDAT
-              </Badge>
-            ) : null}
-
-            <div className="mb-4 text-center">
-              <h3 className="text-lg font-bold tracking-wide text-slate-900">
-                {plan.name}
-              </h3>
-              <div className="mt-3 flex flex-col items-center gap-0.5">
-                <p className="text-3xl font-bold text-slate-900">
-                  {plan.priceLei}{" "}
-                  <span className="text-base font-semibold text-slate-600">
-                    LEI
-                  </span>
-                  <span className="text-base font-normal text-slate-500">
-                    / luna
-                  </span>
-                </p>
-                <p className="text-sm text-slate-500">{plan.priceUsdApprox}</p>
-              </div>
-              <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800">
-                {props.trialDays > 0 ? (
-                  <>
-                    {props.trialDays} zile gratuit (trial), apoi pretul afisat
-                  </>
-                ) : (
-                  <>Fara trial in Stripe la checkout (trialPeriodDays = 0)</>
-                )}
+            <h3 className="text-center text-lg font-semibold uppercase tracking-wider text-white">
+              {plan.name}
+            </h3>
+            <div className="text-center">{priceBlock}</div>
+            <div className="text-center">
+              <p className="glass mt-3 inline-block rounded-full px-3 py-1 text-xs text-gray-300">
+                {trialLabel}
               </p>
             </div>
-
-            <ul className="mb-6 flex flex-1 flex-col gap-2.5 text-sm text-slate-700">
-              {plan.features.map((f) => (
-                <li key={f} className="flex gap-2">
-                  <Check
-                    className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"
-                    aria-hidden
-                  />
-                  <span>{f}</span>
-                </li>
-              ))}
-            </ul>
-
-            <Button
-              type="button"
-              size="lg"
-              className={
-                plan.recommended
-                  ? "w-full bg-amber-500 text-white hover:bg-amber-600"
-                  : "w-full"
-              }
-              disabled={isLoading}
-              onClick={() => handlePrimaryCta(plan.id)}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Se incarca...
-                </>
-              ) : (
-                plan.cta
-              )}
-            </Button>
-
-            <p className="mt-2 text-center text-[11px] text-slate-400">
-              {footNote}
-            </p>
+            {featuresList}
+            {ctaButton}
+            {showFootNote ? (
+              <p className="mt-2 text-center text-[11px] text-gray-500">
+                {footNote}
+              </p>
+            ) : null}
           </div>
         );
       })}
@@ -247,12 +287,18 @@ export function PricingNav() {
           <Link href="/login" className="text-slate-600 hover:text-slate-900">
             Autentificare
           </Link>
-          <Button asChild size="sm" variant="outline">
-            <Link href="/register">Inregistrare</Link>
-          </Button>
-          <Button asChild size="sm">
-            <Link href={ROUTES.dashboard}>Aplicatie</Link>
-          </Button>
+          <Link
+            href="/register"
+            className="rounded-md border border-slate-200 px-3 py-1.5 text-sm font-medium hover:bg-slate-50"
+          >
+            Inregistrare
+          </Link>
+          <Link
+            href={ROUTES.dashboard}
+            className="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
+          >
+            Aplicatie
+          </Link>
         </nav>
       </div>
     </header>
