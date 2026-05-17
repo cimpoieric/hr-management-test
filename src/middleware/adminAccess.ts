@@ -23,12 +23,32 @@ export function isSuperAdminRole(role: string | null | undefined): boolean {
   return role === "SUPER_ADMIN";
 }
 
+const AUDIT_LOGS_PAGE =
+  "/superadmin/audit-logs";
+
+export function isAuditLogsPagePath(pathname: string): boolean {
+  return (
+    pathname === AUDIT_LOGS_PAGE ||
+    pathname.startsWith(`${AUDIT_LOGS_PAGE}/`)
+  );
+}
+
 export function resolveAdminPageAccess(
   pathname: string,
   role: string | null | undefined,
 ): AdminPageAccess {
   if (!isAdminPagePath(pathname)) return "allow";
+  if (isAuditLogsPagePath(pathname)) {
+    return role === "SUPER_ADMIN" || role === "ORG_ADMIN" ? "allow" : "deny";
+  }
   return isSuperAdminRole(role) ? "allow" : "deny";
+}
+
+export function isGdprRequestsApiPath(pathname: string): boolean {
+  return (
+    pathname === "/api/admin/gdpr-requests" ||
+    pathname.startsWith("/api/admin/gdpr-requests/")
+  );
 }
 
 export function resolveAdminApiAccess(
@@ -36,5 +56,8 @@ export function resolveAdminApiAccess(
   role: string | null | undefined,
 ): AdminPageAccess {
   if (!isAdminApiPath(pathname)) return "allow";
+  if (isGdprRequestsApiPath(pathname)) {
+    return role === "SUPER_ADMIN" || role === "ORG_ADMIN" ? "allow" : "deny";
+  }
   return isSuperAdminRole(role) ? "allow" : "deny";
 }

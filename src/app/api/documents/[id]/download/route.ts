@@ -8,6 +8,7 @@
 
 import { createReadStream } from "fs";
 import path from "path";
+import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fileExists, getMimeType, resolveAbsolutePath } from "@/lib/storage";
@@ -63,6 +64,16 @@ export async function GET(
 
     // Stream pentru fișiere mari (>10MB)
     const stream = createReadStream(absolutePath);
+
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "DOWNLOAD_DOCUMENT",
+      resource: "Document",
+      resourceId: documentId,
+      details: { fileName: document.fileName, employeeId: document.employeeId },
+      req: request,
+    });
 
     return new NextResponse(stream as unknown as ReadableStream, {
       status: 200,

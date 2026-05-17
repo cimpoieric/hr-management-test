@@ -15,6 +15,7 @@ import { incrementOrganizationEmployeeCount } from "@/lib/organizationPlan";
 import { prismaTyped } from "@/lib/prisma";
 import { validateCNP, validateIBAN } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
+import { logAudit } from "@/lib/audit";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -284,6 +285,15 @@ export async function POST(request: NextRequest) {
       errors: results.filter((r) => r.result === "ERROR").length,
       mode,
     };
+
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "IMPORT_DATA",
+      resource: "Employee",
+      details: stats,
+      req: request,
+    });
 
     return NextResponse.json({ stats, results }, { status: 200 });
   } catch (error) {

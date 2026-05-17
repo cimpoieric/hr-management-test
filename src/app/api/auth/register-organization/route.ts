@@ -8,6 +8,7 @@ import {
 } from "@/lib/planCatalog";
 import { prismaBase as prisma } from "@/lib/prisma";
 import type { PricingPlanId } from "@/lib/pricingPlans";
+import { logAudit } from "@/lib/audit";
 import { type NextRequest, NextResponse } from "next/server";
 import { Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
@@ -31,6 +32,11 @@ const bodySchema = z
     agreedToTerms: z.literal(true, {
       errorMap: () => ({
         message: "You must accept the Terms and Privacy Policy",
+      }),
+    }),
+    agreedToDpa: z.literal(true, {
+      errorMap: () => ({
+        message: "You must accept the Data Processing Agreement (DPA)",
       }),
     }),
   })
@@ -90,6 +96,8 @@ export async function POST(request: NextRequest) {
       subscriptionStatus: "trial",
       status: "trial",
       trialEndsAt: defaultTrialEndsAt(),
+      dpaAcceptedAt: new Date(),
+      dpaAcceptedBy: adminEmail,
     };
 
     const org = await prisma.organization.create({ data: orgData });
@@ -126,6 +134,18 @@ export async function POST(request: NextRequest) {
       { status: 200 },
     );
     setAuthCookie(response, token);
+
+    void logAudit({
+      userId: user.id,
+      userEmail: user.email,
+      action: "REGISTER_ORGANIZATION",
+      resource: "Organization",
+      resourceId: org.id,
+      firmId: org.id,
+      details: { companyName: org.name, planKey },
+      req: request,
+    });
+
     return response;
   } catch (error) {
     console.error("[REGISTER_ORGANIZATION]", error);

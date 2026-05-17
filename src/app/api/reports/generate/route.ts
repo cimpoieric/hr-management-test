@@ -16,7 +16,7 @@
 import { existsSync } from "fs";
 import { join } from "path";
 import { getAppSettings } from "@/lib/appSettings";
-import { logAuditFF } from "@/lib/audit";
+import { logAudit, logAuditFF } from "@/lib/audit";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { DEPLOYMENT_COUNTRIES } from "@/lib/countries";
 import { calculateStatus } from "@/lib/documentStatus";
@@ -820,6 +820,16 @@ export async function POST(request: NextRequest) {
         reportId,
         storageKey,
       },
+    });
+
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "GENERATE_REPORT",
+      resource: "Report",
+      resourceId: reportId,
+      details: { type: reportType, title: reportTitle, employeeCount },
+      req: request,
     });
 
     return NextResponse.json({

@@ -55,6 +55,10 @@ model Organization {
   // Limbi
   defaultLanguage      String    @default("en") // en sau ro
 
+  /** Acceptare Acord Prelucrare Date (DPA) la inregistrare. */
+  dpaAcceptedAt        DateTime?
+  dpaAcceptedBy        String?
+
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -172,6 +176,10 @@ model Employee {
   companyId      Int
   company        Company        @relation(fields: [companyId], references: [id])
   hiredAt        DateTime       @default(now())
+  /** Momentul informării GDPR (banner onboarding / profil angajat). */
+  gdprInformedAt DateTime?
+  /** User.id care a confirmat informarea (de obicei angajatul). */
+  gdprInformedBy String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   documents      Document[]

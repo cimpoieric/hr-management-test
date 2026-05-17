@@ -1,3 +1,4 @@
+import { logAudit } from "@/lib/audit";
 import { generatePayslipFromTimesheet } from "@/lib/payslipFromTimesheet";
 import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { ROLES_PAYROLL } from "@/lib/roles";
@@ -25,6 +26,16 @@ export async function POST(request: NextRequest) {
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
+    const { user } = planCheck;
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "GENERATE_PAYROLL",
+      resource: "Payroll",
+      resourceId: result.payslip?.id ?? parsed.data.timesheetId,
+      details: { timesheetId: parsed.data.timesheetId },
+      req: request,
+    });
     return NextResponse.json(result.payslip, { status: result.status });
   } catch (error) {
     console.error("[PAYSLIPS_GENERATE_POST]", error);

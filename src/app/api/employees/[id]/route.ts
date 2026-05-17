@@ -234,6 +234,33 @@ export async function GET(
     response.bankName =
       canSeeIban || canEditEmployee(user.role) ? employee.bankName : null;
 
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "VIEW_EMPLOYEE",
+      resource: "Employee",
+      resourceId: employeeId,
+      details: {
+        prismaScalars: Object.keys(employee).filter(
+          (k) => !["company", "country", "documents", "deployments"].includes(k),
+        ),
+        company: ["id", "name", "taxCode"],
+        country: ["id", "name", "code", "phoneCode"],
+        documents: ["id", "type", "fileName", "uploadedAt"],
+        deployments: [
+          "id",
+          "country",
+          "city",
+          "startDate",
+          "endDate",
+          "status",
+          "notes",
+        ],
+        responseFields: Object.keys(response),
+      },
+      req: request,
+    });
+
     return NextResponse.json(response, { status: 200 });
   } catch (error) {
     console.error("[EMPLOYEE_GET]", error);
@@ -446,6 +473,15 @@ export async function PUT(
       newValues: updateData,
     });
 
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "UPDATE_EMPLOYEE",
+      resource: "Employee",
+      resourceId: employeeId,
+      req: request,
+    });
+
     return NextResponse.json({
       id: updated.id,
       firstName: updated.firstName,
@@ -540,6 +576,16 @@ export async function DELETE(
       ipAddress: getClientIp(request),
       oldValues: { status: existing.status },
       newValues: { status: "TERMINATED" },
+    });
+
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "DELETE_EMPLOYEE",
+      resource: "Employee",
+      resourceId: employeeId,
+      details: { soft: true, status: "TERMINATED" },
+      req: request,
     });
 
     return NextResponse.json({

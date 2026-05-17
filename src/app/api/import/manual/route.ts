@@ -19,6 +19,7 @@ import { extractTextFromPDF } from "@/lib/parsers/pdfParser";
 import { canEditEmployee } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import path from "path";
+import { logAudit } from "@/lib/audit";
 import { type NextRequest, NextResponse } from "next/server";
 
 async function extractText(
@@ -111,6 +112,16 @@ export async function POST(request: NextRequest) {
         uncertainFields: JSON.stringify(uncertainFields),
         status: "PENDING",
       },
+    });
+
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "IMPORT_DATA",
+      resource: "PendingImport",
+      resourceId: pending.id,
+      details: { source: "MANUAL_UPLOAD", fileName: pending.fileName },
+      req: request,
     });
 
     return NextResponse.json(

@@ -186,14 +186,109 @@ export interface LogAuditOptions {
   userAgent?: string;
 }
 
+/** Parametri GDPR pentru `logAudit` (salvare directă în AuditLog). */
+export type AuditParams = {
+  userId?: string | null;
+  userEmail?: string | null;
+  action: string;
+  resource: string;
+  resourceId?: string | number | null;
+  firmId?: string | null;
+  details?: string | Record<string, unknown> | null;
+  req?: NextRequest | null;
+};
+
+function ipFromReq(req?: NextRequest | null): string {
+  if (!req) return "unknown";
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-real-ip") ??
+    "unknown"
+  );
+}
+
+function uaFromReq(req?: NextRequest | null): string | null {
+  return req?.headers.get("user-agent") ?? null;
+}
+
+function serializeAuditDetails(
+  details?: string | Record<string, unknown> | null,
+): string | null {
+  if (details == null) return null;
+  if (typeof details === "string") return details;
+  try {
+    return JSON.stringify(details);
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Loghează o acțiune în AuditLog.
- *
- * Fire-and-forget: nu blochează request-ul principal.
- * Completează automat userId, userName, userRole, ipAddress din context
- * dacă acesta e setat via setAuditContext().
+ * Înregistrează acțiunea în tabela AuditLog (Prisma).
+ * Nu aruncă erori — returnează false la eșec.
  */
-export async function logAudit(options: LogAuditOptions): Promise<void> {
+export async function logAudit(params: AuditParams): Promise<boolean>;
+
+/**
+ * @deprecated Preferă `AuditParams` cu `resource`. Păstrat pentru compatibilitate.
+ */
+export async function logAudit(options: LogAuditOptions): Promise<void>;
+
+export async function logAudit(
+  params: AuditParams | LogAuditOptions,
+): Promise<boolean | void> {
+  if ("resource" in params && typeof params.resource === "string") {
+    return logAuditEntry(params as AuditParams);
+  }
+  await logAuditFromLegacyOptions(params as LogAuditOptions);
+}
+
+async function logAuditEntry(params: AuditParams): Promise<boolean> {
+  try {
+    const { getTenantRequestContext } = await import("./tenantRequestStorage");
+    const firmId =
+      params.firmId?.trim() ||
+      getTenantRequestContext()?.organizationId ||
+      "__unauthenticated__";
+
+    let userId: string | null = null;
+    if (params.userId != null && String(params.userId).trim()) {
+      const id = String(params.userId).trim();
+      const row = await prismaBase.user.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      userId = row?.id ?? id;
+    }
+
+    const resourceId =
+      params.resourceId == null || params.resourceId === ""
+        ? null
+        : String(params.resourceId);
+
+    await prismaBase.auditLog.create({
+      data: {
+        action: params.action,
+        resource: params.resource,
+        resourceId,
+        firmId,
+        userId,
+        userEmail: params.userEmail ?? null,
+        details: serializeAuditDetails(params.details),
+        ipAddress: ipFromReq(params.req),
+        userAgent: uaFromReq(params.req),
+      },
+    });
+    return true;
+  } catch (error) {
+    console.error("[AUDIT_LOG]", error);
+    return false;
+  }
+}
+
+async function logAuditFromLegacyOptions(
+  options: LogAuditOptions,
+): Promise<void> {
   const ctx = auditStorage.getStore();
 
   const rawUserId = options.userId ?? ctx?.userId ?? null;

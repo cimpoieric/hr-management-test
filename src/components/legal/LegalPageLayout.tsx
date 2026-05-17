@@ -15,7 +15,7 @@ export function LegalPageLayout({ title, children }: LegalPageLayoutProps) {
             href="/"
             className="text-sm font-medium text-blue-950 hover:underline"
           >
-            Back to home
+            Înapoi la pagina principală
           </Link>
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             HR Management

@@ -40,6 +40,7 @@ const PUBLIC_PREFIXES = [
   "/privacy-policy",
   "/terms",
   "/gdpr",
+  "/dpa",
   "/api/auth/login",
   "/api/auth/register",
   "/api/auth/forgot-password",

@@ -18,6 +18,7 @@
 
 import { requireAuth } from "@/lib/auth";
 import { mapAuditLogToLegacy } from "@/lib/auditInsert";
+import { isSuperAdminRole } from "@/middleware/adminAccess";
 import { isJwtRoleIn, ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
@@ -40,6 +41,16 @@ const VALID_ACTIONS = [
   "BACKUP",
   "PASSWORD_CHANGE",
   "SETTINGS_CHANGE",
+  "CREATE_EMPLOYEE",
+  "UPDATE_EMPLOYEE",
+  "DELETE_EMPLOYEE",
+  "VIEW_EMPLOYEE",
+  "GENERATE_PAYROLL",
+  "GENERATE_REPORT",
+  "DOWNLOAD_DOCUMENT",
+  "UPLOAD_DOCUMENT",
+  "IMPORT_DATA",
+  "REGISTER_ORGANIZATION",
 ];
 
 const VALID_ENTITIES = [
@@ -51,6 +62,8 @@ const VALID_ENTITIES = [
   "System",
   "PendingImport",
   "Company",
+  "Organization",
+  "Payroll",
 ];
 
 // ─── Helper: parse date ──────────────────────────────────────────────────────
@@ -90,11 +103,15 @@ export async function GET(request: NextRequest) {
     const action = searchParams.get("action");
     const dateFrom = searchParams.get("dateFrom");
     const dateTo = searchParams.get("dateTo");
+    const filterFirmId = searchParams.get("firmId");
 
     // ── Build where ──
-    const where: Record<string, unknown> = {
-      firmId: user.organizationId,
-    };
+    const where: Record<string, unknown> = {};
+    if (isSuperAdminRole(user.role)) {
+      if (filterFirmId) where.firmId = filterFirmId;
+    } else {
+      where.firmId = user.organizationId;
+    }
 
     // RBAC: non-admin vede doar logurile proprii
     if (!isJwtRoleIn(user, ROLES_SETTINGS_ADMIN)) {

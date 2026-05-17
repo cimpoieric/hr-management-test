@@ -37,6 +37,7 @@ export default function RegisterPage() {
 
   const [planId, setPlanId] = useState<PricingPlanId | null>(null);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
+  const [agreedToDpa, setAgreedToDpa] = useState(false);
 
   function validateStep1(): boolean {
     if (!companyName.trim()) {
@@ -82,6 +83,12 @@ export default function RegisterPage() {
       toast.error("You must accept the Terms and Privacy Policy.");
       return false;
     }
+    if (!agreedToDpa) {
+      toast.error(
+        "You must accept the Data Processing Agreement (DPA) and Privacy Policy.",
+      );
+      return false;
+    }
     return true;
   }
 
@@ -116,6 +123,7 @@ export default function RegisterPage() {
           confirmPassword,
           planId,
           agreedToTerms,
+          agreedToDpa,
         }),
       });
 
@@ -391,6 +399,36 @@ export default function RegisterPage() {
                 <input
                   type="checkbox"
                   className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-950"
+                  checked={agreedToDpa}
+                  onChange={(e) => setAgreedToDpa(e.target.checked)}
+                  required
+                />
+                <span>
+                  Sunt de acord cu{" "}
+                  <Link
+                    href="/dpa"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-blue-950 underline"
+                  >
+                    Acordul de Prelucrare a Datelor (DPA)
+                  </Link>{" "}
+                  si{" "}
+                  <Link
+                    href="/privacy-policy"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-medium text-blue-950 underline"
+                  >
+                    Politica de Confidentialitate
+                  </Link>
+                  .
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-950"
                   checked={agreedToTerms}
                   onChange={(e) => setAgreedToTerms(e.target.checked)}
                 />
@@ -399,17 +437,10 @@ export default function RegisterPage() {
                   <Link
                     href="/terms"
                     target="_blank"
+                    rel="noopener noreferrer"
                     className="font-medium text-blue-950 underline"
                   >
                     Terms
-                  </Link>{" "}
-                  and{" "}
-                  <Link
-                    href="/privacy"
-                    target="_blank"
-                    className="font-medium text-blue-950 underline"
-                  >
-                    Privacy Policy
                   </Link>
                   .
                 </span>

@@ -9,6 +9,7 @@ import { requireAuth, requireRole } from "@/lib/auth";
 import { ROLES_EMPLOYEES_RW } from "@/lib/roles";
 import { triggerManualImport } from "@/lib/cron";
 import { canEditEmployee } from "@/lib/permissions";
+import { logAudit } from "@/lib/audit";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function POST(request: NextRequest) {
@@ -23,6 +24,14 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await triggerManualImport();
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "IMPORT_DATA",
+      resource: "System",
+      details: { source: "EMAIL_TRIGGER" },
+      req: request,
+    });
     return NextResponse.json(result, { status: 200 });
   } catch (error) {
     console.error("[EMAIL_TRIGGER]", error);

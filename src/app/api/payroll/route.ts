@@ -3,6 +3,7 @@ import { checkPlan, FEATURES } from "@/lib/middleware/plan-check";
 import { ROLES_PAYROLL } from "@/lib/roles";
 import { prismaTyped as prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { logAudit } from "@/lib/audit";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -133,6 +134,16 @@ export async function POST(request: NextRequest) {
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: result.status });
     }
+    const { user } = planCheck;
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "GENERATE_PAYROLL",
+      resource: "Payroll",
+      resourceId: result.payslip?.id ?? timesheetId,
+      details: { timesheetId },
+      req: request,
+    });
     return NextResponse.json(result.payslip, { status: result.status });
   } catch (error) {
     console.error("[PAYSLIPS_POST]", error);

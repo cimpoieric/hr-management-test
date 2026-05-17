@@ -32,6 +32,7 @@
     "test": "vitest",
     "test:e2e": "playwright test",
     "stripe:create-catalog": "tsx scripts/stripe-create-catalog.ts",
+    "wipe:storage": "tsx scripts/wipe-storage.ts",
     "subset-pdf-fonts": "node scripts/subset-pdf-fonts.mjs",
     "restructure-api": "node scripts/restructure-api.mjs",
     "electron": "electron .",

@@ -815,7 +815,7 @@ export async function POST(request: NextRequest) {
     );
 
     await logAudit(
-      "CREATE",
+      "CREATE_EMPLOYEE",
       "Employee",
       employee.id,
       data,

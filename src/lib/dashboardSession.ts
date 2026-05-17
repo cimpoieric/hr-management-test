@@ -36,6 +36,15 @@ export async function requireSuperAdminSession(): Promise<AuthContext> {
 
 export const requireSuperAdmin = requireSuperAdminSession;
 
+/** Audit logs UI: SUPER_ADMIN (global) sau ORG_ADMIN (firmă proprie). */
+export async function requireAuditLogsViewer(): Promise<AuthContext> {
+  const session = await requireDashboardSession();
+  guardDashboardRoles(session, [UserRole.SUPER_ADMIN, UserRole.ORG_ADMIN], {
+    superAdminBypass: false,
+  });
+  return session;
+}
+
 export function guardDashboardRoles(
   session: AuthContext,
   allowed: UserRole[],

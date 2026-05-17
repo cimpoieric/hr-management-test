@@ -538,6 +538,14 @@ export function LandingView({
                   Drepturi GDPR
                 </Link>
               </li>
+              <li>
+                <Link
+                  href="/dpa"
+                  className="text-slate-600 hover:text-blue-950"
+                >
+                  DPA
+                </Link>
+              </li>
             </ul>
           </div>
         </div>

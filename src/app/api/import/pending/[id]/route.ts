@@ -4,7 +4,7 @@
  * DELETE /api/import/pending/[id]  — Respingere: șterge record + mută fișier
  */
 
-import { createSafeAuditLog } from "@/lib/audit";
+import { createSafeAuditLog, logAudit } from "@/lib/audit";
 import { readImportFile } from "@/lib/importStorage";
 import { checkCanAddEmployees, checkPlan } from "@/lib/middleware/plan-check";
 import { requireAuth, requireRole } from "@/lib/auth";
@@ -401,6 +401,16 @@ export async function POST(
         importId,
         documentStored: true,
       }),
+    });
+
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "IMPORT_DATA",
+      resource: "PendingImport",
+      resourceId: importId,
+      details: { action: "APPROVE", employeeId: employee.id },
+      req: request,
     });
 
     return NextResponse.json(

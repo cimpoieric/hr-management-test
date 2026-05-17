@@ -22,6 +22,7 @@ import {
   isValidDocumentType,
   saveFile,
 } from "@/lib/storage";
+import { logAudit } from "@/lib/audit";
 import { type NextRequest, NextResponse } from "next/server";
 
 function parsePositiveIntFormValue(raw: unknown): number | null {
@@ -217,6 +218,16 @@ export async function POST(request: NextRequest) {
         fileName: file.name,
         status,
       }),
+    });
+
+    void logAudit({
+      userId: user.userId,
+      userEmail: user.email,
+      action: "UPLOAD_DOCUMENT",
+      resource: "Document",
+      resourceId: document.id,
+      details: { type, employeeId, fileName: file.name },
+      req: request,
     });
 
     return NextResponse.json(
