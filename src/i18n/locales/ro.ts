@@ -1353,6 +1353,9 @@ const ro = {
       lblBankAccount: "Cont bancar (IBAN)",
       lblBankName: "Banc\u0103",
       lblAddress: "Adres\u0103",
+      lblCountry: "\u021aara (sediu)",
+      hintCountry:
+        "\u021aara sediului firmei, folosit\u0103 la compararea deta\u0219\u0103rilor.",
       hintCompanyName: "Numele legal al companiei, afi\u0219at pe rapoarte \u0219i documente.",
       hintCuiTaxId: "Cod unic de \u00eenregistrare fiscal\u0103 (ex. RO123456).",
       hintAdminName: "Numele complet al reprezentantului legal.",

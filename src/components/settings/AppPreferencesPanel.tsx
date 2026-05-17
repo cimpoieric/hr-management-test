@@ -26,6 +26,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 const fieldInputClass =
   "w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-slate-950";
 
+type CountryOpt = { id: number; name: string; code: string };
+
 function SettingsField({
   id,
   label,
@@ -66,11 +68,13 @@ export function AppPreferencesPanel() {
   const [importingDb, setImportingDb] = useState(false);
   const dbInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [countries, setCountries] = useState<CountryOpt[]>([]);
 
   const [form, setForm] = useState({
     companyName: "",
     companyCuiReg: "",
     companyAddress: "",
+    companyCountryId: "",
     legalRepName: "",
     legalRepRole: "",
     companyIban: "",
@@ -106,6 +110,13 @@ export function AppPreferencesPanel() {
   }, [checkLogo]);
 
   useEffect(() => {
+    fetch("/api/organization/countries", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed"))))
+      .then((data) => setCountries(data.countries ?? []))
+      .catch(() => setCountries([]));
+  }, []);
+
+  useEffect(() => {
     fetch("/api/settings")
       .then((res) =>
         res.ok ? res.json() : Promise.reject(new Error("Failed")),
@@ -115,6 +126,10 @@ export function AppPreferencesPanel() {
           companyName: data.companyName ?? "",
           companyCuiReg: data.companyCuiReg ?? "",
           companyAddress: data.companyAddress ?? "",
+          companyCountryId:
+            data.companyCountryId != null && data.companyCountryId !== ""
+              ? String(data.companyCountryId)
+              : "",
           legalRepName: data.legalRepName ?? "",
           legalRepRole: data.legalRepRole ?? "",
           companyIban: data.companyIban ?? "",
@@ -542,6 +557,28 @@ export function AppPreferencesPanel() {
                   rows={2}
                   disabled={!canWrite}
                 />
+              </SettingsField>
+              <SettingsField
+                id="settings-company-country"
+                label={t("components.appPreferences.lblCountry")}
+                hint={t("components.appPreferences.hintCountry")}
+              >
+                <select
+                  id="settings-company-country"
+                  value={form.companyCountryId}
+                  onChange={(e) =>
+                    setField("companyCountryId", e.target.value)
+                  }
+                  className={fieldInputClass}
+                  disabled={!canWrite}
+                >
+                  <option value="">—</option>
+                  {countries.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.code})
+                    </option>
+                  ))}
+                </select>
               </SettingsField>
             </div>
           </div>

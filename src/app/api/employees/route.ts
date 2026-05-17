@@ -20,6 +20,7 @@ import {
   isEmployeeMarkedDetached,
 } from "@/lib/detachedEmployee";
 import { incrementOrganizationEmployeeCount } from "@/lib/organizationPlan";
+import { syncEmployeeDeploymentByCountry } from "@/lib/syncEmployeeDeploymentByCountry";
 import { checkCanAddEmployees } from "@/lib/middleware/plan-check";
 import {
   parseSalaryAmountDecimal,
@@ -821,6 +822,21 @@ export async function POST(request: NextRequest) {
       data,
       getClientIp(request),
     );
+
+    try {
+      await syncEmployeeDeploymentByCountry({
+        employeeId: employee.id,
+        companyId: data.companyId,
+        countryId: employee.countryId,
+        hiredAt: employee.hiredAt,
+        city: employee.city,
+      });
+    } catch (deploymentSyncError) {
+      console.error(
+        "[EMPLOYEES_POST] deployment auto-create failed",
+        deploymentSyncError,
+      );
+    }
 
     return NextResponse.json(
       {

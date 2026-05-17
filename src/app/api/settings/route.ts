@@ -9,11 +9,19 @@ import { requireRole } from "@/lib/auth";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { type NextRequest, NextResponse } from "next/server";
 
+function parseCompanyCountryId(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
+}
+
 function normalizeIncoming(body: Partial<AppSettings>): AppSettings {
   return {
     companyName: (body.companyName ?? "").trim(),
     companyCuiReg: (body.companyCuiReg ?? "").trim(),
     companyAddress: (body.companyAddress ?? "").trim(),
+    companyCountryId: parseCompanyCountryId(body.companyCountryId),
     legalRepName: (body.legalRepName ?? "").trim(),
     legalRepRole: (body.legalRepRole ?? "").trim(),
     companyIban: (body.companyIban ?? "").trim(),

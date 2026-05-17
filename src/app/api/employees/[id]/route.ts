@@ -18,6 +18,7 @@ import {
   canViewSensitiveData,
 } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { syncEmployeeDeploymentByCountry } from "@/lib/syncEmployeeDeploymentByCountry";
 import {
   parseSalaryAmountDecimal,
   parseSalaryTypeInput,
@@ -481,6 +482,21 @@ export async function PUT(
       resourceId: employeeId,
       req: request,
     });
+
+    try {
+      await syncEmployeeDeploymentByCountry({
+        employeeId: updated.id,
+        companyId: updated.companyId,
+        countryId: updated.countryId,
+        hiredAt: updated.hiredAt,
+        city: updated.city,
+      });
+    } catch (deploymentSyncError) {
+      console.error(
+        "[EMPLOYEE_PUT] deployment auto-sync failed",
+        deploymentSyncError,
+      );
+    }
 
     return NextResponse.json({
       id: updated.id,

@@ -1316,6 +1316,8 @@ const en = {
       lblBankAccount: "Bank account (IBAN)",
       lblBankName: "Bank name",
       lblAddress: "Address",
+      lblCountry: "Country (HQ)",
+      hintCountry: "Company headquarters country used for deployment checks.",
       hintCompanyName:
         "Legal company name shown on reports and exported documents.",
       hintCuiTaxId: "Tax identification or trade register number (e.g. RO123456).",
