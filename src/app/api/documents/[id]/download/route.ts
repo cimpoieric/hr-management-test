@@ -1,18 +1,20 @@
 /**
  * GET /api/documents/[id]/download
  *
- * Returnează fișierul ca stream cu headers corecte.
+ * Returnează fișierul ca stream (local sau R2/S3).
  * Verifică acces: user autentificat.
- * Niciodată nu expune calea absolută.
  */
 
-import { createReadStream } from "fs";
-import path from "path";
 import { logAudit } from "@/lib/audit";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { fileExists, getMimeType, resolveAbsolutePath } from "@/lib/storage";
-import { stat } from "fs/promises";
+import { isS3ObjectStorageEnabled } from "@/lib/s3ObjectStorage";
+import {
+  createReadStream,
+  fileExists,
+  getFileSize,
+  getMimeType,
+} from "@/lib/storage";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(
@@ -24,6 +26,13 @@ export async function GET(
     return (
       authError ??
       NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
+  }
+
+  if (process.env.VERCEL === "1" && !isS3ObjectStorageEnabled()) {
+    return NextResponse.json(
+      { error: "Storage not configured" },
+      { status: 500 },
     );
   }
 
@@ -46,24 +55,20 @@ export async function GET(
     });
 
     if (!document) {
-      return NextResponse.json({ error: "Document negăsit" }, { status: 404 });
+      return NextResponse.json({ error: "Document negasit" }, { status: 404 });
     }
 
-    // Verifică existența fișierului
     const exists = await fileExists(document.storagePath);
     if (!exists) {
       return NextResponse.json(
-        { error: "Fișier negăsit pe disk" },
+        { error: "Fisier negasit in stocare" },
         { status: 404 },
       );
     }
 
-    const absolutePath = resolveAbsolutePath(document.storagePath);
-    const fileStat = await stat(absolutePath);
     const mimeType = document.mimeType || getMimeType(document.fileName);
-
-    // Stream pentru fișiere mari (>10MB)
-    const stream = createReadStream(absolutePath);
+    const stream = await createReadStream(document.storagePath);
+    const fileSize = await getFileSize(document.storagePath);
 
     void logAudit({
       userId: user.userId,
@@ -79,13 +84,18 @@ export async function GET(
       status: 200,
       headers: {
         "Content-Type": mimeType,
-        "Content-Length": String(fileStat.size),
+        "Content-Length": String(fileSize),
         "Content-Disposition": `attachment; filename="${encodeURIComponent(document.fileName)}"`,
         "Cache-Control": "private, max-age=3600",
       },
     });
   } catch (error) {
     console.error("[DOCUMENT_DOWNLOAD]", error);
+    const message =
+      error instanceof Error ? error.message : "Eroare la descarcare";
+    if (message.includes("S3") || message.includes("configured")) {
+      return NextResponse.json({ error: "Storage not configured" }, { status: 500 });
+    }
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });
   }
 }

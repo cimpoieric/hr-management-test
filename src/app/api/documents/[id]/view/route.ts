@@ -4,11 +4,15 @@
  * Stream fișier cu Content-Disposition: inline (preview în iframe / tab).
  */
 
-import { createReadStream } from "fs";
 import { requireAuth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { fileExists, getMimeType, resolveAbsolutePath } from "@/lib/storage";
-import { stat } from "fs/promises";
+import { isS3ObjectStorageEnabled } from "@/lib/s3ObjectStorage";
+import {
+  createReadStream,
+  fileExists,
+  getFileSize,
+  getMimeType,
+} from "@/lib/storage";
 import { type NextRequest, NextResponse } from "next/server";
 
 export async function GET(
@@ -20,6 +24,13 @@ export async function GET(
     return (
       authError ??
       NextResponse.json({ error: "Neautentificat" }, { status: 401 })
+    );
+  }
+
+  if (process.env.VERCEL === "1" && !isS3ObjectStorageEnabled()) {
+    return NextResponse.json(
+      { error: "Storage not configured" },
+      { status: 500 },
     );
   }
 
@@ -42,34 +53,38 @@ export async function GET(
     });
 
     if (!document) {
-      return NextResponse.json({ error: "Document negăsit" }, { status: 404 });
+      return NextResponse.json({ error: "Document negasit" }, { status: 404 });
     }
 
     const exists = await fileExists(document.storagePath);
     if (!exists) {
       return NextResponse.json(
-        { error: "Fișier negăsit pe disk" },
+        { error: "Fisier negasit in stocare" },
         { status: 404 },
       );
     }
 
-    const absolutePath = resolveAbsolutePath(document.storagePath);
-    const fileStat = await stat(absolutePath);
     const mimeType = document.mimeType || getMimeType(document.fileName);
-    const stream = createReadStream(absolutePath);
+    const stream = await createReadStream(document.storagePath);
+    const fileSize = await getFileSize(document.storagePath);
     const safeName = encodeURIComponent(document.fileName);
 
     return new NextResponse(stream as unknown as ReadableStream, {
       status: 200,
       headers: {
         "Content-Type": mimeType,
-        "Content-Length": String(fileStat.size),
+        "Content-Length": String(fileSize),
         "Content-Disposition": `inline; filename*=UTF-8''${safeName}`,
         "Cache-Control": "private, no-store",
       },
     });
   } catch (error) {
     console.error("[DOCUMENT_VIEW]", error);
+    const message =
+      error instanceof Error ? error.message : "Eroare la vizualizare";
+    if (message.includes("S3") || message.includes("configured")) {
+      return NextResponse.json({ error: "Storage not configured" }, { status: 500 });
+    }
     return NextResponse.json({ error: "Eroare server" }, { status: 500 });
   }
 }
