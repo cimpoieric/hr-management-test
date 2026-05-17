@@ -283,6 +283,12 @@ export const SUPER_ADMIN_SIDEBAR_ROUTE_DEFS: SidebarRouteDef[] = [
     showAdminBadge: true,
   },
   {
+    href: ROUTES.adminOrganizationsCreate,
+    i18nKey: "nav.addOrganization",
+    icon: Factory,
+    showAdminBadge: true,
+  },
+  {
     href: ROUTES.adminUsers,
     i18nKey: "nav.users",
     icon: Shield,

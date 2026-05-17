@@ -107,6 +107,7 @@ const ro = {
     profile: "Profil",
     logout: "Deconectare",
     companies: "Firme",
+    addOrganization: "Adaug\u0103 organiza\u021bie",
     countries: "\u021b\u0103ri",
     users: "Utilizatori",
     backup: "Backup",

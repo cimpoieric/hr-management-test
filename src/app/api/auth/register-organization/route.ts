@@ -1,16 +1,9 @@
-import { generateToken, hashPassword, setAuthCookie } from "@/lib/auth";
-import { createDefaultOrganizationSettings } from "@/lib/organizationSettings";
-import { resolveUniqueOrganizationSlug } from "@/lib/organizationSlug";
-import {
-  defaultTrialEndsAt,
-  ensurePlansExist,
-  resolvePlanIdByKey,
-} from "@/lib/planCatalog";
-import { prismaBase as prisma } from "@/lib/prisma";
-import type { PricingPlanId } from "@/lib/pricingPlans";
+import { generateToken, setAuthCookie } from "@/lib/auth";
+import { createOrganizationWithAdminUser } from "@/lib/organizationCreate";
 import { logAudit } from "@/lib/audit";
+import type { PricingPlanId } from "@/lib/pricingPlans";
+import { prismaBase as prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
-import { Prisma, UserRole } from "@prisma/client";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -45,12 +38,6 @@ const bodySchema = z
     path: ["confirmPassword"],
   });
 
-function emptyToNull(s: string | null | undefined): string | null {
-  if (s == null) return null;
-  const t = s.trim();
-  return t === "" ? null : t;
-}
-
 export async function POST(request: NextRequest) {
   try {
     const json = await request.json();
@@ -65,62 +52,35 @@ export async function POST(request: NextRequest) {
     const d = parsed.data;
     const planKey = d.planId as PricingPlanId;
     const adminEmail = d.adminEmail.toLowerCase().trim();
-    const companyEmail = d.companyEmail.toLowerCase().trim();
 
-    const existing = await prisma.user.findUnique({
-      where: { email: adminEmail },
-      select: { id: true },
-    });
-    if (existing) {
-      return NextResponse.json(
-        { error: "An account with this admin email already exists." },
-        { status: 409 },
-      );
-    }
-
-    const slug = await resolveUniqueOrganizationSlug(d.companyName);
-    const passwordHash = await hashPassword(d.password);
-
-    await ensurePlansExist(prisma);
-    const resolvedPlanId = await resolvePlanIdByKey(prisma, planKey);
-
-    const orgData: Prisma.OrganizationUncheckedCreateInput = {
-      name: d.companyName.trim(),
-      slug,
-      cui: emptyToNull(d.companyCui),
-      address: emptyToNull(d.companyAddress),
-      phone: emptyToNull(d.companyPhone),
-      email: companyEmail,
-      planId: resolvedPlanId,
-      employeeCount: 0,
-      subscriptionStatus: "trial",
-      status: "trial",
-      trialEndsAt: defaultTrialEndsAt(),
-      dpaAcceptedAt: new Date(),
-      dpaAcceptedBy: adminEmail,
-    };
-
-    const org = await prisma.organization.create({ data: orgData });
-
-    await createDefaultOrganizationSettings(org.id, prisma);
-
-    let user;
+    let created;
     try {
-      user = await prisma.user.create({
-        data: {
-          email: adminEmail,
-          name: d.adminName.trim(),
-          password: passwordHash,
-          role: UserRole.ORG_ADMIN,
-          organizationId: org.id,
-          isActive: true,
-          mustChangePassword: false,
-        },
+      created = await createOrganizationWithAdminUser({
+        companyName: d.companyName,
+        adminEmail,
+        adminName: d.adminName,
+        password: d.password,
+        planKey,
+        companyEmail: d.companyEmail,
+        companyCui: d.companyCui,
+        companyAddress: d.companyAddress,
+        companyPhone: d.companyPhone,
+        startAsActive: false,
+        dpaAcceptedBy: adminEmail,
       });
-    } catch (e) {
-      await prisma.organization.delete({ where: { id: org.id } });
-      throw e;
+    } catch (error) {
+      if (error instanceof Error && error.message === "EMAIL_EXISTS") {
+        return NextResponse.json(
+          { error: "An account with this admin email already exists." },
+          { status: 409 },
+        );
+      }
+      throw error;
     }
+
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { id: created.userId },
+    });
 
     const token = await generateToken(
       user.id,
@@ -140,9 +100,9 @@ export async function POST(request: NextRequest) {
       userEmail: user.email,
       action: "REGISTER_ORGANIZATION",
       resource: "Organization",
-      resourceId: org.id,
-      firmId: org.id,
-      details: { companyName: org.name, planKey },
+      resourceId: created.organizationId,
+      firmId: created.organizationId,
+      details: { companyName: d.companyName.trim(), planKey },
       req: request,
     });
 

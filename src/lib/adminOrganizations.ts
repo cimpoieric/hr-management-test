@@ -3,11 +3,13 @@ import "server-only";
 import type { NextRequest } from "next/server";
 import { getClientIp, logAuditFF } from "@/lib/audit";
 import type { AuthContext } from "@/lib/auth";
+import { createOrganizationWithAdminUser } from "@/lib/organizationCreate";
 import {
   getOrganizationPlanKey,
   organizationPlanSelect,
   resolvePlanIdByKey,
 } from "@/lib/organizationPlan";
+import { ensurePlansExist } from "@/lib/planCatalog";
 import { PLAN_NAME_BY_KEY } from "@/lib/planCatalog";
 import type { PricingPlanId } from "@/lib/pricingPlans";
 import { prismaBase as prisma } from "@/lib/prisma";
@@ -43,6 +45,16 @@ export const organizationUpdateSchema = z.object({
   featuresOverride: z.string().nullable().optional(),
   employeeCount: z.number().int().min(0).optional(),
   email: z.string().email().nullable().optional(),
+});
+
+export const organizationCreateSchema = z.object({
+  companyName: z.string().min(1, "Company name is required").max(200),
+  adminName: z.string().min(1).max(200).optional(),
+  adminEmail: z.string().email("Invalid admin email"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+  plan: z.enum(["starter", "business", "enterprise", "custom"]),
+  companyEmail: z.string().email().optional(),
+  startAsActive: z.boolean().optional(),
 });
 
 export const organizationPlanStatusUpdateSchema = z
@@ -134,6 +146,8 @@ export type AdminOrganizationListFilters = {
 export async function listAdminOrganizations(
   filters: AdminOrganizationListFilters = {},
 ): Promise<OrganizationListRow[]> {
+  await ensurePlansExist(prisma);
+
   const search = filters.search?.trim() ?? "";
   const status = filters.status?.trim() ?? "";
   const plan = filters.plan?.trim() ?? "";
@@ -161,6 +175,30 @@ export async function listAdminOrganizations(
   });
 
   return organizations.map(mapOrganizationListRow);
+}
+
+export type AdminOrganizationCreateInput = z.infer<
+  typeof organizationCreateSchema
+>;
+
+export async function createAdminOrganization(
+  data: AdminOrganizationCreateInput,
+): Promise<OrganizationDetail> {
+  const result = await createOrganizationWithAdminUser({
+    companyName: data.companyName,
+    adminEmail: data.adminEmail,
+    adminName: data.adminName ?? data.adminEmail.split("@")[0] ?? "Admin",
+    password: data.password,
+    planKey: data.plan,
+    companyEmail: data.companyEmail ?? data.adminEmail,
+    startAsActive: data.startAsActive ?? true,
+  });
+
+  const detail = await getOrganizationDetail(result.organizationId);
+  if (!detail) {
+    throw new Error("Organization was created but could not be loaded");
+  }
+  return detail;
 }
 
 export async function getOrganizationDetail(

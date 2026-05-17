@@ -26,6 +26,7 @@ export const ROUTES = {
   backup: "/backup",
   admin: "/admin",
   adminCompanies: "/admin/companies",
+  adminOrganizationsCreate: "/admin/organizations/create",
   adminUsers: "/admin/users",
   adminCountries: "/admin/countries",
   adminBackup: "/admin/backup",

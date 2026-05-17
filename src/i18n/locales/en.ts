@@ -103,6 +103,7 @@ const en = {
     profile: "Profile",
     logout: "Log out",
     companies: "Companies",
+    addOrganization: "Add organization",
     countries: "Countries",
     users: "Users",
     backup: "Backup",

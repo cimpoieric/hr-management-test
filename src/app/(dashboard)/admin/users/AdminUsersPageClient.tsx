@@ -27,7 +27,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { UserRole } from "@/lib/roles";
-import { Loader2 } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 type UserRow = {
@@ -78,20 +79,22 @@ export default function AdminUsersPage() {
         fetch("/api/admin/organizations", { cache: "no-store" }),
       ]);
       if (!usersResponse.ok) throw new Error("Could not load users");
-      if (!organizationsResponse.ok) {
-        throw new Error("Could not load organizations");
-      }
       const usersPayload = await usersResponse.json();
-      const organizationsPayload = await organizationsResponse.json();
       setRows(usersPayload.users ?? []);
-      setOrganizations(
-        (organizationsPayload.organizations ?? []).map(
-          (organization: { id: string; name: string }) => ({
-            id: organization.id,
-            name: organization.name,
-          }),
-        ),
-      );
+
+      if (organizationsResponse.ok) {
+        const organizationsPayload = await organizationsResponse.json();
+        setOrganizations(
+          (organizationsPayload.organizations ?? []).map(
+            (organization: { id: string; name: string }) => ({
+              id: organization.id,
+              name: organization.name,
+            }),
+          ),
+        );
+      } else {
+        setOrganizations([]);
+      }
     } catch (loadError) {
       setError(
         loadError instanceof Error ? loadError.message : "Unexpected error",
@@ -148,10 +151,18 @@ export default function AdminUsersPage() {
 
   return (
     <div className="max-w-7xl space-y-6">
-      <AdminPageHeader
-        title="Users"
-        description="All users across every organization."
-      />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <AdminPageHeader
+          title="Users"
+          description="All users across every organization."
+        />
+        <Button asChild className="shrink-0 self-start">
+          <Link href="/admin/organizations/create">
+            <Plus className="mr-2 h-4 w-4" />
+            Adauga organizatie
+          </Link>
+        </Button>
+      </div>
 
       <div className="grid gap-3 md:grid-cols-3">
         <Input
