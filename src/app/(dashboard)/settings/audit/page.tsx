@@ -27,7 +27,7 @@ import { UserRole } from "@/lib/roles";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface AuditLog {
-  id: number;
+  id: string;
   action: string;
   entity: string;
   entityId: number | null;
@@ -103,7 +103,7 @@ export default function AuditLogPage() {
   const [page, setPage] = useState(1);
   const [limit] = useState(50);
   const [error, setError] = useState("");
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
 
   const [filters, setFilters] = useState<AuditFilters>({
@@ -188,7 +188,7 @@ export default function AuditLogPage() {
     }
   }
 
-  function toggleExpand(id: number) {
+  function toggleExpand(id: string) {
     setExpandedId((prev) => (prev === id ? null : id));
   }
 

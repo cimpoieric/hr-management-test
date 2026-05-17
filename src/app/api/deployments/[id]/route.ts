@@ -22,20 +22,15 @@ async function logAudit(
   newValues?: unknown,
   ipAddress?: string,
 ) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        action,
-        entity: "Deployment",
-        entityId,
-        oldValues: oldValues ? JSON.stringify(oldValues) : null,
-        newValues: newValues ? JSON.stringify(newValues) : null,
-        ipAddress: ipAddress ?? null,
-      },
-    });
-  } catch (e) {
-    console.error("[AUDIT_LOG]", e);
-  }
+  const { createSafeAuditLog } = await import("@/lib/auditInsert");
+  void createSafeAuditLog({
+    action,
+    entity: "Deployment",
+    entityId,
+    oldValues: oldValues ? JSON.stringify(oldValues) : null,
+    newValues: newValues ? JSON.stringify(newValues) : null,
+    ipAddress: ipAddress ?? null,
+  });
 }
 
 function getClientIp(request: NextRequest): string {

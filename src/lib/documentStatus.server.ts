@@ -27,6 +27,7 @@ export async function updateDocumentStatuses(): Promise<{
       status: true,
       expiryDate: true,
       employeeId: true,
+      organizationId: true,
       type: true,
     },
   });
@@ -49,20 +50,20 @@ export async function updateDocumentStatuses(): Promise<{
       if (newStatus === "EXPIRED") {
         expired++;
         // Loghează în AuditLog
-        await prisma.auditLog.create({
-          data: {
-            action: "STATUS_CHANGE",
-            entity: "Document",
-            entityId: doc.employeeId,
-            oldValues: JSON.stringify({
-              documentId: doc.id,
-              status: doc.status,
-            }),
-            newValues: JSON.stringify({
-              documentId: doc.id,
-              status: "EXPIRED",
-            }),
-          },
+        const { createSafeAuditLog } = await import("./auditInsert");
+        void createSafeAuditLog({
+          action: "STATUS_CHANGE",
+          entity: "Document",
+          entityId: doc.employeeId,
+          firmId: doc.organizationId,
+          oldValues: JSON.stringify({
+            documentId: doc.id,
+            status: doc.status,
+          }),
+          newValues: JSON.stringify({
+            documentId: doc.id,
+            status: "EXPIRED",
+          }),
         });
       }
 

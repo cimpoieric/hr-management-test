@@ -205,20 +205,18 @@ export async function POST(request: NextRequest) {
 
     // ─── Audit log ───────────────────────────────────────────────
 
-    // `AuditLog.entityId` → FK către `Employee.id` (nu ID document).
-    await prisma.auditLog.create({
-      data: {
-        action: "CREATE",
-        entity: "Document",
-        entityId: employeeId,
-        newValues: JSON.stringify({
-          documentId: document.id,
-          type,
-          employeeId,
-          fileName: file.name,
-          status,
-        }),
-      },
+    const { createSafeAuditLog } = await import("@/lib/auditInsert");
+    void createSafeAuditLog({
+      action: "CREATE",
+      entity: "Document",
+      entityId: employeeId,
+      newValues: JSON.stringify({
+        documentId: document.id,
+        type,
+        employeeId,
+        fileName: file.name,
+        status,
+      }),
     });
 
     return NextResponse.json(

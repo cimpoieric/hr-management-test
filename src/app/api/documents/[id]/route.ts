@@ -80,19 +80,18 @@ export async function DELETE(
       data: { deletedAt: new Date() },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        action: "DELETE",
-        entity: "Document",
-        entityId: document.employeeId,
-        oldValues: JSON.stringify({
-          documentId,
-          fileName: document.fileName,
-          type: document.type,
-          employeeId: document.employeeId,
-          status: document.status,
-        }),
-      },
+    const { createSafeAuditLog } = await import("@/lib/auditInsert");
+    void createSafeAuditLog({
+      action: "DELETE",
+      entity: "Document",
+      entityId: document.employeeId,
+      oldValues: JSON.stringify({
+        documentId,
+        fileName: document.fileName,
+        type: document.type,
+        employeeId: document.employeeId,
+        status: document.status,
+      }),
     });
 
     return NextResponse.json(

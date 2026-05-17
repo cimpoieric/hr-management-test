@@ -7,6 +7,7 @@
  * Doar ADMIN poate exporta.
  */
 
+import { createSafeAuditLog, mapAuditLogToLegacy } from "@/lib/auditInsert";
 import { requireRole } from "@/lib/auth";
 import { ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
@@ -65,13 +66,15 @@ export async function GET(request: NextRequest) {
     const dateTo = searchParams.get("dateTo");
 
     // ── Build where ──
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = {
+      firmId: user.organizationId,
+    };
 
     if (filterUserId) {
-      where.userId = Number.parseInt(filterUserId, 10);
+      where.userId = filterUserId;
     }
     if (entityType && VALID_ENTITIES.includes(entityType)) {
-      where.entity = entityType;
+      where.resource = entityType;
     }
     if (action && VALID_ACTIONS.includes(action)) {
       where.action = action;
@@ -102,13 +105,11 @@ export async function GET(request: NextRequest) {
       select: {
         id: true,
         action: true,
-        entity: true,
-        entityId: true,
+        resource: true,
+        resourceId: true,
         userId: true,
-        userName: true,
-        userRole: true,
-        oldValues: true,
-        newValues: true,
+        userEmail: true,
+        details: true,
         ipAddress: true,
         userAgent: true,
         createdAt: true,
@@ -130,18 +131,21 @@ export async function GET(request: NextRequest) {
       "New Values",
     ];
 
-    const rows = logs.map((log) => [
-      log.id,
-      log.createdAt.toISOString(),
-      log.userName ?? "System",
-      log.userRole ?? "—",
-      log.action,
-      log.entity,
-      log.entityId ?? "—",
-      log.ipAddress ?? "—",
-      log.oldValues ?? "",
-      log.newValues ?? "",
-    ]);
+    const rows = logs.map((log) => {
+      const legacy = mapAuditLogToLegacy(log);
+      return [
+        legacy.id,
+        log.createdAt.toISOString(),
+        legacy.userName ?? "System",
+        legacy.userRole ?? "—",
+        legacy.action,
+        legacy.entity,
+        legacy.entityId ?? "—",
+        legacy.ipAddress ?? "—",
+        legacy.oldValues != null ? JSON.stringify(legacy.oldValues) : "",
+        legacy.newValues != null ? JSON.stringify(legacy.newValues) : "",
+      ];
+    });
 
     const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
     ws["!cols"] = [
@@ -163,27 +167,22 @@ export async function GET(request: NextRequest) {
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
     // Audit: export log
-    try {
-      await prisma.auditLog.create({
-        data: {
-          action: "EXPORT_EXCEL",
-          entity: "System",
-          userId: user.userId,
-          userName: user.email,
-          userRole: user.role,
-          newValues: JSON.stringify({
-            count: logs.length,
-            type: "audit_logs_export",
-          }),
-          ipAddress:
-            request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-            request.headers.get("x-real-ip") ??
-            "unknown",
-        },
-      });
-    } catch {
-      // ignore audit error
-    }
+    void createSafeAuditLog({
+      action: "EXPORT_EXCEL",
+      entity: "System",
+      firmId: user.organizationId,
+      userId: user.userId,
+      userEmail: user.email,
+      userRole: user.role,
+      newValues: JSON.stringify({
+        count: logs.length,
+        type: "audit_logs_export",
+      }),
+      ipAddress:
+        request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+        request.headers.get("x-real-ip") ??
+        "unknown",
+    });
 
     return new NextResponse(buf, {
       status: 200,

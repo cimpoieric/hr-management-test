@@ -19,20 +19,15 @@ async function logAudit(
   newValues: unknown | null,
   request: NextRequest,
 ) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        action,
-        entity: "Timesheet",
-        entityId,
-        oldValues: oldValues ? JSON.stringify(oldValues) : null,
-        newValues: newValues ? JSON.stringify(newValues) : null,
-        ipAddress: getClientIp(request),
-      },
-    });
-  } catch (e) {
-    console.error("[AUDIT_LOG_TIMESHEET_REJECT]", e);
-  }
+  const { createSafeAuditLog } = await import("@/lib/auditInsert");
+  void createSafeAuditLog({
+    action,
+    entity: "Timesheet",
+    entityId,
+    oldValues: oldValues ? JSON.stringify(oldValues) : null,
+    newValues: newValues ? JSON.stringify(newValues) : null,
+    ipAddress: getClientIp(request),
+  });
 }
 
 const rejectSchema = z.object({

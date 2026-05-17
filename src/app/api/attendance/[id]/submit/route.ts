@@ -16,20 +16,15 @@ async function logAudit(
   newValues: unknown,
   request: NextRequest,
 ) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        action: "UPDATE",
-        entity: "Timesheet",
-        entityId,
-        oldValues: JSON.stringify(oldValues),
-        newValues: JSON.stringify(newValues),
-        ipAddress: getClientIp(request),
-      },
-    });
-  } catch (e) {
-    console.error("[AUDIT_LOG_TIMESHEET_SUBMIT]", e);
-  }
+  const { createSafeAuditLog } = await import("@/lib/auditInsert");
+  void createSafeAuditLog({
+    action: "UPDATE",
+    entity: "Timesheet",
+    entityId,
+    oldValues: JSON.stringify(oldValues),
+    newValues: JSON.stringify(newValues),
+    ipAddress: getClientIp(request),
+  });
 }
 
 export async function POST(

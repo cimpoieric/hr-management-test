@@ -78,6 +78,7 @@ export async function POST(request: NextRequest) {
         entity: "User",
         ipAddress: clientIp,
         details: `Autentificare esuata (email negasit): ${email}`,
+        firmId: "__unauthenticated__",
       });
       return NextResponse.json(
         { error: "Email sau parolă invalidă" },
@@ -106,6 +107,7 @@ export async function POST(request: NextRequest) {
         userRole: user.role,
         ipAddress: clientIp,
         details: `Autentificare esuata (parola gresita): ${email}`,
+        firmId: user.organizationId,
       });
       return NextResponse.json(
         { error: "Email sau parolă invalidă" },
@@ -145,6 +147,7 @@ export async function POST(request: NextRequest) {
       userRole: user.role,
       ipAddress: clientIp,
       details: `Autentificare reusita: ${user.email}`,
+      firmId: organizationId,
     });
 
     const response = NextResponse.json(

@@ -25,16 +25,19 @@ export async function GET(request: NextRequest) {
       await Promise.all([
         getDeploymentStats(now),
         prisma.auditLog.findMany({
-          where: { createdAt: { gte: sevenDaysAgo } },
+          where: {
+            firmId: user.organizationId,
+            createdAt: { gte: sevenDaysAgo },
+          },
           orderBy: { createdAt: "desc" },
           take: 8,
           select: {
             id: true,
             action: true,
-            entity: true,
-            userName: true,
+            resource: true,
+            userEmail: true,
             createdAt: true,
-            entityId: true,
+            resourceId: true,
           },
         }),
       ]);
@@ -42,9 +45,11 @@ export async function GET(request: NextRequest) {
     const recentActivity = recentAuditRaw.map((item) => ({
       id: item.id,
       action: item.action,
-      entity: item.entity,
-      entityId: item.entityId,
-      userName: item.userName ?? null,
+      entity: item.resource,
+      entityId: item.resourceId
+        ? Number.parseInt(item.resourceId, 10)
+        : null,
+      userName: item.userEmail ?? null,
       createdAt: item.createdAt,
     }));
 

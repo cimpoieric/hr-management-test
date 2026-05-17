@@ -48,19 +48,18 @@ export async function DELETE(
       );
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.timesheet.delete({ where: { id: timesheetId } });
-      await tx.auditLog.create({
-        data: {
-          action: "DELETE",
-          entity: "Timesheet",
-          entityId: timesheetId,
-          newValues: JSON.stringify({ deleted: true, ...existing }),
-          ipAddress: getClientIp(request),
-          userId: user.userId,
-          userRole: user.role,
-        },
-      });
+    await prisma.timesheet.delete({ where: { id: timesheetId } });
+
+    const { createSafeAuditLog } = await import("@/lib/auditInsert");
+    void createSafeAuditLog({
+      action: "DELETE",
+      entity: "Timesheet",
+      entityId: timesheetId,
+      firmId: user.organizationId,
+      newValues: JSON.stringify({ deleted: true, ...existing }),
+      ipAddress: getClientIp(request),
+      userId: user.userId,
+      userRole: user.role,
     });
 
     return NextResponse.json({ success: true });
@@ -194,16 +193,18 @@ export async function PUT(
       },
     });
 
-    await prisma.auditLog.create({
-      data: {
-        action: "UPDATE",
-        entity: "Timesheet",
-        entityId: timesheetId,
-        newValues: JSON.stringify(updated),
-        ipAddress: getClientIp(request),
-        userId: user.userId,
-        userRole: user.role,
-      },
+    const { createSafeAuditLog: logTimesheetUpdate } = await import(
+      "@/lib/auditInsert"
+    );
+    void logTimesheetUpdate({
+      action: "UPDATE",
+      entity: "Timesheet",
+      entityId: timesheetId,
+      firmId: user.organizationId,
+      newValues: JSON.stringify(updated),
+      ipAddress: getClientIp(request),
+      userId: user.userId,
+      userRole: user.role,
     });
 
     return NextResponse.json(updated);

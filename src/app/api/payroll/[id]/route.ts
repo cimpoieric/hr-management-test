@@ -98,17 +98,18 @@ export async function DELETE(
     await prisma.$transaction(async (tx) => {
       await tx.payslipItem.deleteMany({ where: { payslipId } });
       await tx.payslip.delete({ where: { id: payslipId } });
-      await tx.auditLog.create({
-        data: {
-          action: "DELETE",
-          entity: "Payslip",
-          entityId: payslipId,
-          newValues: JSON.stringify({ deleted: true, id: payslipId }),
-          ipAddress: getClientIp(request),
-          userId: user.userId,
-          userRole: user.role,
-        },
-      });
+    });
+
+    const { createSafeAuditLog } = await import("@/lib/auditInsert");
+    void createSafeAuditLog({
+      action: "DELETE",
+      entity: "Payslip",
+      entityId: payslipId,
+      firmId: user.organizationId,
+      newValues: JSON.stringify({ deleted: true, id: payslipId }),
+      ipAddress: getClientIp(request),
+      userId: user.userId,
+      userRole: user.role,
     });
 
     return NextResponse.json({ success: true });

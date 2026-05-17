@@ -516,10 +516,10 @@ export function LandingView({
             <ul className="mt-3 space-y-2 text-sm">
               <li>
                 <Link
-                  href="/privacy"
+                  href="/privacy-policy"
                   className="text-slate-600 hover:text-blue-950"
                 >
-                  Privacy
+                  Politică confidențialitate
                 </Link>
               </li>
               <li>
@@ -527,7 +527,15 @@ export function LandingView({
                   href="/terms"
                   className="text-slate-600 hover:text-blue-950"
                 >
-                  Terms
+                  Termeni și condiții
+                </Link>
+              </li>
+              <li>
+                <Link
+                  href="/gdpr"
+                  className="text-slate-600 hover:text-blue-950"
+                >
+                  Drepturi GDPR
                 </Link>
               </li>
             </ul>

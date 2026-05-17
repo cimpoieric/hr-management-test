@@ -177,6 +177,7 @@ export interface LogAuditOptions {
   oldValues?: unknown;
   newValues?: unknown;
   details?: string; // Text scurt descriere, opțional
+  firmId?: string;
   /** Stored as string on `AuditLog.userId` (User.id is cuid). Numbers are coerced. */
   userId?: string | number | null;
   userName?: string;
@@ -201,13 +202,22 @@ export async function logAudit(options: LogAuditOptions): Promise<void> {
   const ipAddress = options.ipAddress ?? ctx?.ipAddress ?? null;
   const userAgent = options.userAgent ?? ctx?.userAgent ?? null;
 
+  const detailsPayload =
+    options.details != null && options.details !== ""
+      ? options.oldValues == null && options.newValues == null
+        ? JSON.stringify({ message: options.details })
+        : options.details
+      : null;
+
   await createSafeAuditLog({
     action: options.action,
     entity: options.entity,
     entityId: options.entityId ?? null,
+    firmId: options.firmId ?? null,
     userId: rawUserId,
-    userName,
+    userEmail: userName,
     userRole,
+    details: detailsPayload,
     oldValues: options.oldValues ? sanitizeValues(options.oldValues) : null,
     newValues: options.newValues ? sanitizeValues(options.newValues) : null,
     ipAddress,

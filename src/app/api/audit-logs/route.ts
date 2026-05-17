@@ -17,6 +17,7 @@
  */
 
 import { requireAuth } from "@/lib/auth";
+import { mapAuditLogToLegacy } from "@/lib/auditInsert";
 import { isJwtRoleIn, ROLES_SETTINGS_ADMIN } from "@/lib/roles";
 import { prisma } from "@/lib/prisma";
 import { type NextRequest, NextResponse } from "next/server";
@@ -91,17 +92,19 @@ export async function GET(request: NextRequest) {
     const dateTo = searchParams.get("dateTo");
 
     // ── Build where ──
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = {
+      firmId: user.organizationId,
+    };
 
     // RBAC: non-admin vede doar logurile proprii
     if (!isJwtRoleIn(user, ROLES_SETTINGS_ADMIN)) {
       where.userId = user.userId;
     } else if (filterUserId) {
-      where.userId = Number.parseInt(filterUserId, 10);
+      where.userId = filterUserId;
     }
 
     if (entityType && VALID_ENTITIES.includes(entityType)) {
-      where.entity = entityType;
+      where.resource = entityType;
     }
 
     if (action && VALID_ACTIONS.includes(action)) {
@@ -138,13 +141,11 @@ export async function GET(request: NextRequest) {
         select: {
           id: true,
           action: true,
-          entity: true,
-          entityId: true,
+          resource: true,
+          resourceId: true,
           userId: true,
-          userName: true,
-          userRole: true,
-          oldValues: true,
-          newValues: true,
+          userEmail: true,
+          details: true,
           ipAddress: true,
           userAgent: true,
           createdAt: true,
@@ -153,12 +154,24 @@ export async function GET(request: NextRequest) {
       prisma.auditLog.count({ where }),
     ]);
 
-    // Parse JSON values
-    const parsedLogs = logs.map((log) => ({
-      ...log,
-      oldValues: log.oldValues ? parseJsonSafe(log.oldValues) : null,
-      newValues: log.newValues ? parseJsonSafe(log.newValues) : null,
-    }));
+    const parsedLogs = logs.map((log) => {
+      const legacy = mapAuditLogToLegacy(log);
+      return {
+        ...legacy,
+        oldValues:
+          legacy.oldValues != null
+            ? typeof legacy.oldValues === "string"
+              ? parseJsonSafe(legacy.oldValues)
+              : legacy.oldValues
+            : null,
+        newValues:
+          legacy.newValues != null
+            ? typeof legacy.newValues === "string"
+              ? parseJsonSafe(legacy.newValues as string)
+              : legacy.newValues
+            : null,
+      };
+    });
 
     return NextResponse.json({
       data: parsedLogs,

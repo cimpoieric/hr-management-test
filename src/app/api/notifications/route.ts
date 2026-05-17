@@ -52,9 +52,10 @@ export async function GET(request: NextRequest) {
       }),
       prisma.pendingImport.count({ where: { status: "PENDING" } }),
       prisma.auditLog.findMany({
+        where: { firmId: user.organizationId },
         orderBy: { createdAt: "desc" },
         take: 3,
-        select: { id: true, action: true, entity: true, createdAt: true },
+        select: { id: true, action: true, resource: true, createdAt: true },
       }),
     ]);
 
@@ -107,7 +108,7 @@ export async function GET(request: NextRequest) {
       notifications.push({
         id: 100 + idx,
         type: item.action === "CREATE" ? "success" : "info",
-        message: `${item.action.replaceAll("_", " ")} · ${item.entity}`,
+        message: `${item.action.replaceAll("_", " ")} · ${item.resource}`,
         time: formatRelativeTime(item.createdAt),
         read: true,
       });

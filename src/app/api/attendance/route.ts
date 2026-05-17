@@ -19,19 +19,14 @@ async function logAudit(
   newValues: unknown,
   request: NextRequest,
 ) {
-  try {
-    await prisma.auditLog.create({
-      data: {
-        action,
-        entity: "Timesheet",
-        entityId,
-        newValues: JSON.stringify(newValues),
-        ipAddress: getClientIp(request),
-      },
-    });
-  } catch (e) {
-    console.error("[AUDIT_LOG_TIMESHEET]", e);
-  }
+  const { createSafeAuditLog } = await import("@/lib/auditInsert");
+  void createSafeAuditLog({
+    action,
+    entity: "Timesheet",
+    entityId,
+    newValues: JSON.stringify(newValues),
+    ipAddress: getClientIp(request),
+  });
 }
 
 // Query params sunt opționali în App Router; validăm doar tipul și constrângeri simple.

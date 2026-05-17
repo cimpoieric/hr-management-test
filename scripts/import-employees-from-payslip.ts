@@ -240,18 +240,20 @@ async function main() {
     await prisma.auditLog.create({
       data: {
         action: "BULK_IMPORT",
-        entity: "System",
-        entityId: null,
-        oldValues: null,
-        newValues: JSON.stringify({
-          kind: "employees_from_payslips",
-          companyName: COMPANY_NAME,
-          week: WEEK,
-          year: YEAR,
-          period: PERIOD,
-          totalRows: rows.length,
-          imported,
-          existed,
+        resource: "System",
+        resourceId: null,
+        firmId: organization.id,
+        details: JSON.stringify({
+          newValues: {
+            kind: "employees_from_payslips",
+            companyName: COMPANY_NAME,
+            week: WEEK,
+            year: YEAR,
+            period: PERIOD,
+            totalRows: rows.length,
+            imported,
+            existed,
+          },
         }),
       },
     });

@@ -108,7 +108,6 @@ model User {
   updatedAt          DateTime     @updatedAt
   approvedTimesheets Timesheet[]  @relation("TimesheetApprovedBy")
   emailLogs          EmailLog[]   @relation("EmailLogUser")
-  auditLogs          AuditLog[]
 
   @@index([organizationId])
 }
@@ -178,7 +177,6 @@ model Employee {
   documents      Document[]
   deployments    Deployment[]
   salaryCalculations SalaryCalculation[]
-  auditLogs      AuditLog[]
   timesheets     Timesheet[]
   payslips       Payslip[]
   emailLogs      EmailLog[]     @relation("EmailLogEmployee")
@@ -272,25 +270,36 @@ model Deployment {
 }
 
 model AuditLog {
-  id          Int       @id @default(autoincrement())
-  action      String // LOGIN, LOGOUT, CREATE, UPDATE, DELETE, VIEW, EXPORT, IMPORT_APPROVE, IMPORT_REJECT, BACKUP
-  entity      String // Employee, Document, Deployment, User, Report, System
-  entityId    Int?
-  employee    Employee? @relation(fields: [entityId], references: [id], onDelete: SetNull)
-  userId      String?
-  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
-  userName    String? // Denormalized for querying
-  userRole    String? // Denormalized for querying
-  oldValues   String? // JSON - masked for sensitive data
-  newValues   String? // JSON - masked for sensitive data
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime  @default(now())
+  id         String   @id @default(cuid())
+  userId     String?
+  userEmail  String?
+  action     String // VIEW_EMPLOYEE, EXPORT_PDF, EXPORT_EXCEL, DOWNLOAD_DOCUMENT, UPDATE_SALARY, DELETE_EMPLOYEE, LOGIN, LOGOUT, PASSWORD_RESET, CREATE, UPDATE, DELETE, ...
+  resource   String // Employee, Document, Payslip, Report, System, ...
+  resourceId String?
+  firmId     String
+  details    String? // JSON cu câmpurile accesate / oldValues+newValues
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
 
-  @@index([entity, entityId])
-  @@index([action])
-  @@index([userId])
-  @@index([createdAt])
+  @@index([firmId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+model GdprRequest {
+  id         String    @id @default(cuid())
+  type       String // DELETE, ACCESS, RECTIFY, PORTABILITY, OPPOSITION
+  status     String    @default("pending") // pending, in_progress, completed, rejected
+  employeeId String
+  firmId     String
+  details    String?
+  adminNotes String?
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([firmId, status])
+  @@index([employeeId, createdAt])
 }
 
 model EmployeeHistory {
