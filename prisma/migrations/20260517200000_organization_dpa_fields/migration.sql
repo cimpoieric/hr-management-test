@@ -1,3 +1,3 @@
 -- AlterTable
-ALTER TABLE "Organization" ADD COLUMN "dpaAcceptedAt" DATETIME;
-ALTER TABLE "Organization" ADD COLUMN "dpaAcceptedBy" TEXT;
+ALTER TABLE "Organization" ADD COLUMN IF NOT EXISTS "dpaAcceptedAt" TIMESTAMP(3);
+ALTER TABLE "Organization" ADD COLUMN IF NOT EXISTS "dpaAcceptedBy" TEXT;

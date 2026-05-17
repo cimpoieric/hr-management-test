@@ -1,3 +1,3 @@
 -- AlterTable
-ALTER TABLE "Employee" ADD COLUMN "gdprInformedAt" DATETIME;
-ALTER TABLE "Employee" ADD COLUMN "gdprInformedBy" TEXT;
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "gdprInformedAt" TIMESTAMP(3);
+ALTER TABLE "Employee" ADD COLUMN IF NOT EXISTS "gdprInformedBy" TEXT;
