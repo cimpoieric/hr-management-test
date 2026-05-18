@@ -139,5 +139,5 @@ export function isPlaceholderImportCnp(cnp: string): boolean {
 
 /** Prefix in observations for rows saved with generated CNP. */
 export function placeholderCnpObservationNote(realCnp: string): string {
-  return `${PLACEHOLDER_MARK}: CNP provizoriu ${realCnp} ù de inlocuit`;
+  return `${PLACEHOLDER_MARK}: CNP provizoriu ${realCnp} ‚Äî de inlocuit`;
 }

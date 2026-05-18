@@ -375,7 +375,7 @@ export function EmployeeSpreadsheetImportClient() {
           Import angajati Excel / CSV
         </h1>
         <p className="mt-1 text-sm text-gray-500">
-          Excel cu mai multe foi (HTC, BAKKER, etc.) ù se citesc toate foile.
+          Excel cu mai multe foi (HTC, BAKKER, etc.) ‚Äî se citesc toate foile.
           Coloane: NUME, CNP, ADRESA, FUNCTIA, SALAR NEGOCIAT, DATA ANG., DATA
           INC., BSN, POSTED W., A1, CONT., DECIZIE, CI, FISA APP+PSI.
         </p>

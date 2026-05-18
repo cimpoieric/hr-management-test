@@ -313,7 +313,7 @@ function parseRowsFromSheet(
 
     if (!cnp) {
       warnings.push(
-        `Foaia "${sheetLabel}", randul ${r + 1}: CNP lipsa ù import incomplet.`,
+        `Foaia "${sheetLabel}", randul ${r + 1}: CNP lipsa ‚Äî import incomplet.`,
       );
     }
 
