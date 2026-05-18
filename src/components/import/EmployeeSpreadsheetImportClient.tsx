@@ -1,26 +1,18 @@
 "use client";
 
 import type { ImportRowResult } from "@/app/api/employees/import/route";
+import { mapSpreadsheetRowToImportItem } from "@/lib/parsers/employeeSpreadsheetMap";
+import type { ParsedEmployeeSpreadsheetRow } from "@/lib/parsers/employeeSpreadsheetParser";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { getSpreadsheetPreviewMissingFields } from "@/lib/parsers/importEmployeeNormalize";
 import { ROUTES } from "@/lib/routes";
 import { AlertCircle, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
-export type SpreadsheetEmployeeRow = {
-  rowIndex: number;
-  lastName: string;
-  firstName: string;
-  cnp: string;
-  position?: string;
-  salary?: string;
-  email?: string;
-  phone?: string;
-  iban?: string;
-  bankName?: string;
-  address?: string;
-  city?: string;
-};
+export type SpreadsheetEmployeeRow = ParsedEmployeeSpreadsheetRow;
 
 type SpreadsheetUploadResponse = {
   success?: boolean;
@@ -28,6 +20,8 @@ type SpreadsheetUploadResponse = {
   data?: SpreadsheetEmployeeRow[];
   preview?: SpreadsheetEmployeeRow[];
   rowCount?: number;
+  sheetsParsed?: number;
+  sheetCount?: number;
   warnings?: string[];
   error?: string;
 };
@@ -40,31 +34,94 @@ function pickEmployeesFromResponse(
   return Array.isArray(list) ? list : [];
 }
 
+const IMPORT_BATCH_SIZE = 500;
+
+function ImportRowStatusCell({ row }: { row: SpreadsheetEmployeeRow }) {
+  const lipsa = getSpreadsheetPreviewMissingFields(row);
+
+  if (lipsa.length === 0) {
+    return (
+      <Badge
+        variant="outline"
+        className="bg-green-50 text-green-700 text-[10px] whitespace-nowrap"
+      >
+        Complet
+      </Badge>
+    );
+  }
+
+  return (
+    <span
+      className="inline-block cursor-help"
+      title={`Lipseste: ${lipsa.join(", ")}`}
+    >
+      <Badge
+        variant="outline"
+        className="bg-amber-50 text-amber-800 text-[10px] whitespace-nowrap"
+      >
+        Incomplet ({lipsa.length})
+      </Badge>
+    </span>
+  );
+}
+
 export function EmployeeSpreadsheetImportClient() {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [savedCount, setSavedCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
   const [error, setError] = useState("");
   const [warnings, setWarnings] = useState<string[]>([]);
   const [employees, setEmployees] = useState<SpreadsheetEmployeeRow[]>([]);
   const [companyId, setCompanyId] = useState("1");
   const [companies, setCompanies] = useState<{ id: number; name: string }[]>([]);
+  const [createCompaniesFromSheets, setCreateCompaniesFromSheets] =
+    useState(false);
+  const [companiesSummary, setCompaniesSummary] = useState<{
+    existing: string[];
+    created: string[];
+    missing: string[];
+  } | null>(null);
   const [previewResults, setPreviewResults] = useState<ImportRowResult[] | null>(
     null,
   );
 
+  const sheetCompanyNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const row of employees) {
+      const s = row.sourceSheet?.trim();
+      if (s) names.add(s);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b, "ro"));
+  }, [employees]);
+
+  const hasSheetCompanies = sheetCompanyNames.length > 0;
+
+  async function loadCompanies() {
+    try {
+      const res = await fetch("/api/organization/companies?all=1");
+      const d = (await res.json()) as {
+        companies?: { id: number; name: string }[];
+      };
+      const list = d.companies ?? [];
+      setCompanies(list);
+      if (list[0] && !companyId) setCompanyId(String(list[0].id));
+    } catch {
+      // silent
+    }
+  }
+
   useEffect(() => {
-    fetch("/api/organization/companies")
-      .then((r) => r.json())
-      .then((d: { companies?: { id: number; name: string }[] }) => {
-        const list = d.companies ?? [];
-        setCompanies(list);
-        if (list[0]) setCompanyId(String(list[0].id));
-      })
-      .catch(() => undefined);
+    void loadCompanies();
   }, []);
+
+  useEffect(() => {
+    if (hasSheetCompanies) setCreateCompaniesFromSheets(true);
+  }, [hasSheetCompanies]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -102,6 +159,7 @@ export function EmployeeSpreadsheetImportClient() {
     setWarnings([]);
     setEmployees([]);
     setPreviewResults(null);
+    setCompaniesSummary(null);
 
     try {
       const formData = new FormData();
@@ -129,7 +187,13 @@ export function EmployeeSpreadsheetImportClient() {
             "Verifica antetul: Nume, Prenume, CNP.",
         });
       } else {
-        toast.success(`S-au extras ${rows.length} angajati din fisier.`);
+        const sheetInfo =
+          typeof data.sheetsParsed === "number" && data.sheetCount
+            ? ` (${data.sheetsParsed} foi din ${data.sheetCount})`
+            : "";
+        toast.success(
+          `S-au extras ${rows.length} angajati din fisier${sheetInfo}.`,
+        );
       }
     } catch {
       setError("Eroare de retea. Incearca din nou.");
@@ -140,18 +204,103 @@ export function EmployeeSpreadsheetImportClient() {
 
   function buildImportItems() {
     const cid = Number.parseInt(companyId, 10);
-    return employees.map((row) => ({
-      cnp: row.cnp.replace(/\D/g, ""),
-      firstName: row.firstName === "\u2014" ? "" : row.firstName,
-      lastName: row.lastName === "\u2014" ? "" : row.lastName,
-      email: row.email ?? null,
-      phone: row.phone ?? null,
-      iban: row.iban ?? null,
-      bankName: row.bankName ?? null,
-      address: row.address ?? null,
-      city: row.city ?? null,
-      companyId: Number.isFinite(cid) && cid > 0 ? cid : 1,
-    }));
+    const resolvedCompanyId = Number.isFinite(cid) && cid > 0 ? cid : 1;
+    return employees.map((row) =>
+      mapSpreadsheetRowToImportItem(row, resolvedCompanyId),
+    );
+  }
+
+  async function postImportBatch(
+    items: ReturnType<typeof buildImportItems>,
+    mode: "preview" | "commit",
+  ) {
+    const res = await fetch("/api/employees/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode,
+        items,
+        createCompaniesFromSheets:
+          createCompaniesFromSheets && hasSheetCompanies,
+        fallbackCompanyId: Number.parseInt(companyId, 10) || undefined,
+      }),
+    });
+    const data = await res.json();
+    return { res, data };
+  }
+
+  async function handleSaveAll() {
+    if (employees.length === 0) return;
+
+    const allItems = buildImportItems();
+    const totalCount = allItems.length;
+
+    setIsSaving(true);
+    setSavedCount(0);
+    setFailedCount(0);
+    setError("");
+    setPreviewResults(null);
+
+    let success = 0;
+    let failed = 0;
+    let processed = 0;
+
+    try {
+      for (let offset = 0; offset < allItems.length; offset += IMPORT_BATCH_SIZE) {
+        const chunk = allItems.slice(offset, offset + IMPORT_BATCH_SIZE);
+        const { res, data } = await postImportBatch(chunk, "commit");
+
+        if (data.companies) {
+          setCompaniesSummary(data.companies as typeof companiesSummary);
+        }
+
+        if (!res.ok) {
+          failed += chunk.length;
+          processed += chunk.length;
+          setSavedCount(processed);
+          setFailedCount(failed);
+          const errMsg =
+            typeof data.error === "string"
+              ? data.error
+              : "Eroare la salvarea unui lot de angajati";
+          setError(errMsg);
+          continue;
+        }
+
+        const results = (data.results ?? []) as ImportRowResult[];
+        for (const r of results) {
+          if (r.result === "CREATED" || r.result === "UPDATED") success++;
+          else if (r.result === "ERROR") failed++;
+          else if (r.result === "REVIEW_REQUIRED") failed++;
+        }
+
+        processed += chunk.length;
+        setSavedCount(processed);
+        setFailedCount(failed);
+      }
+
+      if (success > 0) {
+        const createdCo =
+          (companiesSummary?.created.length ?? 0) > 0
+            ? ` Firme create: ${companiesSummary!.created.length}.`
+            : "";
+        toast.success(`Salvati: ${success}, Esuati: ${failed}`, {
+          description: `Total procesati: ${totalCount}.${createdCo}`,
+        });
+        await loadCompanies();
+        if (failed === 0) {
+          setEmployees([]);
+          setFile(null);
+        }
+      } else if (failed > 0) {
+        toast.error(`Niciun angajat salvat. Esuati: ${failed}`);
+      }
+    } catch {
+      setError("Eroare de retea la salvare.");
+      toast.error("Eroare de retea la salvare.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   async function runImport(mode: "preview" | "commit") {
@@ -164,12 +313,11 @@ export function EmployeeSpreadsheetImportClient() {
     setError("");
 
     try {
-      const res = await fetch("/api/employees/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode, items: buildImportItems() }),
-      });
-      const data = await res.json();
+      const { res, data } = await postImportBatch(buildImportItems(), mode);
+
+      if (data.companies) {
+        setCompaniesSummary(data.companies as typeof companiesSummary);
+      }
 
       if (!res.ok) {
         setError(data.error ?? "Import esuat");
@@ -183,15 +331,24 @@ export function EmployeeSpreadsheetImportClient() {
 
       if (mode === "preview") {
         setPreviewResults((data.results ?? []) as ImportRowResult[]);
+        const co = data.companies as typeof companiesSummary;
+        const coHint =
+          co && co.missing.length > 0
+            ? ` ${co.missing.length} firme noi la import.`
+            : "";
         toast.success("Previzualizare gata", {
-          description: `${data.stats?.created ?? 0} noi, ${data.stats?.updated ?? 0} actualizari, ${data.stats?.review ?? 0} de revizuit.`,
+          description: `${data.stats?.created ?? 0} noi, ${data.stats?.updated ?? 0} actualizari, ${data.stats?.review ?? 0} de revizuit.${coHint}`,
         });
         return;
       }
 
+      const createdCo =
+        (data.companies as { created?: string[] } | undefined)?.created
+          ?.length ?? 0;
       toast.success("Import finalizat", {
-        description: `${data.stats?.created ?? 0} creati, ${data.stats?.updated ?? 0} actualizati.`,
+        description: `${data.stats?.created ?? 0} creati, ${data.stats?.updated ?? 0} actualizati.${createdCo > 0 ? ` Firme create: ${createdCo}.` : ""}`,
       });
+      await loadCompanies();
       setEmployees([]);
       setPreviewResults(null);
       setFile(null);
@@ -218,8 +375,9 @@ export function EmployeeSpreadsheetImportClient() {
           Import angajati Excel / CSV
         </h1>
         <p className="mt-1 text-sm text-gray-500">
-          Coloane: Nume, Prenume, CNP (obligatorii). Optional: Functie, Salariu,
-          Email, Telefon, IBAN.
+          Excel cu mai multe foi (HTC, BAKKER, etc.) ù se citesc toate foile.
+          Coloane: NUME, CNP, ADRESA, FUNCTIA, SALAR NEGOCIAT, DATA ANG., DATA
+          INC., BSN, POSTED W., A1, CONT., DECIZIE, CI, FISA APP+PSI.
         </p>
       </div>
 
@@ -321,68 +479,164 @@ export function EmployeeSpreadsheetImportClient() {
             <h2 className="font-semibold text-gray-900">
               Angajati extrasi ({employees.length})
             </h2>
-            <div className="flex items-center gap-2">
-              <label className="text-sm text-gray-600">Firma</label>
-              <select
-                value={companyId}
-                onChange={(e) => setCompanyId(e.target.value)}
-                className="rounded-lg border bg-white px-3 py-1.5 text-sm"
-              >
+            <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center">
+              {hasSheetCompanies ? (
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={createCompaniesFromSheets}
+                    onChange={(e) =>
+                      setCreateCompaniesFromSheets(e.target.checked)
+                    }
+                    className="rounded border-gray-300"
+                  />
+                  Creeaza firme din foile Excel
+                </label>
+              ) : null}
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-gray-600">
+                  {createCompaniesFromSheets && hasSheetCompanies
+                    ? "Firma (fallback)"
+                    : "Firma"}
+                </label>
+                <select
+                  value={companyId}
+                  onChange={(e) => setCompanyId(e.target.value)}
+                  disabled={
+                    createCompaniesFromSheets && hasSheetCompanies
+                  }
+                  className="rounded-lg border bg-white px-3 py-1.5 text-sm disabled:bg-gray-100"
+                >
                 {companies.map((c) => (
                   <option key={c.id} value={String(c.id)}>
                     {c.name}
                   </option>
                 ))}
-              </select>
+                </select>
+              </div>
             </div>
           </div>
+
+          {hasSheetCompanies && createCompaniesFromSheets ? (
+            <div className="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+              <p className="font-medium">
+                {sheetCompanyNames.length} firme din foile Excel
+              </p>
+              <p className="mt-1 text-xs text-blue-800">
+                {sheetCompanyNames.join(", ")}
+              </p>
+              <p className="mt-1 text-xs text-blue-700">
+                La import, fiecare angajat este asignat firmei cu acelasi nume
+                ca foaia. Firmele lipsa se creeaza automat.
+              </p>
+            </div>
+          ) : null}
+
+          {companiesSummary ? (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+              <p className="font-medium">Firme</p>
+              {companiesSummary.created.length > 0 ? (
+                <p className="mt-1">
+                  Create: {companiesSummary.created.join(", ")}
+                </p>
+              ) : null}
+              {companiesSummary.existing.length > 0 ? (
+                <p className="mt-1 text-slate-600">
+                  Existente: {companiesSummary.existing.join(", ")}
+                </p>
+              ) : null}
+              {companiesSummary.missing.length > 0 ? (
+                <p className="mt-1 text-amber-800">
+                  Vor fi create la import:{" "}
+                  {companiesSummary.missing.join(", ")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead>
                 <tr className="border-b text-gray-600">
                   <th className="px-2 py-2">#</th>
+                  {employees.some((r) => r.sourceSheet) ? (
+                    <th className="px-2 py-2">Foaie</th>
+                  ) : null}
                   <th className="px-2 py-2">Nume</th>
                   <th className="px-2 py-2">Prenume</th>
                   <th className="px-2 py-2">CNP</th>
                   <th className="px-2 py-2">Functie</th>
                   <th className="px-2 py-2">Salariu</th>
+                  <th className="px-2 py-2">Angajare</th>
+                  <th className="px-2 py-2">Stare</th>
+                  <th className="px-2 py-2">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {employees.map((row) => (
-                  <tr key={row.rowIndex} className="border-b border-gray-100">
+                  <tr
+                    key={`${row.sourceSheet ?? ""}-${row.rowIndex}-${row.cnp}`}
+                    className="border-b border-gray-100"
+                  >
                     <td className="px-2 py-2 text-gray-500">{row.rowIndex}</td>
+                    {employees.some((r) => r.sourceSheet) ? (
+                      <td className="px-2 py-2 text-xs text-gray-600">
+                        {row.sourceSheet ?? "\u2014"}
+                      </td>
+                    ) : null}
                     <td className="px-2 py-2">{row.lastName}</td>
                     <td className="px-2 py-2">{row.firstName}</td>
                     <td className="px-2 py-2 font-mono text-xs">{row.cnp}</td>
                     <td className="px-2 py-2">{row.position ?? "\u2014"}</td>
                     <td className="px-2 py-2">{row.salary ?? "\u2014"}</td>
+                    <td className="px-2 py-2 text-xs">
+                      {row.hiredAt ?? "\u2014"}
+                    </td>
+                    <td className="px-2 py-2 text-xs">
+                      {row.terminationDate ? "Incetat" : "Activ"}
+                    </td>
+                    <td className="px-2 py-2">
+                      <ImportRowStatusCell row={row} />
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          <div className="flex flex-wrap gap-2 pt-2">
+          <Button
+            type="button"
+            className="w-full"
+            disabled={isSaving || importing}
+            onClick={() => void handleSaveAll()}
+          >
+            {isSaving ? (
+              <>
+                <Loader2 size={16} className="mr-2 inline animate-spin" />
+                Se salveaza... ({savedCount}/{employees.length})
+                {failedCount > 0 ? `, esuate: ${failedCount}` : ""}
+              </>
+            ) : (
+              `Salveaza toti ${employees.length} angajatii`
+            )}
+          </Button>
+
+          <p className="text-center text-xs text-gray-500">
+            Se salveaza toti angajatii extrasi, inclusiv cei cu date incomplete
+            (fara prenume, fara CNP etc.).
+          </p>
+
+          <div className="flex flex-wrap gap-2 pt-1">
             <button
               type="button"
-              disabled={importing}
-              onClick={() => runImport("preview")}
+              disabled={importing || isSaving}
+              onClick={() => void runImport("preview")}
               className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
             >
               {importing ? (
                 <Loader2 size={14} className="inline animate-spin" />
               ) : null}{" "}
               Previzualizare import
-            </button>
-            <button
-              type="button"
-              disabled={importing}
-              onClick={() => runImport("commit")}
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-            >
-              Importa in sistem
             </button>
           </div>
 

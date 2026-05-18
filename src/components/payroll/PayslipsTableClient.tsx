@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { PermissionGuard } from "@/components/auth/PermissionGuard";
 import {
   fetchEmployerDetailsForPayslip,
-  generateWeeklyPayslip,
+  downloadWeeklyPayslip,
   mapPayslipApiResponseToPayslipData,
   openWeeklyPayslipPreview,
 } from "@/components/payroll/WeeklyPayslipPDF";
@@ -167,7 +167,7 @@ export function PayslipsTableClient({
   async function handleDownloadPDF(payslipId: number) {
     try {
       const data = await loadPayslipData(payslipId);
-      generateWeeklyPayslip(data);
+      downloadWeeklyPayslip(data);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("common.error"));
     }
@@ -175,10 +175,16 @@ export function PayslipsTableClient({
 
   async function handleSendEmail(payslipId: number) {
     try {
-      await postJson("/api/email/send", {
+      const result = (await postJson("/api/email/send", {
         type: "fluturas",
         data: { payslipId },
-      });
+      })) as { success?: boolean; trimise?: number; error?: string };
+      const sent = Number(result.trimise ?? 0);
+      if (sent === 0 || result.success === false) {
+        throw new Error(
+          result.error ?? t("components.toast.payslipEmailSendError"),
+        );
+      }
       toast.success(t("components.toast.payslipEmailSent"));
       router.refresh();
     } catch (e) {
@@ -651,6 +657,7 @@ function SendEmailModal({
       });
 
       const result = (await res.json().catch(() => ({}))) as {
+        success?: boolean;
         error?: string;
         total?: number;
         trimise?: number;
@@ -665,7 +672,16 @@ function SendEmailModal({
       const ok = Number(result.trimise ?? 0);
       const bad = Number(result.esuate ?? 0);
       const total = Number(result.total ?? ok + bad);
-      if (bad > 0 && ok > 0) {
+
+      if (ok === 0 || result.success === false) {
+        toast.error(
+          result.error ?? t("components.toast.payslipEmailBulkFail"),
+        );
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (bad > 0) {
         toast.warning(
           t("components.toast.payslipEmailBulkPartial", {
             ok: String(ok),
@@ -673,10 +689,8 @@ function SendEmailModal({
             bad: String(bad),
           }),
         );
-      } else if (bad > 0 && ok === 0) {
-        toast.error(
-          result.error ?? t("components.toast.payslipEmailBulkFail"),
-        );
+      } else if (ok === 1) {
+        toast.success(t("components.toast.payslipEmailSent"));
       } else {
         toast.success(
           t("components.toast.payslipEmailBulkOk", { n: String(ok) }),

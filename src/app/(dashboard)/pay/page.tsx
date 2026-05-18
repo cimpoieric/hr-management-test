@@ -10,7 +10,7 @@ import {
 } from "@/components/filters/AdvancedFilter";
 import { ReadOnlyField } from "@/components/ui/ReadOnlyField";
 import { useCanEdit } from "@/hooks/usePermission";
-import { generateWeeklyPayslip } from "@/components/payroll/WeeklyPayslipPDF";
+import { downloadWeeklyPayslip } from "@/components/payroll/WeeklyPayslipPDF";
 import { formatIsoWeekPeriod, getPayrollWeekDefaults } from "@/lib/isoWeek";
 import { preventWheelOnFocusedNumberInput } from "@/lib/numericInput";
 import {
@@ -368,7 +368,7 @@ export default function PlataPage() {
         const employeeName =
           `${String(emp.lastName ?? "").trim()} ${String(emp.firstName ?? "").trim()}`.trim() ||
           "—";
-        generateWeeklyPayslip({
+        downloadWeeklyPayslip({
           companyName,
           companyAddress,
           employeeName,

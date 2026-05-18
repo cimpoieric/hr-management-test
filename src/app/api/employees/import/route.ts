@@ -13,17 +13,43 @@ import { canApproveImport } from "@/lib/permissions";
 import { checkCanAddEmployees, checkPlan } from "@/lib/middleware/plan-check";
 import { incrementOrganizationEmployeeCount } from "@/lib/organizationPlan";
 import { prismaTyped } from "@/lib/prisma";
+import { normalizeImportEmployeeRow } from "@/lib/parsers/importEmployeeNormalize";
+import { spreadsheetImportItemToEmployeeData } from "@/lib/parsers/employeeImportWrite";
+import {
+  ensureCompaniesForSheetNames,
+  resolveCompanyIdForImportRow,
+} from "@/lib/services/companyFromSheet";
 import { validateCNP, validateIBAN } from "@/lib/validation";
 import type { Prisma } from "@prisma/client";
 import { logAudit } from "@/lib/audit";
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+const isoDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "Data invalida (YYYY-MM-DD)")
+  .nullable()
+  .optional();
+
+const emptyableName = z
+  .union([z.string(), z.null()])
+  .optional()
+  .transform((v) => {
+    const t = String(v ?? "").trim();
+    if (!t || t === "\u2014" || t === "-" || t.toUpperCase() === "N/A") {
+      return "";
+    }
+    return t;
+  });
+
 const importRowSchema = z.object({
-  cnp: z.string().regex(/^[0-9]{13}$/, "CNP invalid"),
-  firstName: z.string().min(1).max(100),
-  lastName: z.string().min(1).max(100),
-  email: z.string().email().nullable().optional(),
+  cnp: z
+    .union([z.string(), z.null()])
+    .optional()
+    .transform((v) => String(v ?? "").replace(/\D/g, "")),
+  firstName: emptyableName,
+  lastName: emptyableName,
+  email: z.union([z.string(), z.null()]).optional(),
   phone: z.string().max(20).nullable().optional(),
   iban: z.string().max(34).nullable().optional(),
   bankName: z.string().max(100).nullable().optional(),
@@ -31,11 +57,28 @@ const importRowSchema = z.object({
   city: z.string().max(100).nullable().optional(),
   countryId: z.number().int().positive().nullable().optional(),
   companyId: z.number().int().positive(),
+  position: z.string().max(100).nullable().optional(),
+  observations: z.string().max(1000).nullable().optional(),
+  workNorm: z.string().max(100).nullable().optional(),
+  seriesCI: z.string().max(10).nullable().optional(),
+  numberCI: z.string().max(20).nullable().optional(),
+  status: z.enum(["ACTIVE", "TERMINATED"]).optional(),
+  hiredAt: isoDateSchema,
+  salaryType: z.enum(["ORA", "LUNAR", "SAPTAMANAL"]).nullable().optional(),
+  salaryAmount: z.number().finite().nonnegative().nullable().optional(),
+  salaryCurrency: z.string().max(10).nullable().optional(),
+  paymentFrequency: z.enum(["weekly", "monthly"]).nullable().optional(),
+  salaryStartDate: isoDateSchema,
+  sourceSheet: z.string().max(100).nullable().optional(),
 });
 
 const importSchema = z.object({
   mode: z.enum(["preview", "commit"]).default("preview"),
   items: z.array(importRowSchema).min(1).max(500),
+  /** Creează/găsește firme după numele foii Excel (HTC, BAKKER, …). */
+  createCompaniesFromSheets: z.boolean().optional().default(false),
+  /** Firmă pentru rânduri fără sourceSheet sau foaie nerecunoscută. */
+  fallbackCompanyId: z.number().int().positive().optional(),
 });
 
 export type ImportRowResult =
@@ -69,7 +112,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { mode, items } = parsed.data;
+    const { mode, items, createCompaniesFromSheets, fallbackCompanyId } =
+      parsed.data;
 
     const authCheck = await checkPlan(request, { roles: ROLES_EMPLOYEES_RW });
     if (!authCheck.allowed) return authCheck.response;
@@ -81,26 +125,79 @@ export async function POST(request: NextRequest) {
 
     const results: ImportRowResult[] = [];
 
-    const allCnps = items.map((i) => i.cnp);
-    const existingEmployees = await prismaTyped.employee.findMany({
-      where: { cnp: { in: allCnps } },
-    });
+    const lookupCnps = items
+      .map((i) => String(i.cnp ?? "").replace(/\D/g, ""))
+      .filter((c) => c.length === 13 && validateCNP(c));
+    const existingEmployees =
+      lookupCnps.length > 0
+        ? await prismaTyped.employee.findMany({
+            where: { cnp: { in: lookupCnps } },
+          })
+        : [];
 
     const existingByCnp = new Map(existingEmployees.map((e) => [e.cnp, e]));
 
+    const fallbackId = fallbackCompanyId ?? items[0]?.companyId ?? 1;
+    let companyIdBySheetKey = new Map<string, number>();
+    let companiesSummary: {
+      existing: string[];
+      created: string[];
+      missing: string[];
+    } | null = null;
+
+    if (createCompaniesFromSheets) {
+      const sheetNames = items
+        .map((i) => i.sourceSheet)
+        .filter(
+          (s): s is string => typeof s === "string" && s.trim().length > 0,
+        );
+      const ensure = await ensureCompaniesForSheetNames(
+        user.organizationId,
+        sheetNames,
+        { createMissing: mode === "commit" },
+      );
+      companyIdBySheetKey = ensure.companyIdBySheetKey;
+      companiesSummary = {
+        existing: ensure.existing,
+        created: ensure.created,
+        missing: ensure.missing,
+      };
+    }
+
+    const companyCache = new Map<number, { id: number; name: string } | null>();
+
+    function resolveRowCompanyId(item: (typeof items)[number]): number {
+      return createCompaniesFromSheets
+        ? resolveCompanyIdForImportRow(
+            item.sourceSheet,
+            fallbackId,
+            companyIdBySheetKey,
+          )
+        : item.companyId;
+    }
+
     if (mode === "commit") {
       let newEmployeeCount = 0;
-      for (const item of items) {
-        const existing = existingByCnp.get(item.cnp) ?? null;
+      for (let j = 0; j < items.length; j++) {
+        const planItem = items[j];
+        if (!planItem) continue;
+        const planNorm = normalizeImportEmployeeRow(
+          planItem,
+          j,
+          user.organizationId,
+        );
+        const existing = planNorm.cnpIsValid
+          ? (existingByCnp.get(planNorm.cnp) ?? null)
+          : null;
         const dedupe = dedupeEmployee(existing, {
-          firstName: item.firstName,
-          lastName: item.lastName,
-          email: item.email,
-          phone: item.phone,
-          iban: item.iban,
-          bankName: item.bankName,
-          address: item.address,
-          city: item.city,
+          firstName: planNorm.firstName,
+          lastName: planNorm.lastName,
+          email: planItem.email,
+          phone: planItem.phone,
+          iban: planItem.iban,
+          bankName: planItem.bankName,
+          address: planItem.address,
+          city: planItem.city,
         });
         if (dedupe.action === "CREATE") newEmployeeCount += 1;
       }
@@ -116,21 +213,16 @@ export async function POST(request: NextRequest) {
       const item = items[i];
       if (!item) continue;
 
-      const existing = existingByCnp.get(item.cnp) ?? null;
+      const normalized = normalizeImportEmployeeRow(
+        item,
+        i,
+        user.organizationId,
+      );
+      const existing = normalized.cnpIsValid
+        ? (existingByCnp.get(normalized.cnp) ?? null)
+        : null;
 
       try {
-        if (!validateCNP(item.cnp)) {
-          results.push({
-            index: i,
-            cnp: item.cnp,
-            result: "ERROR",
-            confidence: null,
-            message: "CNP invalid",
-            diff: null,
-            existing: null,
-          });
-          continue;
-        }
         if (item.iban && !validateIBAN(item.iban)) {
           results.push({
             index: i,
@@ -145,8 +237,8 @@ export async function POST(request: NextRequest) {
         }
 
         const dedupe = dedupeEmployee(existing, {
-          firstName: item.firstName,
-          lastName: item.lastName,
+          firstName: normalized.firstName,
+          lastName: normalized.lastName,
           email: item.email,
           phone: item.phone,
           iban: item.iban,
@@ -155,31 +247,70 @@ export async function POST(request: NextRequest) {
           city: item.city,
         });
 
+        const resolvedCompanyId = resolveRowCompanyId(item);
+        const company = await prismaTyped.company.findFirst({
+          where: {
+            id: resolvedCompanyId,
+            organizationId: user.organizationId,
+          },
+          select: { id: true, name: true },
+        });
+        if (!company) {
+          results.push({
+            index: i,
+            cnp: item.cnp,
+            result: "ERROR",
+            confidence: null,
+            message: createCompaniesFromSheets
+              ? `Firma invalida pentru foaia "${item.sourceSheet ?? "—"}"`
+              : "Firma invalida sau inexistenta",
+            diff: null,
+            existing: null,
+          });
+          continue;
+        }
+        companyCache.set(company.id, company);
+
+        const itemResolved = {
+          ...item,
+          ...normalized,
+          firstName: normalized.firstName,
+          lastName: normalized.lastName,
+          observations: normalized.observations,
+          companyId: company.id,
+          importStatus: normalized.importStatus,
+          missingFields: normalized.missingFields,
+        };
+        const employeeFields =
+          spreadsheetImportItemToEmployeeData(itemResolved);
+        const firmSuffix = createCompaniesFromSheets
+          ? ` (firma ${company.name})`
+          : "";
+        const incompleteSuffix =
+          normalized.importStatus === "incomplet"
+            ? " (import incomplet)"
+            : "";
+        const cnpStored = normalized.cnpForStorage;
+
         if (dedupe.action === "CREATE") {
           if (mode === "commit") {
-            const cnpHash = hashSha256(item.cnp);
-            const cnpEncrypted = encrypt(item.cnp);
+            const cnpHash = hashSha256(cnpStored);
+            const cnpEncrypted = encrypt(cnpStored);
             const ibanEncrypted = item.iban ? encrypt(item.iban) : null;
             const ibanHash = item.iban ? hashSha256(item.iban) : null;
 
             const created = await prismaTyped.employee.create({
               data: {
                 organizationId: user.organizationId,
-                cnp: item.cnp,
+                cnp: cnpStored,
                 cnpEncrypted,
                 cnpHash,
-                firstName: item.firstName,
-                lastName: item.lastName,
-                email: item.email ?? null,
-                phone: item.phone ?? null,
+                ...employeeFields,
                 iban: ibanEncrypted,
                 ibanHash,
-                bankName: item.bankName ?? null,
-                address: item.address ?? null,
-                city: item.city ?? null,
-                companyId: item.companyId,
-                ...(item.countryId != null
-                  ? { countryId: item.countryId }
+                companyId: itemResolved.companyId,
+                ...(itemResolved.countryId != null
+                  ? { countryId: itemResolved.countryId }
                   : {}),
               } as unknown as Prisma.EmployeeUncheckedCreateInput,
             });
@@ -189,20 +320,20 @@ export async function POST(request: NextRequest) {
             );
             results.push({
               index: i,
-              cnp: item.cnp,
+              cnp: normalized.cnp || cnpStored,
               result: "CREATED",
               employeeId: created.id,
               confidence: dedupe.confidence,
-              message: "Angajat creat cu succes",
+              message: `Angajat creat cu succes${firmSuffix}${incompleteSuffix}`,
             });
           } else {
             results.push({
               index: i,
-              cnp: item.cnp,
+              cnp: normalized.cnp || cnpStored,
               result: "CREATED",
               employeeId: -1,
               confidence: dedupe.confidence,
-              message: "[PREVIEW] Se va CREA angajat nou",
+              message: `[PREVIEW] Se va CREA angajat nou${firmSuffix}${incompleteSuffix}`,
             });
           }
           continue;
@@ -216,35 +347,29 @@ export async function POST(request: NextRequest) {
             const updated = await prismaTyped.employee.update({
               where: { id: existing!.id },
               data: {
-                firstName: item.firstName,
-                lastName: item.lastName,
-                email: item.email ?? null,
-                phone: item.phone ?? null,
+                ...employeeFields,
                 iban: ibanEncrypted,
                 ibanHash,
-                bankName: item.bankName ?? null,
-                address: item.address ?? null,
-                city: item.city ?? null,
-                companyId: item.companyId,
-                countryId: item.countryId ?? null,
+                companyId: itemResolved.companyId,
+                countryId: itemResolved.countryId ?? null,
               } as unknown as Prisma.EmployeeUncheckedUpdateInput,
             });
             results.push({
               index: i,
-              cnp: item.cnp,
+              cnp: normalized.cnp || cnpStored,
               result: "UPDATED",
               employeeId: updated.id,
               confidence: dedupe.confidence,
-              message: "Angajat actualizat (match > 80%)",
+              message: `Angajat actualizat (match > 80%)${firmSuffix}${incompleteSuffix}`,
             });
           } else {
             results.push({
               index: i,
-              cnp: item.cnp,
+              cnp: normalized.cnp || cnpStored,
               result: "UPDATED",
               employeeId: existing!.id,
               confidence: dedupe.confidence,
-              message: "[PREVIEW] Se va ACTUALIZA angajat existent",
+              message: `[PREVIEW] Se va ACTUALIZA angajat existent${firmSuffix}${incompleteSuffix}`,
             });
           }
           continue;
@@ -291,11 +416,14 @@ export async function POST(request: NextRequest) {
       userEmail: user.email,
       action: "EMPLOYEE_IMPORTED",
       resource: "Employee",
-      details: stats,
+      details: { ...stats, companies: companiesSummary },
       req: request,
     });
 
-    return NextResponse.json({ stats, results }, { status: 200 });
+    return NextResponse.json(
+      { stats, results, companies: companiesSummary },
+      { status: 200 },
+    );
   } catch (error) {
     console.error("[IMPORT_POST]", error);
     return NextResponse.json(

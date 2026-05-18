@@ -63,10 +63,8 @@ export async function POST(request: NextRequest) {
 
     const { storedPath } = await writePendingImportFile(buffer, file.name);
 
-    const { employees, warnings } = parseEmployeesFromSpreadsheet(
-      buffer,
-      file.name,
-    );
+    const { employees, warnings, sheetsParsed, sheetCount } =
+      parseEmployeesFromSpreadsheet(buffer, file.name);
 
     return NextResponse.json(
       {
@@ -75,6 +73,8 @@ export async function POST(request: NextRequest) {
         storedPath,
         fileName: file.name,
         rowCount: employees.length,
+        sheetsParsed,
+        sheetCount,
         warnings,
       },
       { status: 200 },

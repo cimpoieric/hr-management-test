@@ -173,6 +173,20 @@ model Employee {
   salaryStartDate DateTime?
   /** weekly | monthly — determină tipul pontajului și fluturașului. */
   paymentFrequency String       @default("weekly")
+  /** complet | incomplet — status la import Excel. */
+  statusImport              String?   @default("incomplet") @map("status_import") @db.VarChar(20)
+  /** Lista câmpurilor lipsă la import (JSON array de string-uri). */
+  campuriLipsa              Json?     @map("campuri_lipsa")
+  /** Numele foii Excel sursă (firmă / detașare). */
+  sursaFoaie                String?   @map("sursa_foaie") @db.VarChar(100)
+  nrCrtExcel                Int?      @map("nr_crt_excel")
+  bsn                       String?   @db.VarChar(50)
+  postedW                   String?   @map("posted_w") @db.VarChar(50)
+  a1                        String?   @db.VarChar(50)
+  decizie                   String?   @db.VarChar(50)
+  fisaAppPsi                String?   @map("fisa_app_psi") @db.VarChar(50)
+  dataAngajareOriginala     DateTime? @map("data_angajare_originala") @db.Date
+  dataIncetareOriginala     String?   @map("data_incetare_originala") @db.VarChar(50)
   companyId      Int
   company        Company        @relation(fields: [companyId], references: [id])
   hiredAt        DateTime       @default(now())

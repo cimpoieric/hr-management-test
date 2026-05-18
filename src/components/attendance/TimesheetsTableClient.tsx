@@ -16,11 +16,6 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { TimesheetForm } from "@/components/forms/TimesheetForm";
-import {
-  fetchEmployerDetailsForPayslip,
-  generateWeeklyPayslip,
-  mapPayslipApiResponseToPayslipData,
-} from "@/components/payroll/WeeklyPayslipPDF";
 import { preventWheelOnFocusedNumberInput } from "@/lib/numericInput";
 import { ROUTES } from "@/lib/routes";
 import {
@@ -336,26 +331,7 @@ export function TimesheetsTableClient({
   async function doGeneratePayslip(id: number) {
     setBusy(id, true);
     try {
-      const created = await postJson(`/api/payroll/generate`, { timesheetId: id });
-      const payslipId =
-        typeof created === "object" &&
-        created !== null &&
-        "id" in created &&
-        typeof (created as { id: unknown }).id === "number"
-          ? (created as { id: number }).id
-          : null;
-      const [detail, employer] = await Promise.all([
-        payslipId != null
-          ? fetch(`/api/payroll/${payslipId}`, {
-              credentials: "same-origin",
-              cache: "no-store",
-            }).then((res) => res.json())
-          : Promise.resolve(created),
-        fetchEmployerDetailsForPayslip(),
-      ]);
-      generateWeeklyPayslip(
-        mapPayslipApiResponseToPayslipData(detail, employer),
-      );
+      await postJson(`/api/payroll/generate`, { timesheetId: id });
       toast.success(t("components.toast.timesheetPayslipGenerated"));
       router.push(ROUTES.payslips);
       router.refresh();

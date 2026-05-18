@@ -417,15 +417,25 @@ export function buildWeeklyPayslipDocument(data: PayslipData): jsPDF {
   return doc;
 }
 
-export function generateWeeklyPayslip(data: PayslipData): void {
-  const doc = buildPayslipDocument(data);
+export function payslipPdfFileName(data: PayslipData): string {
   const safeName =
     sanitizeFilePart(data.employeeName) || `employee_${data.employeeId}`;
   const suffix =
     data.payslipType === "monthly"
       ? `${data.monthYear ?? data.year}_${String(data.month ?? 1).padStart(2, "0")}`
       : `${data.weekNumber}_${data.year}`;
-  doc.save(`fluturas_${safeName}_${suffix}.pdf`);
+  return `fluturas_${safeName}_${suffix}.pdf`;
+}
+
+/** Triggers a browser file download — use only from explicit Download actions. */
+export function downloadWeeklyPayslip(data: PayslipData): void {
+  const doc = buildPayslipDocument(data);
+  doc.save(payslipPdfFileName(data));
+}
+
+/** @deprecated Use {@link downloadWeeklyPayslip} for explicit downloads. */
+export function generateWeeklyPayslip(data: PayslipData): void {
+  downloadWeeklyPayslip(data);
 }
 
 export function openWeeklyPayslipPreview(data: PayslipData): void {

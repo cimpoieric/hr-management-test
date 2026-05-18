@@ -147,7 +147,7 @@ export async function POST(request: NextRequest) {
       const esuate = total - trimise;
 
       const payload = { success: trimise > 0, total, trimise, esuate, detalii };
-      if (trimise === 0 && esuate > 0) {
+      if (trimise === 0) {
         const failed = detalii.find((x) => x.status === "esuat");
         const firstErr =
           failed && "eroare" in failed

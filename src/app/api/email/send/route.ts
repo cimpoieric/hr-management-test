@@ -146,19 +146,26 @@ export async function POST(request: NextRequest) {
       const total = uniqueIds.length;
       const trimise = detalii.filter((d) => d.status === "trimis").length;
       const esuate = total - trimise;
+      const firstOk = detalii.find((d) => d.status === "trimis");
 
-      if (total === 1 && trimise === 1) {
-        const ok = detalii[0];
-        return NextResponse.json({
-          success: true,
-          message: "Email trimis",
-          emailLogId:
-            ok && ok.status === "trimis" ? ok.emailLogId : undefined,
-        });
-      }
+      const payload = {
+        success: trimise > 0,
+        total,
+        trimise,
+        esuate,
+        detalii,
+        ...(total === 1 && trimise === 1
+          ? {
+              message: "Email trimis",
+              emailLogId:
+                firstOk && firstOk.status === "trimis"
+                  ? firstOk.emailLogId
+                  : undefined,
+            }
+          : {}),
+      };
 
-      const payload = { success: trimise > 0, total, trimise, esuate, detalii };
-      if (trimise === 0 && esuate > 0) {
+      if (trimise === 0) {
         const failed = detalii.find((x) => x.status === "esuat");
         const firstErr =
           failed && "eroare" in failed
@@ -169,6 +176,7 @@ export async function POST(request: NextRequest) {
           { status: 422 },
         );
       }
+
       return NextResponse.json(payload);
     } catch (e) {
       console.error("[EMAIL_SEND_FATAL]", e);

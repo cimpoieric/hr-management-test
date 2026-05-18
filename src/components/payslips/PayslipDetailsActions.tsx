@@ -2,7 +2,7 @@
 
 import {
   fetchEmployerDetailsForPayslip,
-  generateWeeklyPayslip,
+  downloadWeeklyPayslip,
   mapPayslipApiResponseToPayslipData,
 } from "@/components/payroll/WeeklyPayslipPDF";
 import { useRouter } from "next/navigation";
@@ -42,7 +42,7 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
         typeof data.error === "string" ? data.error : "Eroare la citirea PDF",
       );
     }
-    generateWeeklyPayslip(mapPayslipApiResponseToPayslipData(data, employer));
+    downloadWeeklyPayslip(mapPayslipApiResponseToPayslipData(data, employer));
   }
 
   return (
@@ -70,10 +70,16 @@ export function PayslipDetailsActions({ payslipId }: { payslipId: number }) {
         onClick={async () => {
           setBusy(true);
           try {
-            await postJson("/api/email/send", {
+            const result = (await postJson("/api/email/send", {
               type: "fluturas",
               data: { payslipId },
-            });
+            })) as { success?: boolean; trimise?: number; error?: string };
+            const sent = Number(result.trimise ?? 0);
+            if (sent === 0 || result.success === false) {
+              throw new Error(
+                result.error ?? "Trimiterea emailului a eșuat",
+              );
+            }
             toast.success("Email trimis cu succes!");
             router.refresh();
           } catch (e) {
