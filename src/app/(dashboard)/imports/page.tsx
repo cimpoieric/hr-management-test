@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   Eye,
+  FileSpreadsheet,
   FileText,
   Filter,
   Inbox,
@@ -197,13 +198,22 @@ function ImporturiPageContent() {
             })}
           </p>
         </div>
-        <Link
-          href={ROUTES.importManual}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-        >
-          <Upload size={16} />
-          {t("pages.imports.manualUpload")}
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href={ROUTES.importSpreadsheet}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            <FileSpreadsheet size={16} />
+            Import Excel / CSV
+          </Link>
+          <Link
+            href={ROUTES.importManual}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            <Upload size={16} />
+            {t("pages.imports.manualUpload")}
+          </Link>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
